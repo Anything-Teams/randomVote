@@ -1,0 +1,112 @@
+.show-mode { background: radial-gradient(ellipse at 40% 0%, #202b48, #0c1425 70%); }
+.show-mode .page-heading { display: none; }
+.show-mode .page-content { width: min(100% - 48px, 1512px); padding-top: 26px; padding-bottom: 40px; }
+.show-mode .site-footer { color: #7c8da9; border-color: #273551; }
+.cinematic-layout { grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; }
+.cinematic-broadcast { border-color: #4a5c77; box-shadow: 0 18px 55px #0005; }
+.cinematic-broadcast .broadcast-head { height: 43px; background: #101a30; }
+.stage-screen { position: relative; overflow: hidden; isolation: isolate; container-type: inline-size; }
+.cinematic-broadcast canvas { image-rendering: auto; }
+.cinema-hud { position: absolute; top: 2.5%; left: 3%; right: 3%; display: flex; justify-content: space-between; gap: 12px; pointer-events: none; color: #eef3e5; font-size: clamp(10px, 1.65cqw, 16px); font-weight: 900; letter-spacing: 1px; text-shadow: 0 2px 5px #000; z-index: 4; }
+.cinema-hud span { background: #111d35be; padding: 5px 10px; border-left: 3px solid #fbd975; }
+.news-lower-third { position: absolute; z-index: 5; bottom: 3%; left: 3%; right: 3%; min-height: 9%; display: grid; grid-template-columns: auto minmax(0, 1fr); background: #112039ed; box-shadow: 0 8px 20px #0004; color: white; border-bottom: 3px solid #fbd975; animation: lower-third-in 650ms cubic-bezier(.18,.85,.32,1) both; }
+.news-tag { padding: 9px 12px; display: grid; place-items: center; background: #fbd975; color: #18233b; font-size: clamp(10px, 1.8cqw, 19px); font-weight: 950; white-space: nowrap; }
+.news-lower-third > div { min-width: 0; padding: 8px 13px; }
+.news-lower-third strong { display: block; font-size: clamp(12px, 2.5cqw, 26px); line-height: 1.3; letter-spacing: -.5px; overflow-wrap: anywhere; }
+.news-lower-third div > span { display: block; font-size: clamp(10px, 1.45cqw, 15px); color: #aabed5; margin-top: 3px; }
+.news-lower-third.urgent { border-color: #ff7654; }
+.news-lower-third.urgent .news-tag { background: #ee634b; color: white; }
+.scene-wipe { position: absolute; z-index: 7; top: -20%; left: -60%; width: 43%; height: 140%; background: linear-gradient(90deg, #fbd975 0 68%, #ee6d50 68% 100%); transform: skewX(-15deg); pointer-events: none; animation: scene-wipe 900ms cubic-bezier(.68,.05,.28,.98) both; }
+.suspense-vignette { pointer-events: none; position: absolute; z-index: 3; inset: 0; box-shadow: inset 0 0 65px 15px #0009; border: 3px solid #ee634b80; animation: suspense-breath 1250ms ease-in-out infinite; }
+.news-ticker { height: 35px; display: flex; color: #d3e1e7; font-size: 12px; align-items: stretch; border-top: 1px solid #42556d; background: #0e1a2e; overflow: hidden; }
+.news-ticker > span { background: #e9664d; color: white; font: 900 11px monospace; letter-spacing: 1px; padding: 0 14px; display: grid; place-items: center; flex: none; position: relative; z-index: 1; }
+.news-ticker > div { overflow: hidden; display: flex; align-items: center; }
+.news-ticker p { margin: 0; white-space: nowrap; animation: news-crawl 25s linear infinite; }
+.cinematic-broadcast .broadcast-topic { padding: 15px 22px; background: #f1cf78; }
+.cinematic-broadcast .broadcast-topic strong { font-size: 23px; }
+.cinematic-broadcast .timeline { padding: 16px 22px; }
+.timeline-item.current { color: #fbd975; }
+.timeline-item.current .timeline-dot { box-shadow: 0 0 0 4px #fbd97524; }
+.show-time-track { height: 3px; background: #2b3a54; }
+.show-time-track span { display: block; height: 100%; background: #58c5be; transition: width 100ms linear; }
+.live-desk { background: #f6f4eb; border-color: #4a5c77; box-shadow: 0 14px 40px #0003; padding: 21px; min-height: 0; }
+.live-desk .results-heading { margin: 17px 0; }
+.live-desk .results-heading h2 { font-size: 24px; letter-spacing: -1px; }
+.live-desk .results-heading p { font-size: 13px; }
+.live-desk .count-progress { border-color: #dbe0dc; }
+.live-desk .count-progress strong { color: #d6573f; }
+.margin-card { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 0; margin-top: 7px; border-bottom: 1px solid #dbe0dc; }
+.margin-card > span { font-size: 12px; line-height: 1.4; font-weight: 800; color: #52677d; max-width: 155px; }
+.margin-card > strong { font: 900 27px monospace; white-space: nowrap; }
+.margin-card small { font: 700 10px sans-serif; margin-left: 3px; }
+.margin-card.close-race { color: #ce503c; }
+.margin-card.close-race > span { color: #ce503c; }
+.animated-leaderboard { position: relative; margin: 15px 0 0; }
+.moving-row { position: absolute; top: 0; left: 0; right: 0; margin: 0; height: 56px; padding: 9px 8px 8px; border: 1px solid #dfe4df; border-left: 3px solid var(--candidate-color); background: #ffffffa8; transition: transform 650ms cubic-bezier(.2,.8,.2,1), box-shadow 500ms, background 350ms; will-change: transform; }
+.moving-row.is-leading { background: #fff8df; box-shadow: 0 3px 10px #28395115; z-index: 2; }
+.moving-row .vote-info { gap: 6px; }
+.moving-row .rank { width: 18px; font-size: 11px; }
+.moving-row .vote-name { font-size: 14px; }
+.moving-row .vote-info strong { font-size: 14px; }
+.moving-row .vote-track { margin-top: 8px; height: 6px; margin-left: 24px; }
+.moving-row .vote-track span { transition: width 170ms linear; }
+.candidate-roll { display: flex; flex-direction: column; gap: 9px; }
+.candidate-roll > div { display: flex; align-items: center; gap: 10px; background: white; border: 1px solid #e0e4dc; padding: 10px; animation: candidate-in 600ms cubic-bezier(.22,.75,.2,1) both; }
+.candidate-roll > div > span { padding: 7px; font: 900 13px monospace; color: #14223b; }
+.candidate-roll strong { font-size: 14px; flex: 1; overflow-wrap: anywhere; }
+.candidate-roll small { font-size: 11px; color: #819080; white-space: nowrap; }
+.voting-desk { border: 1px solid #dfe5dd; background: #fff; padding: 22px 16px; text-align: center; }
+.voting-desk > span { display: block; font-size: 14px; font-weight: 800; color: #668182; }
+.voting-desk > strong { display: block; font: 900 clamp(25px, 3vw, 36px) monospace; margin: 13px 0 2px; color: #15213b; letter-spacing: -1.5px; }
+.voting-desk p { font-size: 12px; color: #859590; line-height: 1.5; }
+.ballot-flow { position: relative; width: 150px; height: 150px; margin: 15px auto; overflow: hidden; }
+.ballot-flow b { position: absolute; bottom: 0; left: 30px; width: 90px; height: 62px; background: #fbd975; border: 3px solid #15213b; padding-top: 20px; font-size: 15px; z-index: 1; }
+.ballot-flow b:before { content: ''; position: absolute; width: 55px; height: 6px; left: 14px; top: -3px; background: #15213b; }
+.ballot-flow i { position: absolute; left: 63px; width: 24px; height: 32px; background: #eef3e8; border: 2px solid #15213b; animation: ballot-drop 1800ms ease-in infinite; }
+.ballot-flow i:nth-child(2) { animation-delay: -600ms; }
+.ballot-flow i:nth-child(3) { animation-delay: -1200ms; }
+.live-desk .winner-summary { margin-top: 10px; }
+.winner-summary p { font-size: 12px; line-height: 1.5; color: #836346; margin: 10px 0 0; }
+.live-desk .fiction-note { font-size: 11px; padding-top: 17px; }
+.skip-button { background: transparent; border-color: #cbd4d0; color: #6b7c83; font-size: 13px; height: 40px; }
+.lead-change-callout { pointer-events: none; position: absolute; z-index: 6; left: 50%; top: 42%; width: 70%; text-align: center; color: #fff4d4; transform: translate(-50%, -50%) rotate(-3deg); animation: lead-change-impact 1600ms cubic-bezier(.18,.85,.3,1) both; filter: drop-shadow(0 7px 0 #111d35); }
+.lead-change-callout > span { display: inline-block; font: 900 clamp(10px, 1.65cqw, 17px) monospace; letter-spacing: 2px; background: #111d35; padding: 5px 11px; }
+.lead-change-callout strong { display: block; background: #e95e49; font-size: clamp(24px, 7cqw, 76px); line-height: 1.25; font-weight: 950; padding: 6px 18px; border: 3px solid #fff4d4; letter-spacing: -2px; }
+.lead-change-callout b { display: inline-block; background: #fbd975; color: #111d35; font-size: clamp(11px, 2.4cqw, 25px); padding: 6px 12px; max-width: 100%; overflow-wrap: anywhere; }
+@keyframes lead-change-impact { 0% { opacity: 0; transform: translate(-50%, -50%) rotate(-7deg) scale(1.7); } 14%, 70% { opacity: 1; transform: translate(-50%, -50%) rotate(-3deg) scale(1); } 100% { opacity: 0; transform: translate(-50%, -60%) rotate(-3deg) scale(.96); } }
+@keyframes scene-wipe { 0% { transform: translateX(-180%) skewX(-15deg); } 100% { transform: translateX(510%) skewX(-15deg); } }
+@keyframes lower-third-in { from { opacity: 0; transform: translateY(25px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes news-crawl { from { transform: translateX(30px); } to { transform: translateX(-55%); } }
+@keyframes candidate-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes ballot-drop { 0% { transform: translate(-55px, -30px) rotate(-30deg); opacity: 0; } 25% { opacity: 1; } 70% { transform: translate(0, 64px) rotate(5deg); opacity: 1; } 100% { transform: translate(0, 104px); opacity: 0; } }
+@keyframes suspense-breath { 50% { border-color: #ee634b20; box-shadow: inset 0 0 80px 15px #000b; } }
+@media (max-width: 1100px) {
+  .cinematic-layout { grid-template-columns: 1fr; }
+  .live-desk { width: 100%; }
+  .candidate-roll { display: grid; grid-template-columns: repeat(2, 1fr); }
+  .live-desk .results-heading h2 { font-size: 27px; }
+  .animated-leaderboard { max-width: none; }
+  .moving-row .vote-name { font-size: 16px; }
+  .moving-row .vote-info strong { font-size: 16px; }
+  .margin-card > span { max-width: none; }
+}
+@media (max-width: 600px) {
+  .show-mode .page-content { width: calc(100% - 16px); padding-top: 12px; }
+  .cinematic-broadcast .broadcast-head { font-size: 9px; letter-spacing: 0; padding: 0 10px; height: 34px; }
+  .cinema-hud span { padding: 3px 5px; font-size: 8px; }
+  .news-lower-third { bottom: 2%; left: 2%; right: 2%; border-bottom-width: 2px; }
+  .news-tag { padding: 6px; font-size: 9px; }
+  .news-lower-third > div { padding: 6px 8px; }
+  .news-lower-third strong { font-size: 12px; letter-spacing: -.3px; }
+  .news-lower-third div > span { display: none; }
+  .news-ticker { height: 29px; font-size: 10px; }
+  .news-ticker > span { font-size: 9px; padding: 0 8px; }
+  .cinematic-broadcast .broadcast-topic { padding: 11px 14px; }
+  .cinematic-broadcast .broadcast-topic strong { font-size: 19px; }
+  .cinematic-broadcast .timeline { padding: 13px 12px; }
+  .candidate-roll { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene-wipe, .suspense-vignette { display: none; }
+  .news-ticker p { animation: none; white-space: normal; }
+}
