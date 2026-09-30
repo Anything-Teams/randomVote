@@ -1,4 +1,4 @@
-import type { DramaFrame, ElectionResult } from './election';
+import type { Candidate, DramaFrame, ElectionResult } from './election';
 
 export type ShowPhase = 'declaration' | 'voting' | 'counting' | 'winner';
 export const SHOW_DURATION = 30_000;
@@ -9,10 +9,10 @@ export function phaseFor(elapsed: number): ShowPhase {
   return elapsed < 5_000 ? 'declaration' : elapsed < COUNT_START ? 'voting' : elapsed < WINNER_START ? 'counting' : 'winner';
 }
 
-// Each district is counted in a burst, followed by time to read the new standings.
-// The final box remains sealed until the last 2.5 seconds of the count.
-const countClock = [[0, 0], [2_200, 32], [5_000, 32], [7_200, 68],
-  [14_500, 68], [15_800, 92], [17_000, 100]];
+// Incoming batches keep the live graph moving. Short pauses mark the two
+// confirmed district tallies and the seal on the last box.
+const countClock = [[0, 0], [3_500, 28], [4_200, 28], [8_600, 64],
+  [9_300, 64], [12_500, 90], [13_400, 90], [17_000, 100]];
 
 export function countProgress(elapsed: number): number {
   const local = elapsed - COUNT_START;
@@ -24,10 +24,14 @@ export function countProgress(elapsed: number): number {
   return previousProgress + (nextProgress - previousProgress) * (local - previousTime) / (nextTime - previousTime);
 }
 
-/** The ranking board moves once after each box, rather than following every vote. */
-export function settledProgress(elapsed: number): number {
-  const local = elapsed - COUNT_START;
-  return local < 2_200 ? 0 : local < 7_200 ? 32 : local < 17_000 ? 68 : 100;
+/** First arrival time of a progress value, including the start of any hold. */
+export function elapsedAtProgress(progress: number): number {
+  const bounded = Math.max(0, Math.min(100, progress));
+  if (bounded === 0) return COUNT_START;
+  const nextIndex = countClock.findIndex(([, value]) => value >= bounded);
+  const [nextTime, nextValue] = countClock[nextIndex];
+  const [previousTime, previousValue] = countClock[nextIndex - 1];
+  return COUNT_START + previousTime + (bounded - previousValue) / (nextValue - previousValue) * (nextTime - previousTime);
 }
 
 export type CountingBeat = {
@@ -42,25 +46,58 @@ export type CountingBeat = {
 
 export function countBeat(elapsed: number): CountingBeat {
   const local = elapsed - COUNT_START;
-  if (local < 2_200) return { id: 'first', box: 1, state: 'opening', label: '첫 번째 투표함', location: '중앙광장', detail: '첫 투표함을 열고 초반 판세를 확인합니다.' };
-  if (local < 5_000) return { id: 'first', box: 1, state: 'settled', label: '첫 번째 투표함 집계 완료', location: '중앙광장', detail: '초반 선두를 확인하세요. 다음 지역의 표가 곧 도착합니다.' };
-  if (local < 7_200) return { id: 'second', box: 2, state: 'opening', label: '두 번째 투표함', location: '강변마을', detail: '강변마을의 표가 도착했습니다. 추격 후보를 지켜보세요.' };
-  if (local < 11_000) return { id: 'second', box: 2, state: 'settled', label: '두 번째 투표함 집계 완료', location: '강변마을', detail: '순위가 새로 정리됐습니다. 승부를 가를 마지막 투표함이 남았습니다.' };
-  if (local < 14_500) return {
+  if (local < 3_500) return { id: 'first', box: 1, state: 'opening', label: '첫 번째 투표함', location: '중앙광장', detail: '첫 지역의 표가 들어옵니다. 실시간 득표율을 지켜보세요.' };
+  if (local < 4_200) return { id: 'first', box: 1, state: 'settled', label: '첫 번째 투표함 집계 완료', location: '중앙광장', detail: '초반 집계가 끝났습니다. 강변마을의 표가 곧 들어옵니다.' };
+  if (local < 8_600) return { id: 'second', box: 2, state: 'opening', label: '두 번째 투표함', location: '강변마을', detail: '강변마을의 표와 후보들의 소식이 함께 들어옵니다.' };
+  if (local < 12_500) return { id: 'second', box: 2, state: 'settled', label: '접전 속 후속 집계', location: '강변마을', detail: local < 9_300 ? '강변마을 집계 완료. 외곽 투표소의 표를 기다립니다.' : '외곽 투표소의 표가 합류합니다. 선두 격차가 좁혀지고 있습니다.' };
+  if (local < 13_400) return {
     id: 'last', box: 3, state: 'sealed', label: '마지막 투표함 도착', location: '언덕동',
     detail: '봉인된 마지막 투표함. 이 안의 표가 오늘의 주인공을 결정합니다.',
-    secondsUntilReveal: Math.max(1, Math.ceil((14_500 - local) / 1_000)),
+    secondsUntilReveal: Math.max(1, Math.ceil((13_400 - local) / 1_000)),
   };
   return { id: 'last', box: 3, state: 'revealing', label: '마지막 투표함 개봉', location: '언덕동', detail: '봉인을 풀었습니다. 마지막 한 표까지 확인합니다.' };
 }
 
 export type NewsBeat = { id: string; tag: string; title: string; detail: string; urgent: boolean };
 
+export type RaceMoment = {
+  leader: Candidate;
+  runner: Candidate;
+  third?: Candidate;
+  gapPoints: number;
+  gapVotes: number;
+  countedVotes: number;
+  close: boolean;
+  narrowing: boolean;
+  leaderChanged: boolean;
+  climber?: Candidate;
+  placesGained: number;
+};
+
+export function raceMoment(result: ElectionResult, frame: DramaFrame, previousFrame?: DramaFrame): RaceMoment {
+  const sorted = [...result.candidates].filter(candidate => frame.percentages[candidate.id] > 0)
+    .sort((a, b) => frame.percentages[b.id] - frame.percentages[a.id]);
+  const [leader, runner, third] = sorted;
+  const countedVotes = Math.floor(result.totalVotes * frame.progress / 100);
+  const gapPoints = Math.max(0, frame.percentages[leader.id] - frame.percentages[runner.id]);
+  const gapVotes = frame.progress >= 100 ? result.votes[leader.id] - result.votes[runner.id]
+    : Math.max(0, Math.floor(countedVotes * frame.percentages[leader.id] / 100) - Math.floor(countedVotes * frame.percentages[runner.id] / 100));
+  const previous = previousFrame ? [...result.candidates].filter(candidate => previousFrame.percentages[candidate.id] > 0)
+    .sort((a, b) => previousFrame.percentages[b.id] - previousFrame.percentages[a.id]) : [];
+  let climber: Candidate | undefined;
+  let placesGained = 0;
+  sorted.forEach((candidate, rank) => {
+    const oldRank = previous.findIndex(item => item.id === candidate.id);
+    const gain = oldRank - rank;
+    if (oldRank >= 0 && gain > placesGained) { climber = candidate; placesGained = gain; }
+  });
+  const previousGap = previousFrame && previous.length > 1 ? previousFrame.percentages[previous[0].id] - previousFrame.percentages[previous[1].id] : gapPoints;
+  return { leader, runner, third, gapPoints, gapVotes, countedVotes, close: gapPoints <= 0.12,
+    narrowing: gapPoints < previousGap, leaderChanged: previous.length > 0 && previous[0].id !== leader.id, climber, placesGained };
+}
+
 export function newsBeat(phase: ShowPhase, result: ElectionResult, frame: DramaFrame, elapsed?: number): NewsBeat {
-  const sorted = [...result.candidates].sort((a, b) => frame.percentages[b.id] - frame.percentages[a.id]);
-  const leader = sorted[0];
-  const runner = sorted[1];
-  const gap = Math.abs(frame.percentages[leader.id] - frame.percentages[runner.id]);
+  const { leader, runner, third, gapVotes, close } = raceMoment(result, frame);
   if (phase === 'declaration') return { id: 'paper', tag: '호외', title: `${result.candidates.length}명의 후보, 전격 출마!`, detail: '사소한 결정 하나에 전국이 들썩이고 있습니다.', urgent: false };
   if (phase === 'voting') return { id: 'vote', tag: '현장', title: '전국 투표소에 이어지는 행렬', detail: '운명의 한 표가 투표함에 쌓이고 있습니다.', urgent: false };
   if (phase === 'winner') {
@@ -69,14 +106,14 @@ export function newsBeat(phase: ShowPhase, result: ElectionResult, frame: DramaF
   }
   // The optional clock preserves the old call signature for previews while
   // letting the live show distinguish a held tally from an unopened box.
-  const storyTime = elapsed ?? COUNT_START + (frame.progress < 32 ? 1_000 : frame.progress < 68 ? 6_000 : frame.progress < 92 ? 12_000 : 16_000);
+  const storyTime = elapsed ?? elapsedAtProgress(frame.progress);
   const beat = countBeat(storyTime);
-  if (beat.id === 'first' && beat.state === 'opening') return { id: 'first-opening', tag: '첫 투표함', title: '중앙광장 투표함이 열렸습니다', detail: '첫 번째 지역의 표를 확인합니다. 누구의 이름이 먼저 나올까요?', urgent: false };
-  if (beat.id === 'first') return { id: 'first-settled', tag: '초반 판세', title: `${leader.name} 후보, 첫 집계 선두`, detail: `${runner.name} 후보와 ${gap.toFixed(1)}%p 차이. 아직 두 개의 투표함이 남았습니다.`, urgent: false };
-  if (beat.id === 'second' && beat.state === 'opening') return { id: 'second-opening', tag: '추격의 시간', title: '강변마을의 표가 도착했습니다', detail: '중하위권 후보에게도 기회가 있습니다. 다음 집계를 지켜보세요.', urgent: false };
-  if (beat.id === 'second') return { id: 'second-settled', tag: '새로운 판세', title: `${leader.name} 후보가 앞서고 있습니다`, detail: `${runner.name} 후보와 ${gap.toFixed(1)}%p 차이. 이제 마지막 투표함 하나.`, urgent: false };
+  const gapText = new Intl.NumberFormat('ko-KR').format(gapVotes);
+  if (beat.id === 'first') return { id: 'first-box', tag: '초반 판세', title: `${leader.name} 후보 선두 · ${runner.name} 후보 뒤쫓는 중`, detail: `현재 ${gapText}표 차이. 첫 지역의 집계가 계속됩니다.`, urgent: false };
+  if (beat.id === 'second' && beat.state === 'opening') return { id: 'second-box', tag: '판세 변화', title: `${leader.name} · ${runner.name}, ${gapText}표 차이`, detail: '표가 들어올 때마다 후보들의 표정이 달라지고 있습니다.', urgent: close };
+  if (beat.id === 'second') return { id: 'tight-race', tag: close ? '초접전' : '후속 집계', title: `${leader.name} · ${runner.name}${third ? ` · ${third.name}` : ''}, 마지막까지 접전`, detail: `선두 격차 ${gapText}표. 마지막 투표함에 승부가 걸렸습니다.`, urgent: close };
   if (beat.state === 'sealed') return { id: 'last-sealed', tag: '마지막 투표함', title: '아직 누구도 안심할 수 없습니다', detail: '언덕동 투표함의 봉인을 곧 해제합니다. 여러분의 후보를 지켜보세요.', urgent: true };
-  return { id: 'last-revealing', tag: '최종 집계', title: '마지막 투표함의 봉인이 풀렸습니다', detail: '마지막 표가 들어옵니다. 오늘의 주인공이 곧 결정됩니다.', urgent: true };
+  return { id: 'last-revealing', tag: '최종 집계', title: `${leader.name} · ${runner.name}, 단 ${gapText}표 차이`, detail: '마지막 표가 들어옵니다. 오늘의 주인공이 곧 결정됩니다.', urgent: true };
 }
 
 export function winnerPromise(topic: string): string {

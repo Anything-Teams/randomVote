@@ -119,6 +119,19 @@ button.moving-row { font: inherit; color: #17233d; text-align: left; border-radi
 .box-sealed .news-ticker p { animation-play-state: paused; }
 .box-sealed .live-pill span { animation: none; }
 .margin-card > strong { font-size: clamp(14px, 1.5vw, 20px); }
+.race-margin > strong { font-variant-numeric: tabular-nums; font-size: clamp(18px, 2.1vw, 28px); }
+.race-margin > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.live-count-board .vote-info strong { flex: none; font-variant-numeric: tabular-nums; letter-spacing: -.4px; }
+.live-count-board .rank { flex: none; font-variant-numeric: tabular-nums; }
+.moving-row.event-actor { background: #fff0c7; box-shadow: inset 0 0 0 1px #d9984a; }
+.moving-row.is-disqualified { background: #f0e9e5; border-left-color: #b59f99; color: #a2776d; }
+.moving-row.is-disqualified .vote-name { color: #8b7771; text-decoration: line-through; }
+.moving-row.is-disqualified .vote-info strong, .moving-row.is-disqualified .rank { color: #c85645; }
+.story-active .results-heading h2 { color: #bd4d36; }
+.story-active .race-margin { color: #bd4d36; border-color: #deb393; }
+.story-active .race-margin > strong { font-size: 19px; }
+.final-sprint .race-margin.close-race { background: #ffe9dc; padding: 6px; border: 1px solid #e0a086; }
+.final-sprint .progress-track span { background: #d24e39; }
 .lead-change-callout { top: 19%; width: 58%; animation-duration: 950ms; filter: drop-shadow(0 3px 0 #111d35); }
 .lead-change-callout > span { font-size: clamp(7px, 1.1cqw, 12px); padding: 3px 8px; }
 .lead-change-callout strong { font-size: clamp(18px, 4cqw, 43px); padding: 3px 10px; letter-spacing: -1px; border-width: 2px; }
@@ -171,6 +184,9 @@ button.moving-row { font: inherit; color: #17233d; text-align: left; border-radi
   .show-actions button, .show-actions .start-button { flex: 1; min-width: 0; height: 30px; font-size: 10px; }
   .news-lower-third strong { font-size: 12px; }
   .news-lower-third div > span { font-size: 8px; }
+  .phase-counting .broadcast-topic { display: none; }
+  .race-margin > strong, .story-active .race-margin > strong { font-size: 16px; }
+  .final-sprint .race-margin.close-race { padding: 2px 4px; }
 }
 
 @media (max-height: 650px) {
@@ -228,6 +244,8 @@ button.moving-row { font: inherit; color: #17233d; text-align: left; border-radi
   .news-lower-third strong { font-size: 12px; }
   .news-lower-third div > span { font-size: 8px; }
   .news-tag { padding: 5px; font-size: 9px; }
+  .race-margin > strong, .story-active .race-margin > strong { font-size: 16px; }
+  .final-sprint .race-margin.close-race { padding: 2px 4px; }
 }
 
 @media (max-height: 500px) and (min-width: 600px) {

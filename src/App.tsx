@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import GameStage from './GameStage';
 import BroadcastShow from './BroadcastShow';
 import { CANDIDATE_COLORS, MAX_CANDIDATES, createDrama, createElection, frameAt, type Candidate, type DramaFrame, type ElectionResult } from './election';
-import { countProgress, phaseFor, settledProgress, SHOW_DURATION } from './show';
+import { countProgress, phaseFor, SHOW_DURATION } from './show';
 import { readSession, saveSession, type Entry } from './session';
 
 type Status = 'setup' | 'running' | 'finished';
@@ -31,7 +31,6 @@ export default function App() {
   const phase = status === 'setup' ? 'declaration' : phaseFor(elapsed);
   const progress = countProgress(elapsed);
   const snapshot = result && drama.length ? frameAt(drama, progress) : null;
-  const rankingSnapshot = result && drama.length ? frameAt(drama, settledProgress(elapsed)) : null;
 
   function changeEntry(id: number, name: string) {
     setEntries(previous => previous.map(entry => entry.id === id ? { ...entry, name } : entry));
@@ -151,11 +150,11 @@ export default function App() {
               <div className="preview-top"><span className="live-pill"><span /> PREVIEW</span><span>PIXEL TV · CH 01</span></div>
               <div className="preview-stage"><GameStage phase="declaration" candidates={candidates} winnerId="" topic={topic} preview reducedMotion={reducedMotion} /></div>
               <div className="preview-bottom"><div><span className="mini-label">TODAY'S ISSUE</span><strong>{topic.trim() || '오늘의 주제를 입력해 주세요'}</strong></div><span className="preview-arrow" aria-hidden="true">✦</span></div>
-              <p className="preview-caption">세 개의 투표함, 마지막 봉투 한 장. 30초의 선거 특집이 시작됩니다.</p>
+              <p className="preview-caption">몸싸움부터 간식 뇌물까지, 60가지 사건이 판세를 뒤흔듭니다. 누가 끝까지 살아남을까요?</p>
             </section>
           </div>
         ) : (
-          result && snapshot && rankingSnapshot && <BroadcastShow result={result} frame={snapshot} rankingFrame={rankingSnapshot} phase={phase} topic={topic.trim()} elapsed={elapsed} finished={status === 'finished'} runId={runId} reducedMotion={reducedMotion} onSkip={finishNow} onReplay={start} onReset={reset} />
+          result && snapshot && <BroadcastShow result={result} frame={snapshot} phase={phase} topic={topic.trim()} elapsed={elapsed} finished={status === 'finished'} runId={runId} reducedMotion={reducedMotion} onSkip={finishNow} onReplay={start} onReset={reset} />
         )}
       </main>
       <footer className="site-footer"><span>PIXEL ELECTION © 2026</span><span>공정한 추첨 · 거창한 발표 · 실제 투표 아님</span></footer>

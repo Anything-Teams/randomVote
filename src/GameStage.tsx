@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
 import { ElectionScene, STAGE_HEIGHT, STAGE_WIDTH, type StageState } from './game/ElectionScene';
-import type { Candidate } from './election';
+import type { Candidate, ElectionEvent } from './election';
 import type { ShowPhase } from './show';
 
 type Props = {
@@ -18,15 +18,17 @@ type Props = {
   reducedMotion?: boolean;
   elapsed?: number;
   cheeringId?: string;
+  events?: ElectionEvent[];
 };
 const EMPTY_PERCENTAGES: Record<string, number> = {};
+const EMPTY_EVENTS: ElectionEvent[] = [];
 
-export default function GameStage({ phase, candidates, winnerId, topic, percentages = EMPTY_PERCENTAGES, finalPercentages = EMPTY_PERCENTAGES, progress = 0, totalVotes = 0, preview = false, runId = 0, reducedMotion = false, elapsed = 0, cheeringId }: Props) {
+export default function GameStage({ phase, candidates, winnerId, topic, percentages = EMPTY_PERCENTAGES, finalPercentages = EMPTY_PERCENTAGES, progress = 0, totalVotes = 0, preview = false, runId = 0, reducedMotion = false, elapsed = 0, cheeringId, events = EMPTY_EVENTS }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const state = useRef<StageState>({ phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId });
+  const state = useRef<StageState>({ phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events });
   useEffect(() => {
-    state.current = { phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId };
-  }, [phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId]);
+    state.current = { phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events };
+  }, [phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events]);
 
   useEffect(() => {
     if (!host.current) return;
