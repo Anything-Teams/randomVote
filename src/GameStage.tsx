@@ -16,15 +16,17 @@ type Props = {
   preview?: boolean;
   runId?: number;
   reducedMotion?: boolean;
+  elapsed?: number;
+  cheeringId?: string;
 };
 const EMPTY_PERCENTAGES: Record<string, number> = {};
 
-export default function GameStage({ phase, candidates, winnerId, topic, percentages = EMPTY_PERCENTAGES, finalPercentages = EMPTY_PERCENTAGES, progress = 0, totalVotes = 0, preview = false, runId = 0, reducedMotion = false }: Props) {
+export default function GameStage({ phase, candidates, winnerId, topic, percentages = EMPTY_PERCENTAGES, finalPercentages = EMPTY_PERCENTAGES, progress = 0, totalVotes = 0, preview = false, runId = 0, reducedMotion = false, elapsed = 0, cheeringId }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const state = useRef<StageState>({ phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion });
+  const state = useRef<StageState>({ phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId });
   useEffect(() => {
-    state.current = { phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion };
-  }, [phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion]);
+    state.current = { phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId };
+  }, [phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId]);
 
   useEffect(() => {
     if (!host.current) return;

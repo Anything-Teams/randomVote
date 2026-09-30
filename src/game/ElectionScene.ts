@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import type { Candidate } from '../election';
-import type { ShowPhase } from '../show';
+import { COUNT_START, countBeat, type CountingBeat, type ShowPhase } from '../show';
 import { PixelCitizen } from './PixelCitizen';
 
 export const STAGE_WIDTH = 1280;
@@ -16,11 +16,14 @@ export type StageState = {
   topic: string;
   preview: boolean;
   reducedMotion: boolean;
+  elapsed: number;
+  cheeringId?: string;
 };
 type Voter = { citizen: PixelCitizen; ballot: Phaser.GameObjects.Rectangle; offset: number; duration: number; lastDrop: number };
-type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; displayed: number; rank: number; reactedAt: number; rising: boolean };
+type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; support: Phaser.GameObjects.Text; displayed: number };
 type Confetti = { rectangle: Phaser.GameObjects.Rectangle; speed: number; drift: number };
 type Spark = { rectangle: Phaser.GameObjects.Rectangle; vx: number; vy: number; age: number; life: number; gravity: number };
+type NewspaperCard = { candidate: Candidate; card: Phaser.GameObjects.Container; citizen: PixelCitizen; background: Phaser.GameObjects.Rectangle; portrait: Phaser.GameObjects.Rectangle; rules: Phaser.GameObjects.Rectangle[]; nameBand: Phaser.GameObjects.Rectangle; number: Phaser.GameObjects.Text; name: Phaser.GameObjects.Text };
 const ink = 0x14223b;
 const gold = 0xfbd975;
 const paper = 0xf5eedc;
@@ -39,18 +42,40 @@ export class ElectionScene extends Phaser.Scene {
   private paperHeadline?: Phaser.GameObjects.Text;
   private voteCounter?: Phaser.GameObjects.Text;
   private marginText?: Phaser.GameObjects.Text;
-  private raceBars: Phaser.GameObjects.Rectangle[] = [];
-  private leaderId = '';
   private winner?: PixelCitizen;
-  private rings: Phaser.GameObjects.Arc[] = [];
   private sparks: Spark[] = [];
   private previewSignature = '';
+  private newspaperRoot?: Phaser.GameObjects.Container;
+  private newspaperCards = new Map<string, NewspaperCard>();
+  private newspaperLayoutSignature = '';
+  private newspaperInvitation?: Phaser.GameObjects.Container;
+  private newspaperStamp?: Phaser.GameObjects.Text;
   private countdownLabel?: Phaser.GameObjects.Text;
-  private studioPulse?: Phaser.GameObjects.Rectangle;
   private ballotBox?: Phaser.GameObjects.Container;
   private lastFirework = -1;
   private lastBoxImpact = 0;
   private screenWindows: Phaser.GameObjects.Rectangle[] = [];
+  private countingBox?: Phaser.GameObjects.Container;
+  private countingLid?: Phaser.GameObjects.Container;
+  private countingLock?: Phaser.GameObjects.Container;
+  private countingEnvelope?: Phaser.GameObjects.Container;
+  private countingEnvelopeFlap?: Phaser.GameObjects.Triangle;
+  private countingEnvelopeMark?: Phaser.GameObjects.Text;
+  private countingBoxNumber?: Phaser.GameObjects.Text;
+  private countingTitle?: Phaser.GameObjects.Text;
+  private countingLocation?: Phaser.GameObjects.Text;
+  private countingCue?: Phaser.GameObjects.Text;
+  private countingBeam?: Phaser.GameObjects.Graphics;
+  private countingLights: Phaser.GameObjects.Arc[] = [];
+  private countingBallots: Phaser.GameObjects.Container[] = [];
+  private countingBubble?: Phaser.GameObjects.Container;
+  private countingBubbleText?: Phaser.GameObjects.Text;
+  private countingPortrait?: Phaser.GameObjects.Container;
+  private countingBeatKey = '';
+  private countingReactions = new Map<string, { pose: 'wave' | 'cheer' | 'surprised' | 'nervous'; until: number }>();
+  private countingLastLeader = '';
+  private countingBubbleUntil = 0;
+  private finalEnvelopeOpened = false;
 
   constructor(readState: () => StageState) {
     super('election-show');
@@ -112,20 +137,21 @@ export class ElectionScene extends Phaser.Scene {
     this.voters = [];
     this.race = [];
     this.confetti = [];
-    this.rings = [];
     this.sparks = [];
     this.paperHeadline = undefined;
+    this.newspaperRoot = undefined;
+    this.newspaperCards.clear();
+    this.newspaperLayoutSignature = '';
+    this.newspaperInvitation = undefined;
+    this.newspaperStamp = undefined;
     this.voteCounter = undefined;
     this.marginText = undefined;
-    this.raceBars = [];
     this.winner = undefined;
     this.countdownLabel = undefined;
-    this.studioPulse = undefined;
     this.ballotBox = undefined;
     this.lastFirework = -1;
     this.lastBoxImpact = 0;
     this.screenWindows = [];
-    this.leaderId = '';
     this.root = this.add.container(0, 0);
     if (phase === 'declaration') this.newspaper(state);
     if (phase === 'voting') this.pollingStation(state);
@@ -149,6 +175,87 @@ export class ElectionScene extends Phaser.Scene {
 
   private signature(state: StageState) { return `${state.topic}|${state.candidates.map(candidate => `${candidate.id}:${candidate.name}:${candidate.color}`).join('|')}`; }
 
+  /** Editing a preview updates its existing objects, so a keystroke never restarts the actors. */
+  private syncNewspaperCandidates(state: StageState) {
+    const news = this.newspaperRoot;
+    if (!news) return;
+    const layoutSignature = state.candidates.map(candidate => candidate.id).join('|');
+    const layoutChanged = layoutSignature !== this.newspaperLayoutSignature;
+    const ids = new Set(state.candidates.map(candidate => candidate.id));
+    this.newspaperCards.forEach((slot, id) => {
+      if (ids.has(id)) return;
+      this.citizens = this.citizens.filter(citizen => citizen !== slot.citizen);
+      this.destroyPhase(slot.card);
+      this.newspaperCards.delete(id);
+    });
+    const columns = state.candidates.length > 4 ? 5 : 4;
+    const hasTwoRows = state.candidates.length > columns;
+    const width = columns === 5 ? 198 : 238;
+    const pitch = columns === 5 ? 211 : 262;
+    const height = hasTwoRows ? 148 : 274;
+    state.candidates.forEach((candidate, index) => {
+      const row = Math.floor(index / columns);
+      const count = Math.min(columns, state.candidates.length - row * columns);
+      const x = ((index % columns) - (count - 1) / 2) * pitch;
+      const y = hasTwoRows ? -74 + row * 159 : -56;
+      let slot = this.newspaperCards.get(candidate.id);
+      const isNew = !slot;
+      if (!slot) {
+        const card = this.add.container(x, y);
+        news.add(card);
+        const background = this.rect(card, 0, 0, 1, 1, 0xdedfcf);
+        const portrait = this.rect(card, 0, 0, 1, 1, 0x263b49);
+        const rules = Array.from({ length: 5 }, () => this.rect(card, 0, 0, 1, 1, 0xffffff, 0.05));
+        const identity = Number(candidate.id);
+        const citizen = this.citizen(card, candidate, Number.isFinite(identity) ? Math.max(0, identity - 1) : index, 0, height - 39, hasTwoRows ? 2.05 : 4.05);
+        citizen.pose = index % 3 === 0 ? 'wave' : 'idle';
+        const nameBand = this.rect(card, 0, 0, 1, 30, colorOf(candidate));
+        const number = this.text(card, '', 0, 8, 13, '#fbd975');
+        const name = this.text(card, '', 0, height - 29, 19, '#14223b', true);
+        slot = { candidate, card, citizen, background, portrait, rules, nameBand, number, name };
+        this.newspaperCards.set(candidate.id, slot);
+      }
+      if (slot.candidate.color !== candidate.color) this.recolorNewspaperCitizen(slot.citizen, colorOf(slot.candidate), colorOf(candidate));
+      slot.candidate = candidate;
+      if (layoutChanged || isNew) {
+        slot.background.setPosition(-width / 2, 0).setSize(width, height);
+        slot.portrait.setPosition(-width / 2 + 4, 4).setSize(width - 8, height - 37);
+        slot.rules.forEach((rule, line) => rule.setPosition(-width / 2 + 7, 18 + line * 19).setSize(width - 14, 1));
+        slot.citizen.root.setPosition(0, height - 39).setScale(hasTwoRows ? 2.05 : 4.05);
+        slot.nameBand.setPosition(-width / 2 + 4, height - 33).setSize(width - 8, 30);
+      }
+      slot.nameBand.setFillStyle(colorOf(candidate));
+      slot.number.setPosition(-width / 2 + 16, 8).setText(`기호 ${index + 1}`);
+      slot.name.setY(height - 29).setText(candidate.name).setFontSize(candidate.name.length > 9 ? 14 : 19).setWordWrapWidth(width - 12);
+      if (isNew && !state.preview && !state.reducedMotion) {
+        slot.card.setAlpha(0).setScale(0.82).setY(y + 32);
+        this.tweens.add({ targets: slot.card, y, scaleX: 1, scaleY: 1, alpha: 1, delay: 480 + index * 280, duration: 640, ease: 'Back.out' });
+      } else if (layoutChanged && (slot.card.x !== x || slot.card.y !== y)) {
+        this.tweens.killTweensOf(slot.card);
+        if (state.reducedMotion) slot.card.setPosition(x, y);
+        else this.tweens.add({ targets: slot.card, x, y, duration: 320, ease: 'Cubic.out' });
+      }
+    });
+    this.newspaperInvitation?.setVisible(!state.candidates.length);
+    this.newspaperStamp?.setText(state.candidates.length ? '출 마 완 료' : '후 보 모 집');
+    this.paperHeadline?.setText(state.topic || '오늘의 당선자를 뽑습니다').setFontSize(state.topic.length > 30 ? 23 : 37);
+    this.newspaperLayoutSignature = layoutSignature;
+    this.previewSignature = this.signature(state);
+  }
+
+  private recolorNewspaperCitizen(citizen: PixelCitizen, oldColor: number, nextColor: number) {
+    const colors = new Map([
+      [oldColor, nextColor],
+      [Phaser.Display.Color.IntegerToColor(oldColor).lighten(15).color, Phaser.Display.Color.IntegerToColor(nextColor).lighten(15).color],
+      [Phaser.Display.Color.IntegerToColor(oldColor).darken(10).color, Phaser.Display.Color.IntegerToColor(nextColor).darken(10).color],
+    ]);
+    const recolor = (object: Phaser.GameObjects.GameObject) => {
+      if (object instanceof Phaser.GameObjects.Container) object.list.forEach(recolor);
+      else if (object instanceof Phaser.GameObjects.Rectangle && colors.has(object.fillColor)) object.setFillStyle(colors.get(object.fillColor));
+    };
+    recolor(citizen.root);
+  }
+
   private newspaper(state: StageState) {
     this.background(0x263b49);
     for (let i = 0; i < 5; i++) {
@@ -157,6 +264,7 @@ export class ElectionScene extends Phaser.Scene {
     }
     const news = this.add.container(640, 345);
     this.root.add(news);
+    this.newspaperRoot = news;
     this.rect(news, -560, -275, 1120, 570, paper);
     this.rect(news, -560, -275, 1120, 570, 0x7e6950, 0.035);
     this.rect(news, -530, -185, 1060, 5, ink);
@@ -166,51 +274,26 @@ export class ElectionScene extends Phaser.Scene {
     this.text(news, '특별판 / 제 001호', 524, -247, 15, '#5d625b').setOrigin(1, 0);
     this.text(news, '호외', -505, -151, 26, '#d64e3c');
     this.paperHeadline = this.text(news, state.topic || '오늘의 당선자를 뽑습니다', 10, -151, state.topic.length > 30 ? 23 : 37, '#17293b', true).setWordWrapWidth(870);
-    const columns = state.candidates.length > 4 ? 5 : 4;
-    const hasTwoRows = state.candidates.length > columns;
-    const cardWidth = columns === 5 ? 198 : 238;
-    const pitch = columns === 5 ? 211 : 262;
-    state.candidates.forEach((candidate, index) => {
-      const row = Math.floor(index / columns);
-      const count = Math.min(columns, state.candidates.length - row * columns);
-      const x = ((index % columns) - (count - 1) / 2) * pitch;
-      const y = hasTwoRows ? -74 + row * 159 : -56;
-      const card = this.add.container(x, y);
-      news.add(card);
-      const height = hasTwoRows ? 148 : 274;
-      this.rect(card, -cardWidth / 2, 0, cardWidth, height, 0xdedfcf);
-      this.rect(card, -cardWidth / 2 + 4, 4, cardWidth - 8, height - 37, 0x263b49);
-      for (let line = 0; line < 5; line++) this.rect(card, -cardWidth / 2 + 7, 18 + line * 19, cardWidth - 14, 1, 0xffffff, 0.05);
-      const avatar = this.citizen(card, candidate, index, 0, height - 39, hasTwoRows ? 2.05 : 4.05);
-      avatar.pose = 'wave';
-      this.rect(card, -cardWidth / 2 + 4, height - 33, cardWidth - 8, 30, colorOf(candidate));
-      this.text(card, `기호 ${index + 1}`, -cardWidth / 2 + 16, 8, 13, '#fbd975');
-      this.text(card, candidate.name, 0, height - 29, candidate.name.length > 9 ? 14 : 19, '#14223b', true).setWordWrapWidth(cardWidth - 12);
-      if (!state.preview && !state.reducedMotion) {
-        card.setAlpha(0).setScale(0.82).setY(y + 32);
-        this.tweens.add({ targets: card, y, scaleX: 1, scaleY: 1, alpha: 1, delay: 480 + index * 280, duration: 640, ease: 'Back.out' });
-      }
-    });
-    if (!state.candidates.length) {
-      const invitation = this.add.container(0, 44);
-      news.add(invitation);
-      this.rect(invitation, -196, -113, 392, 188, 0xddd9c7).setStrokeStyle(2, 0xb0ad9f);
-      this.rect(invitation, -170, -90, 340, 144, paper);
-      this.rect(invitation, -145, -66, 196, 8, 0xaeb5aa);
-      this.rect(invitation, -145, -40, 222, 6, 0xc5c8b8);
-      this.rect(invitation, -145, -14, 153, 6, 0xc5c8b8);
-      this.rect(invitation, 83, -49, 47, 47, 0x59a99e).setStrokeStyle(3, 0x397d76);
-      this.text(invitation, '✓', 106, -49, 42, '#f5eedc', true);
-      this.text(news, '당신의 후보를 기다립니다', 0, 153, 30, '#17293b', true);
-      this.text(news, '이름을 입력하면 특별판이 완성됩니다', 0, 197, 18, '#647264', true);
-    }
+    const invitation = this.add.container(0, 44);
+    news.add(invitation);
+    this.newspaperInvitation = invitation;
+    this.rect(invitation, -196, -113, 392, 188, 0xddd9c7).setStrokeStyle(2, 0xb0ad9f);
+    this.rect(invitation, -170, -90, 340, 144, paper);
+    this.rect(invitation, -145, -66, 196, 8, 0xaeb5aa);
+    this.rect(invitation, -145, -40, 222, 6, 0xc5c8b8);
+    this.rect(invitation, -145, -14, 153, 6, 0xc5c8b8);
+    this.rect(invitation, 83, -49, 47, 47, 0x59a99e).setStrokeStyle(3, 0x397d76);
+    this.text(invitation, '✓', 106, -49, 42, '#f5eedc', true);
+    this.text(invitation, '당신의 후보를 기다립니다', 0, 109, 30, '#17293b', true);
+    this.text(invitation, '이름을 입력하면 특별판이 완성됩니다', 0, 153, 18, '#647264', true);
+    this.syncNewspaperCandidates(state);
     this.rect(news, -530, 244, 1060, 2, ink);
     this.text(news, '사소한 결정, 전례 없는 선거전으로 번지다', -520, 255, 20, '#334536');
     this.text(news, '전국 투표 / 특별 취재팀', 520, 260, 14, '#536154').setOrigin(1, 0);
     const stamp = this.add.container(456, 273).setAngle(-11).setScale(0.65);
     news.add(stamp);
     this.rect(stamp, -115, -27, 230, 66, 0xc54935, 0.12).setStrokeStyle(5, 0xc54935);
-    this.text(stamp, state.candidates.length ? '출 마 완 료' : '후 보 모 집', 0, -18, 30, '#c54935', true);
+    this.newspaperStamp = this.text(stamp, state.candidates.length ? '출 마 완 료' : '후 보 모 집', 0, -18, 30, '#c54935', true);
     if (!state.preview && !state.reducedMotion) {
       news.setAngle(-13).setScale(0.42).setAlpha(0).setY(388);
       this.tweens.add({ targets: news, y: 345, angle: 0, scaleX: 1, scaleY: 1, alpha: 1, duration: 1050, ease: 'Back.out' });
@@ -268,64 +351,256 @@ export class ElectionScene extends Phaser.Scene {
   }
 
   private countingStudio(state: StageState) {
-    this.background(0x10182d);
-    for (let i = 0; i < 12; i++) {
-      this.rect(this.root, i * 114, 108, 94, 432, 0x1d2c48);
-      for (let j = 0; j < 8; j++) this.screenWindows.push(this.rect(this.root, i * 114 + 18, 130 + j * 48, 60, 16, j % 3 ? 0x38536b : 0x437c86, 0.3));
+    this.background(0x101c2c);
+    this.countingBeatKey = '';
+    this.countingLastLeader = '';
+    this.countingReactions.clear();
+    this.countingLights = [];
+    this.countingBallots = [];
+    this.countingBubbleUntil = 0;
+    this.countingPortrait = undefined;
+    this.finalEnvelopeOpened = false;
+    for (let i = 0; i < 9; i++) {
+      this.rect(this.root, 351 + i * 66, 91, 50, 385, i % 2 ? 0x1c3141 : 0x172b3b);
+      for (let j = 0; j < 7; j++) this.screenWindows.push(this.rect(this.root, 364 + i * 66, 114 + j * 46, 22, 10, 0x82b3b1, 0.11));
     }
     const floor = this.add.graphics();
     floor.lineStyle(1, 0x466a89, 0.19);
-    for (let i = 0; i < 9; i++) floor.lineBetween(640, 455, i * 160, 720);
-    [572, 598, 641, 700].forEach(y => floor.lineBetween(0, y, 1280, y));
+    for (let i = 0; i < 9; i++) floor.lineBetween(640, 462, i * 160, 720);
+    [538, 572, 620, 690].forEach(y => floor.lineBetween(0, y, 1280, y));
     this.root.add(floor);
-    const rim = this.add.graphics();
-    rim.fillStyle(0x71c9cc, 0.045);
-    rim.fillTriangle(40, 720, 177, 70, 455, 70);
-    rim.fillTriangle(1240, 720, 825, 70, 1103, 70);
-    this.root.add(rim);
-    for (let i = 0; i < 3; i++) {
-      const ring = this.add.circle(640, 330, 70 + i * 50).setStrokeStyle(2, 0x58b6b1, 0.23);
-      this.root.add(ring);
-      this.rings.push(ring);
-    }
-    this.text(this.root, '전 국 개 표 특 별 방 송', 640, 38, 26, '#d7e6e9', true);
-    this.countdownLabel = this.text(this.root, '첫 투표함이 열립니다', 68, 82, 20, '#b2d7d8');
+    this.countingBeam = this.add.graphics();
+    this.countingBeam.fillStyle(gold, 0.09);
+    this.countingBeam.fillTriangle(640, 58, 444, 527, 836, 527);
+    this.root.add(this.countingBeam);
+    this.text(this.root, '전 국 개 표 특 별 방 송', 640, 44, 23, '#d7e6e9', true);
+    this.text(this.root, '후보들의 대기실', 68, 83, 18, '#9ab4c7');
     this.marginText = this.text(this.root, '선두 격차 0.0%p', 1212, 82, 20, '#fbd975').setOrigin(1, 0);
-    const compact = state.candidates.length > 5;
+    this.countingTitle = this.text(this.root, '첫 번째 투표함', 640, 138, 30, '#fff1c7', true);
+    this.countingLocation = this.text(this.root, '개표장으로 도착한 표를 확인합니다', 640, 182, 17, '#a8c2c4', true);
+    this.countdownLabel = this.text(this.root, '봉인을 풀고 있습니다', 640, 225, 21, '#fbd975', true);
+    this.countingCue = this.text(this.root, '표가 모일수록, 표정도 달라집니다', 640, 565, 18, '#b8cbd0', true).setWordWrapWidth(540);
     state.candidates.forEach((candidate, index) => {
       const { x, y, width, height } = this.racePosition(index, state.candidates.length);
       const panel = this.add.container(x, y);
       this.root.add(panel);
-      const frame = this.rect(panel, -width / 2, 0, width, height, 0x1b2c48).setStrokeStyle(2, 0x39516c);
+      const frame = this.rect(panel, -width / 2, 0, width, height, 0x1b2c48).setStrokeStyle(1, 0x39516c);
       const glow = this.rect(panel, -width / 2, 0, width, height, colorOf(candidate), 0.04);
-      this.rect(panel, -width / 2, 0, width, 5, colorOf(candidate));
-      const position = this.text(panel, `${index + 1}위`, -width / 2 + 13, 14, compact ? 16 : 21, '#bed0df');
-      const badge = this.text(panel, '개표 중', width / 2 - 12, 16, compact ? 13 : 17, '#cad9e9').setOrigin(1, 0);
-      const citizen = this.citizen(panel, candidate, index, 0, compact ? 146 : 286, compact ? 2.15 : 4.45);
-      citizen.pose = index % 3 === 0 ? 'wave' : index % 3 === 1 ? 'nervous' : 'idle';
-      this.rect(panel, -width / 2 + 12, compact ? 155 : 302, width - 24, 2, colorOf(candidate), 0.55);
-      this.text(panel, candidate.name, 0, compact ? 163 : 320, compact ? candidate.name.length > 14 ? 12 : candidate.name.length > 10 ? 13 : 17 : candidate.name.length > 10 ? 19 : 26, '#fff7e7', true).setWordWrapWidth(width - 20);
-      const percentage = this.text(panel, '0.0%', 0, compact ? 187 : 369, compact ? 27 : 43, candidate.color, true);
+      this.rect(panel, -width / 2, 0, 4, height, colorOf(candidate));
+      const position = this.text(panel, '집계 전', width / 2 - 11, 12, 13, '#91adbf').setOrigin(1, 0);
+      const badge = this.text(panel, '기호 ' + (index + 1), -width / 2 + 69, 12, 13, '#a8c3ce');
+      const citizen = this.citizen(panel, candidate, index, -width / 2 + 36, height - 8, 1.42);
+      citizen.pose = index % 4 === 1 ? 'nervous' : 'idle';
+      this.text(panel, candidate.name, -width / 2 + 69, 34, candidate.name.length > 10 ? 14 : 17, '#fff7e7').setWordWrapWidth(152);
+      const percentage = this.text(panel, '0.0%', width / 2 - 10, 40, 22, candidate.color).setOrigin(1, 0);
+      const support = this.text(panel, '♥', -width / 2 + 21, 7, 16, '#ff9b9b').setVisible(candidate.id === state.cheeringId);
       if (!state.reducedMotion) {
         panel.setAlpha(0);
-        citizen.root.setY(citizen.root.y + 10);
-        this.tweens.add({ targets: panel, alpha: 1, duration: 520, delay: index * 65, ease: 'Cubic.out' });
-        this.tweens.add({ targets: citizen.root, y: compact ? 146 : 286, duration: 700, delay: index * 65, ease: 'Cubic.out' });
+        this.tweens.add({ targets: panel, alpha: 1, duration: 450, delay: index * 38, ease: 'Cubic.out' });
       }
-      this.race.push({ candidate, panel, citizen, percentage, badge, position, glow, frame, displayed: state.percentages[candidate.id] ?? 0, rank: index, reactedAt: -10000, rising: false });
-      this.raceBars.push(this.rect(this.root, 68 + index * 1144 / state.candidates.length, 606, 1144 / state.candidates.length, 7, colorOf(candidate)));
+      this.race.push({ candidate, panel, citizen, percentage, badge, position, glow, frame, support, displayed: state.percentages[candidate.id] ?? 0 });
     });
-    this.studioPulse = this.rect(this.root, 0, 0, 1280, 720, 0xffdd8a, 0).setDepth(300);
+    this.rect(this.root, 446, 510, 388, 19, 0x60737a);
+    this.rect(this.root, 468, 529, 26, 47, 0x253b48);
+    this.rect(this.root, 786, 529, 26, 47, 0x253b48);
+    this.countingBox = this.add.container(640, 441);
+    this.root.add(this.countingBox);
+    this.rect(this.countingBox, -143, -110, 286, 169, 0xf1d986).setStrokeStyle(2, 0x9f834d);
+    this.rect(this.countingBox, 114, -110, 29, 169, 0xc3a65f);
+    this.rect(this.countingBox, -136, -101, 265, 13, 0x172738);
+    this.rect(this.countingBox, -96, -52, 191, 77, 0xffedb6).setStrokeStyle(2, 0xb99a55);
+    this.text(this.countingBox, '운명의 한 표', 0, -40, 21, '#6c6140', true);
+    this.countingBoxNumber = this.text(this.countingBox, 'BOX 01', 0, -9, 27, '#343d3c', true);
+    this.countingLid = this.add.container(-151, -112);
+    this.countingBox.add(this.countingLid);
+    this.rect(this.countingLid, 0, -6, 303, 17, gold).setStrokeStyle(2, 0xa98d4a);
+    this.rect(this.countingLid, 71, -11, 156, 7, 0x273b40);
+    this.countingLock = this.add.container(0, -96);
+    this.countingBox.add(this.countingLock);
+    this.rect(this.countingLock, -15, -6, 30, 22, 0xd45640).setStrokeStyle(2, 0xffba86);
+    this.rect(this.countingLock, -9, -20, 5, 14, 0xc5d5d0);
+    this.rect(this.countingLock, 4, -20, 5, 14, 0xc5d5d0);
+    this.rect(this.countingLock, -9, -23, 18, 5, 0xc5d5d0);
+    this.text(this.countingLock, '封', 0, -5, 15, '#ffebbe', true);
+    for (let i = 0; i < 3; i++) {
+      const light = this.add.circle(582 + i * 58, 542, 9, 0x385269).setStrokeStyle(2, 0x78949c);
+      this.root.add(light);
+      this.countingLights.push(light);
+      this.text(this.root, String(i + 1), 582 + i * 58, 537, 11, '#dce6d6', true);
+    }
+    for (let i = 0; i < 16; i++) {
+      const ballot = this.add.container(640, 328).setVisible(false);
+      this.root.add(ballot);
+      this.rect(ballot, -12, -16, 24, 33, paper).setStrokeStyle(1, 0x9b9f8d);
+      this.rect(ballot, -7, -9, 14, 2, 0x8f9a8e);
+      this.rect(ballot, -7, -3, 14, 2, 0xb7bdac);
+      this.rect(ballot, -2, 5, 7, 6, 0xd77963);
+      this.countingBallots.push(ballot);
+    }
+    this.countingEnvelope = this.add.container(640, 338).setVisible(false);
+    this.root.add(this.countingEnvelope);
+    this.rect(this.countingEnvelope, -55, -37, 110, 74, paper).setStrokeStyle(2, 0xa69a77);
+    this.countingEnvelopeFlap = this.add.triangle(-55, -37, 0, 0, 110, 0, 55, 38, 0xe3dcc4).setOrigin(0, 0);
+    this.countingEnvelope.add(this.countingEnvelopeFlap);
+    this.countingEnvelopeMark = this.text(this.countingEnvelope, '?', 0, -21, 38, '#a05540', true);
+    this.countingBubble = this.add.container(640, 487).setAlpha(0).setDepth(12);
+    this.root.add(this.countingBubble);
+    this.rect(this.countingBubble, -163, -9, 326, 42, paper).setStrokeStyle(2, 0x69777b);
+    const tail = this.add.triangle(-16, 31, 0, 0, 15, 0, 4, 12, paper).setOrigin(0, 0);
+    this.countingBubble.add(tail);
+    this.countingBubbleText = this.text(this.countingBubble, '', 0, 0, 18, '#394c4e', true);
   }
 
-  private racePosition(rank: number, count: number) {
-    const columns = Math.min(5, count);
-    const width = (1144 - (columns - 1) * 14) / columns;
-    const height = count > 5 ? 220 : 444;
-    const row = Math.floor(rank / columns);
-    const rowCount = Math.min(columns, count - row * columns);
-    const rowWidth = rowCount * width + (rowCount - 1) * 14;
-    return { x: (1280 - rowWidth) / 2 + width / 2 + rank % columns * (width + 14), y: 128 + row * (height + 20), width, height };
+  private racePosition(index: number, count: number) {
+    const rows = Math.ceil(count / 2);
+    const right = index >= rows;
+    const row = right ? index - rows : index;
+    return { x: right ? 1095 : 185, y: 122 + (5 - rows) * 44 + row * 88, width: 304, height: 78 };
+  }
+
+  private countReaction(beat: CountingBeat, ranked: Candidate[], time: number) {
+    this.countingReactions.clear();
+    this.countingBubble?.setAlpha(0);
+    if (this.countingPortrait) {
+      const oldPortrait = this.countingPortrait;
+      this.citizens = this.citizens.filter(citizen => citizen.root.parentContainer !== oldPortrait);
+      this.tweens.killTweensOf(oldPortrait);
+      oldPortrait.destroy(true);
+      this.countingPortrait = undefined;
+    }
+    if (beat.state === 'settled') {
+      const state = this.readState();
+      const leader = ranked[0];
+      const previousLeader = this.countingLastLeader;
+      const changed = previousLeader && previousLeader !== leader.id;
+      const burden = /커피|점심|벌칙|청소/.test(state.topic);
+      const presentation = state.topic.includes('발표');
+      this.countingReactions.set(leader.id, { pose: burden ? changed ? 'surprised' : 'nervous' : changed ? 'cheer' : 'wave', until: time + 1500 });
+      if (changed) this.countingReactions.set(previousLeader, { pose: 'surprised', until: time + 1800 });
+      else if (ranked[1]) this.countingReactions.set(ranked[1].id, { pose: 'nervous', until: time + 2000 });
+      const portrait = this.add.container(640, 274).setDepth(11);
+      this.root.add(portrait);
+      this.countingPortrait = portrait;
+      this.rect(portrait, -154, -54, 308, 251, 0x183243).setStrokeStyle(2, colorOf(leader));
+      this.rect(portrait, -154, -54, 308, 31, colorOf(leader));
+      this.text(portrait, leader.name, 0, -48, leader.name.length > 10 ? 13 : 17, '#17293b', true).setWordWrapWidth(284);
+      this.text(portrait, '대기실 현장', 0, -15, 12, '#9abbca', true);
+      const closeup = this.citizen(portrait, leader, state.candidates.findIndex(candidate => candidate.id === leader.id), 0, 177, 3.7);
+      closeup.pose = presentation ? 'bow' : burden ? changed ? 'surprised' : 'nervous' : changed ? 'surprised' : 'wave';
+      if (!this.readState().reducedMotion) {
+        portrait.setAlpha(0).setScale(0.95);
+        this.tweens.add({ targets: portrait, alpha: 1, scaleX: 1, scaleY: 1, duration: 430, ease: 'Cubic.out' });
+      }
+      this.countingBubbleText?.setText(presentation ? '일단… 인사부터 드릴게요!' : burden ? '잠깐, 제가 앞선다고요…?' : changed ? '어? 저요? 정말 저예요?' : beat.box === 1 ? '일단 한숨 돌려도 되겠죠…?' : '끝까지 지켜봐야겠네요…');
+      this.countingBubbleUntil = time + 1600;
+      this.countingBubble?.setAlpha(this.readState().reducedMotion ? 1 : 0);
+      if (!this.readState().reducedMotion && this.countingBubble) {
+        this.countingBubble.setY(494);
+        this.tweens.add({ targets: this.countingBubble, y: 487, alpha: 1, duration: 330, ease: 'Cubic.out' });
+      }
+      this.countingLastLeader = leader.id;
+      this.root.sort('depth');
+    } else if (beat.state === 'sealed') {
+      if (ranked[0]) this.countingReactions.set(ranked[0].id, { pose: 'nervous', until: time + 3500 });
+      if (ranked[ranked.length - 1]) this.countingReactions.set(ranked[ranked.length - 1].id, { pose: 'nervous', until: time + 2600 });
+    }
+  }
+
+  private updateCounting(state: StageState, time: number, delta: number) {
+    const local = Math.max(0, state.elapsed - COUNT_START);
+    const beat = countBeat(state.elapsed);
+    const key = `${beat.id}:${beat.state}`;
+    const ranked = [...state.candidates].sort((a, b) => (state.percentages[b.id] ?? 0) - (state.percentages[a.id] ?? 0));
+    const hasResult = local >= 2200;
+    if (key !== this.countingBeatKey) {
+      this.countingBeatKey = key;
+      this.countReaction(beat, ranked, time);
+    }
+    const leader = ranked[0].id;
+    this.countingTitle?.setText(beat.box === 3 ? '마지막 투표함' : beat.box === 2 ? '두 번째 투표함' : '첫 번째 투표함');
+    this.countingLocation?.setText(beat.location);
+    this.countingBoxNumber?.setText(`BOX 0${beat.box}`);
+    this.countingLights.forEach((light, index) => light.setFillStyle(index < beat.box - 1 ? 0x7bc7ac : index === beat.box - 1 ? gold : 0x385269));
+    const sealed = beat.state === 'sealed';
+    const revealing = beat.state === 'revealing';
+    const opening = beat.state === 'opening';
+    const segmentStart = beat.box === 1 ? 0 : beat.box === 2 ? 5000 : 14500;
+    const segmentTime = local - segmentStart;
+    const openProgress = Phaser.Math.Clamp(segmentTime / (revealing ? 1900 : 1650), 0, 1);
+    const eased = Phaser.Math.Easing.Cubic.InOut(openProgress);
+    if (this.countingBox) {
+      this.countingBox.setY(441 + (state.reducedMotion ? 0 : sealed ? Math.sin(time / 420) * 0.45 : 0));
+      this.countingBox.setAngle(state.reducedMotion || !opening ? 0 : Math.sin(segmentTime / 210) * Math.sin(openProgress * Math.PI) * 0.8);
+    }
+    if (this.countingLid) {
+      const angle = sealed ? 0 : opening || revealing ? -19 * Math.sin(eased * Math.PI) - eased * 7 : -7;
+      this.countingLid.setAngle(state.reducedMotion ? (sealed ? 0 : -7) : angle);
+    }
+    if (this.countingLock) {
+      this.countingLock.setVisible(sealed || revealing && openProgress < 0.3 || opening && openProgress < 0.22);
+      if (revealing) this.countingLock.setY(-96 + eased * 48).setAngle(eased * 28).setAlpha(1 - eased * 2);
+      else this.countingLock.setY(-96).setAngle(0).setAlpha(1);
+    }
+    this.countingBeam?.setAlpha(sealed ? 0.3 : revealing ? 0.65 + eased * 0.35 : 0.45);
+    this.countdownLabel?.setText(sealed ? `봉인 해제까지 ${Math.max(1, Math.ceil((14500 - local) / 1000))}…` : revealing ? segmentTime < 1100 ? '천천히… 마지막 봉투가 나옵니다' : '그 이름이 적혀 있습니다' : opening ? '한 표씩, 차분히 확인합니다' : '다음 투표함이 도착하는 중');
+    this.countingCue?.setText(sealed ? '아직 열지 않은 이 상자에, 결말이 있습니다' : revealing ? '끝까지 남아 있던 한 장의 봉투' : beat.state === 'settled' ? beat.box === 1 ? '이제 첫 결과. 아직 두 상자가 남았습니다' : '마지막 상자 앞에서 모두가 말을 멈췄습니다' : '후보들은 같은 자리에서 결과를 기다립니다');
+    this.countingBallots.forEach((ballot, index) => {
+      const age = segmentTime - 180 - index * 66;
+      const duration = 1130 + index % 3 * 85;
+      const p = age / duration;
+      const visible = opening && p > 0 && p < 1;
+      ballot.setVisible(visible);
+      if (!visible) return;
+      const side = index % 2 ? 1 : -1;
+      const distance = 54 + index % 5 * 12;
+      ballot.setPosition(640 + side * Math.sin(p * Math.PI / 2) * distance, 322 - Math.sin(p * Math.PI) * (54 + index % 4 * 8) + p * 169);
+      ballot.setAngle(side * (p * 73 + index * 5)).setAlpha(Math.min(1, p * 8, (1 - p) * 8));
+      if (state.reducedMotion) ballot.setVisible(false);
+    });
+    const envelopeProgress = Phaser.Math.Clamp((segmentTime - 410) / 1450, 0, 1);
+    if (this.countingEnvelope) {
+      this.countingEnvelope.setVisible(revealing && envelopeProgress > 0);
+      this.countingEnvelope.setY(338 - Phaser.Math.Easing.Cubic.Out(envelopeProgress) * 50);
+      this.countingEnvelope.setAngle(state.reducedMotion ? 0 : -8 * (1 - envelopeProgress)).setAlpha(Math.min(1, envelopeProgress * 4));
+      this.countingEnvelope.setScale(0.82 + envelopeProgress * 0.2);
+    }
+    const flapOpen = Phaser.Math.Clamp((segmentTime - 1250) / 800, 0, 1);
+    this.countingEnvelopeFlap?.setScale(1, 1 - 2 * Phaser.Math.Easing.Cubic.InOut(flapOpen));
+    if (revealing && segmentTime >= 1650) {
+      const winner = state.candidates.find(candidate => candidate.id === state.winnerId);
+      if (winner && this.countingEnvelopeMark) {
+        this.countingEnvelopeMark.setText(winner.name).setFontSize(winner.name.length > 10 ? 10 : 15).setWordWrapWidth(98).setY(-10);
+        if (!this.finalEnvelopeOpened) {
+          this.finalEnvelopeOpened = true;
+          this.burst(640, 285, gold, 10, 40);
+          this.countingReactions.set(winner.id, { pose: 'surprised', until: time + 800 });
+        }
+      }
+    } else this.countingEnvelopeMark?.setText('?').setFontSize(38).setY(-21);
+    if (time > this.countingBubbleUntil && this.countingBubble && this.countingBubble.alpha > 0) this.countingBubble.setAlpha(state.reducedMotion ? 0 : Math.max(0, this.countingBubble.alpha - delta / 250));
+    if (time > this.countingBubbleUntil && this.countingPortrait && this.countingPortrait.alpha > 0) this.countingPortrait.setAlpha(state.reducedMotion ? 0 : Math.max(0, this.countingPortrait.alpha - delta / 250));
+    this.race.forEach((slot, index) => {
+      const rank = ranked.findIndex(candidate => candidate.id === slot.candidate.id);
+      const leading = hasResult && slot.candidate.id === leader;
+      slot.displayed = Phaser.Math.Linear(slot.displayed, state.percentages[slot.candidate.id] ?? 0, state.reducedMotion ? 1 : 1 - Math.exp(-delta / 280));
+      slot.percentage.setText(hasResult ? `${slot.displayed.toFixed(1)}%` : '—');
+      slot.position.setText(hasResult ? `${rank + 1}위` : '집계 전').setColor(leading ? '#fbd975' : '#91adbf');
+      slot.badge.setText(leading ? revealing ? '직전 집계 선두' : '현재 선두' : `기호 ${index + 1}`).setColor(leading ? '#fbd975' : '#a8c3ce');
+      const supported = slot.candidate.id === state.cheeringId;
+      slot.support.setVisible(supported);
+      slot.frame.setStrokeStyle(leading || supported ? 2 : 1, leading ? colorOf(slot.candidate) : supported ? 0xffaaae : 0x39516c);
+      slot.glow.setAlpha(leading ? 0.07 : supported ? 0.05 : 0.025);
+      const reaction = this.countingReactions.get(slot.candidate.id);
+      slot.citizen.pose = reaction && reaction.until > time ? reaction.pose : sealed && index % 4 === 1 ? 'nervous' : 'idle';
+    });
+    const gap = hasResult && ranked.length > 1 ? Math.max(0, (state.percentages[ranked[0].id] ?? 0) - (state.percentages[ranked[1].id] ?? 0)) : 0;
+    this.marginText?.setText(hasResult ? `선두 격차 ${gap.toFixed(1)}%p` : '첫 결과를 기다립니다');
+    if (!state.reducedMotion) {
+      this.screenWindows.forEach((window, index) => window.setAlpha(0.13 + Math.sin(time / 1500 + index * 0.4) * 0.035));
+      const camera = this.cameras.main;
+      camera.setZoom(Phaser.Math.Linear(camera.zoom, sealed ? 1.008 : 1, 1 - Math.exp(-delta / 650)));
+      camera.centerOn(640, 360);
+    }
   }
 
   private victory(state: StageState) {
@@ -371,7 +646,7 @@ export class ElectionScene extends Phaser.Scene {
   update(time: number, delta: number) {
     const state = this.readState();
     if (this.currentPhase !== state.phase) this.switchPhase(state.phase);
-    else if (state.preview && this.signature(state) !== this.previewSignature) this.switchPhase(state.phase, true);
+    else if (state.preview && this.signature(state) !== this.previewSignature) this.syncNewspaperCandidates(state);
     const local = time - this.phaseStart;
     if (state.phase === 'declaration') {
       this.paperHeadline?.setText(state.topic || '오늘의 당선자를 뽑습니다').setFontSize(state.topic.length > 30 ? 23 : 37);
@@ -379,9 +654,14 @@ export class ElectionScene extends Phaser.Scene {
         const focus = Math.floor(local / (4800 / state.candidates.length)) % state.candidates.length;
         citizen.pose = focus === index ? 'wave' : index % 3 === 1 && local > 3800 ? 'bow' : 'idle';
       });
+      if (state.preview) this.newspaperCards.forEach((slot, id) => {
+        const identity = Number(id) || 1;
+        const beat = Math.floor((local + identity * 617) / (2300 + identity % 4 * 230)) % 5;
+        slot.citizen.pose = beat === 0 ? 'wave' : beat === 3 && identity % 3 === 1 ? 'bow' : 'idle';
+      });
     }
     if (state.phase === 'voting') {
-      this.voteCounter?.setText(format.format(Math.floor(state.totalVotes * Math.min(1, local / 4200))));
+      this.voteCounter?.setText(format.format(Math.floor(state.totalVotes * Math.min(1, local / 4000))));
       this.voters.forEach(voter => {
         const { citizen, ballot, offset, duration } = voter;
         const cycle = Math.floor((local + offset) / duration);
@@ -421,64 +701,7 @@ export class ElectionScene extends Phaser.Scene {
         }
       });
     }
-    if (state.phase === 'counting' && this.race.length) {
-      const ranked = [...state.candidates].sort((a, b) => (state.percentages[b.id] ?? 0) - (state.percentages[a.id] ?? 0));
-      const leader = ranked[0].id;
-      if (leader !== this.leaderId) {
-        if (this.leaderId && !state.reducedMotion) {
-          this.cameras.main.shake(160, 0.0016);
-          this.studioPulse?.setAlpha(0.09);
-          if (this.studioPulse) this.tweens.add({ targets: this.studioPulse, alpha: 0, duration: 420, ease: 'Cubic.out' });
-          const newLeader = this.race.find(slot => slot.candidate.id === leader);
-          if (newLeader) {
-            this.burst(newLeader.panel.x, newLeader.panel.y + 48, colorOf(newLeader.candidate), 14, 75);
-            this.tweens.killTweensOf(newLeader.percentage);
-            newLeader.percentage.setScale(1.13);
-            this.tweens.add({ targets: newLeader.percentage, scaleX: 1, scaleY: 1, duration: 450, ease: 'Back.out' });
-          }
-        }
-        this.leaderId = leader;
-      }
-      let barX = 68;
-      this.race.forEach((slot, index) => {
-        const rank = ranked.findIndex(candidate => candidate.id === slot.candidate.id);
-        if (rank !== slot.rank) {
-          slot.rising = rank < slot.rank;
-          slot.reactedAt = time;
-          slot.rank = rank;
-        }
-        const target = this.racePosition(rank, this.race.length);
-        const move = state.reducedMotion ? 1 : 1 - Math.exp(-delta / 170);
-        slot.panel.setPosition(Phaser.Math.Linear(slot.panel.x, target.x, move), Phaser.Math.Linear(slot.panel.y, target.y, move));
-        slot.displayed = Phaser.Math.Linear(slot.displayed, state.percentages[slot.candidate.id] ?? 0, 1 - Math.exp(-delta / 90));
-        slot.percentage.setText(`${slot.displayed.toFixed(1)}%`);
-        slot.position.setText(`${rank + 1}위`).setColor(rank === 0 ? '#fbd975' : '#bed0df');
-        const leading = slot.candidate.id === leader;
-        slot.panel.setDepth(leading ? 100 : 20 - rank);
-        const reacting = time - slot.reactedAt < 700;
-        slot.badge.setText(leading ? '▲ 선두' : reacting ? slot.rising ? '순위 상승' : '다시 추격' : rank < 3 ? '초접전' : '추격 중').setColor(leading ? '#fbd975' : '#9cb6cc');
-        slot.frame.setStrokeStyle(leading ? 3 : 1, leading ? colorOf(slot.candidate) : 0x39516c, leading ? 1 : 0.8);
-        slot.glow.setAlpha(leading ? 0.085 + (state.reducedMotion ? 0 : Math.sin(time / (state.progress > 90 ? 160 : 330)) * 0.035) : reacting && slot.rising ? 0.055 : 0.025);
-        const individual = Math.floor((local + index * 367) / (1400 + index % 3 * 310));
-        slot.citizen.pose = reacting ? slot.rising ? index % 2 ? 'wave' : 'cheer' : index % 3 ? 'surprised' : 'nervous' : state.progress > 90 ? individual % 3 === 0 ? 'idle' : 'nervous' : leading ? individual % 2 ? 'cheer' : 'wave' : individual % 4 === 0 ? 'wave' : individual % 3 === 0 ? 'nervous' : 'idle';
-        const barWidth = 1144 * Math.max(0, slot.displayed) / 100;
-        this.raceBars[index].setX(barX).setDisplaySize(barWidth, 7);
-        barX += barWidth;
-      });
-      this.root.sort('depth');
-      const gap = ranked.length > 1 ? Math.max(0, (state.percentages[ranked[0].id] ?? 0) - (state.percentages[ranked[1].id] ?? 0)) : 0;
-      this.marginText?.setText(`선두 격차 ${gap.toFixed(1)}%p`);
-      if (!state.reducedMotion) this.rings.forEach((ring, index) => { ring.setScale(1 + Math.sin(time / 500 + index) * 0.05); });
-      this.countdownLabel?.setText(state.progress >= 96 ? '마지막 표가 공개됩니다' : state.progress >= 90 ? '마지막 투표함 · 숨죽인 개표장' : gap < 1 ? '단 한 표로도 뒤집히는 승부' : '전국 투표함 실시간 집계');
-      if (!state.reducedMotion) {
-        this.screenWindows.forEach((window, index) => window.setAlpha(0.22 + (Math.sin(time / 440 + index * 1.7) + 1) * 0.13));
-        const camera = this.cameras.main;
-        const targetZoom = 1 + state.progress / 100 * 0.012 + (state.progress >= 90 && state.progress < 96 ? 0.004 : 0);
-        camera.setZoom(Phaser.Math.Linear(camera.zoom, targetZoom, 1 - Math.exp(-delta / 450)));
-        const focus = this.racePosition(0, this.race.length).x < 640 ? -4 : 0;
-        camera.centerOn(640 + Phaser.Math.Linear(camera.midPoint.x - 640, focus, 1 - Math.exp(-delta / 500)), 360);
-      }
-    }
+    if (state.phase === 'counting' && this.race.length) this.updateCounting(state, time, delta);
     if (state.phase === 'winner') {
       if (this.winner) this.winner.pose = state.reducedMotion ? 'cheer' : local < 1080 ? 'run' : local < 1760 ? 'bow' : 'cheer';
       const firework = Math.floor((local - 800) / 750);

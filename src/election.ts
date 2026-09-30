@@ -54,41 +54,35 @@ export function createDrama(result: ElectionResult): DramaFrame[] {
     }
     return shuffled;
   };
-  const order = shuffle(candidates);
-  const frameCount = Math.max(7, candidates.length);
-  const lastLeadIndex = (frameCount - 1) % order.length;
-  const winnerIndex = order.findIndex(candidate => candidate.id === winnerId);
-  // Reserve an opening chase and a final comeback without changing the already chosen winner.
-  if (winnerIndex === 0 || winnerIndex === lastLeadIndex) {
-    const places = order.map((_, index) => index).filter(index => index !== 0 && index !== lastLeadIndex);
-    const replacement = places[randomInt(places.length)];
-    [order[winnerIndex], order[replacement]] = [order[replacement], order[winnerIndex]];
+  const openingOrder = shuffle(candidates);
+  const challengers = openingOrder.slice(Math.max(1, Math.floor(candidates.length / 2)))
+    .filter(candidate => candidate.id !== winnerId);
+  const challengerPool = challengers.length ? challengers : openingOrder.filter(candidate => candidate.id !== winnerId);
+  const challenger = challengerPool[randomInt(challengerPool.length)];
+  // One incoming district drives the comeback. The remaining candidates retain
+  // their relative places, so each update has a story the viewer can follow.
+  const secondOrder = [challenger, ...openingOrder.filter(candidate => candidate.id !== challenger.id)];
+  if (secondOrder.length > 4) {
+    const swap = 2 + randomInt(secondOrder.length - 3);
+    [secondOrder[swap], secondOrder[swap + 1]] = [secondOrder[swap + 1], secondOrder[swap]];
   }
   const average = 100 / candidates.length;
-  const spread = 1.15 + Math.min(0.65, candidates.length * 0.065);
-  // Everyone gets a turn in front while all other ranks are reshuffled at every checkpoint.
-  const frames = Array.from({ length: frameCount }, (_, step): DramaFrame => {
-    const progress = step / (frameCount - 1) * 94;
-    const rankStep = spread * (1 - progress / 220) / (candidates.length - 1);
-    const leader = order[step % order.length];
-    const nextLeader = order[(step + 1) % order.length];
-    const others = shuffle(order.filter(candidate => candidate.id !== leader.id));
-    const nextIndex = others.findIndex(candidate => candidate.id === nextLeader.id);
-    const lowerHalf = Math.ceil(candidates.length / 2);
-    const surgeRank = lowerHalf + randomInt(candidates.length - lowerHalf);
-    // The next front-runner starts in the lower half, so a new leader can come from well down the board.
-    [others[nextIndex], others[surgeRank - 1]] = [others[surgeRank - 1], others[nextIndex]];
-    const ranks = [leader, ...others];
-    return {
+  const frame = (progress: number, order: Candidate[], spread: number): DramaFrame => ({
       progress,
-      percentages: Object.fromEntries(ranks.map((candidate, rank) => [
+      percentages: Object.fromEntries(order.map((candidate, rank) => [
         candidate.id,
-        average + ((candidates.length - 1) / 2 - rank) * rankStep,
+        average + ((candidates.length - 1) / 2 - rank) * spread / (candidates.length - 1),
       ])),
-    };
   });
-  frames.push({ progress: 100, percentages: { ...percentages } });
-  return frames;
+  const opening = frame(0, openingOrder, 1.8);
+  return [
+    opening,
+    { progress: 32, percentages: { ...opening.percentages } },
+    frame(68, secondOrder, 1.5),
+    // The opening of the last box first narrows every gap without changing ranks.
+    frame(92, secondOrder, 0.6),
+    { progress: 100, percentages: { ...percentages } },
+  ];
 }
 
 export function frameAt(frames: DramaFrame[], progress: number): DramaFrame {
@@ -98,6 +92,25 @@ export function frameAt(frames: DramaFrame[], progress: number): DramaFrame {
   const previous = frames[nextIndex - 1];
   const next = frames[nextIndex];
   const fraction = (bounded - previous.progress) / (next.progress - previous.progress);
+  if (previous.progress === 92 && next.progress === 100) {
+    const ids = Object.keys(next.percentages);
+    const winnerId = ids.reduce((winner, id) => next.percentages[id] > next.percentages[winner] ? id : winner);
+    const winnerShare = Math.max(...Object.values(previous.percentages)) + 0.3;
+    const remainingScale = (100 - winnerShare) / (100 - previous.percentages[winnerId]);
+    const reveal = Object.fromEntries(ids.map(id => [id,
+      id === winnerId ? winnerShare : previous.percentages[id] * remainingScale,
+    ]));
+    // Keep the other ranks readable during the final comeback. After the winner
+    // reaches the front, ease the remaining shares into the exact final tally.
+    const finish = Math.pow(fraction, 3);
+    const from = finish < 0.8 ? previous.percentages : reveal;
+    const to = finish < 0.8 ? reveal : next.percentages;
+    const amount = finish < 0.8 ? finish / 0.8 : (finish - 0.8) / 0.2;
+    return {
+      progress: bounded,
+      percentages: Object.fromEntries(ids.map(id => [id, from[id] + (to[id] - from[id]) * amount])),
+    };
+  }
   return {
     progress: bounded,
     percentages: Object.fromEntries(Object.keys(next.percentages).map(id => [
