@@ -1,7 +1,11 @@
 .arena-show { display: grid; grid-template-columns: minmax(0, 1fr) minmax(160px, 22%); gap: 10px; width: 100%; height: 100%; min-height: 0; min-width: 0; color: #fff1d7; }
 .arena-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid #73908b66; border-radius: 16px; background: #172b34; }
 .arena-canvas { display: block; width: 100%; height: 100%; image-rendering: auto; }
-.arena-paused { position: absolute; top: 10px; right: 10px; padding: 5px 8px; background: #10232ace; border: 1px solid #96b1a866; border-radius: 5px; color: #e7dac1; font-weight: 800; font-size: 10px; }
+.arena-callout { position: absolute; top: 8px; left: 10px; right: 10px; display: grid; gap: 5px; padding: 9px 12px; border: 1px solid #c8b48388; border-radius: 9px; background: #152c34e8; pointer-events: none; text-align: center; }
+.arena-callout strong { color: #ffdf96; font-size: clamp(12px, 1.45vw, 20px); line-height: 1.15; }
+.arena-callout span { color: #dae6df; font-size: clamp(10px, 1.05vw, 15px); line-height: 1.25; overflow-wrap: anywhere; }
+.arena-callout-winner { border-color: #f6d477; background: #463d2ded; }
+.arena-paused { position: absolute; bottom: 8px; right: 10px; padding: 5px 8px; background: #10232ace; border: 1px solid #96b1a866; border-radius: 5px; color: #e7dac1; font-weight: 800; font-size: 10px; }
 .arena-board { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 10px; border: 1px solid #d8bc8366; border-radius: 16px; background: #172b34; overflow: hidden; }
 .arena-board-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; flex: 0 0 auto; margin-bottom: 8px; font-size: 13px; }
 .arena-board-heading span { color: #d0b486; font-size: 11px; white-space: nowrap; }
@@ -23,6 +27,9 @@
   .arena-number { width: 14px; height: 12px; font-size: 9px; margin: auto; border-radius: 3px; }
   .arena-name { font-size: 8px; line-height: 1.05; }
   .arena-state { font-size: 8px; text-align: center; }
+  .arena-callout { top: 4px; left: 5px; right: 5px; padding: 5px 6px; gap: 3px; }
+  .arena-callout strong { font-size: 11px; }
+  .arena-callout span { font-size: 9px; line-height: 1.12; }
 }
 @media (max-height: 430px) {
   .arena-show { grid-template-columns: minmax(0, 1fr) 151px; gap: 6px; }
@@ -34,5 +41,8 @@
   .arena-number { width: 15px; height: 15px; font-size: 9px; }
   .arena-name { font-size: 8px; line-height: 1.02; }
   .arena-state { font-size: 8px; }
+  .arena-callout { top: 4px; left: 5px; right: 5px; padding: 4px 6px; gap: 2px; }
+  .arena-callout strong { font-size: 10px; }
+  .arena-callout span { font-size: 8px; line-height: 1.13; }
 }
 @media (prefers-reduced-motion: reduce) { .arena-entry { transition: none; } }

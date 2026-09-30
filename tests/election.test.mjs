@@ -8,7 +8,42 @@ const compiledShow = await build({ entryPoints: ['src/show.ts'], bundle: true, f
 const { countProgress, elapsedAtProgress, countBeat, storyBeat, resolvedEvents, storyOutcome, finalResultGap, tallyVotes, raceMoment, phaseFor, COUNT_START, WINNER_START, SHOW_DURATION, STORY_DURATION, STORY_RESOLVE_AT } = await import(`data:text/javascript;base64,${Buffer.from(compiledShow.outputFiles[0].text).toString('base64')}`);
 const compiledCatalog = await build({ entryPoints: ['src/storyCatalog.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { STORY_CATALOG } = await import(`data:text/javascript;base64,${Buffer.from(compiledCatalog.outputFiles[0].text).toString('base64')}`);
+const compiledFinish = await build({ entryPoints: ['src/game/countingFinish.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { COUNT_FINISH_START, COUNT_FINISH_LINE_X, COUNT_FINISH_END_X, countingFinishAt, countingFinishScale } = await import(`data:text/javascript;base64,${Buffer.from(compiledFinish.outputFiles[0].text).toString('base64')}`);
 const candidates = Array.from({ length: MAX_CANDIDATES }, (_, index) => ({ id: String(index), name: `후보 ${index}`, color: CANDIDATE_COLORS[index] }));
+
+test('the election finish always moves forward for 2–10 survivors, even from the greatest graph marker', () => {
+  const maximumGraphMarker = 252 + 520 + 3;
+  assert.ok(COUNT_FINISH_LINE_X > maximumGraphMarker);
+  for (let count = 2; count <= 10; count++) {
+    let previousCrossing = -Infinity;
+    for (let rank = 0; rank < count; rank++) {
+      let crossing;
+      for (const startX of [287, 515, maximumGraphMarker]) {
+        let previousX = startX;
+        for (let elapsed = COUNT_FINISH_START; elapsed <= WINNER_START; elapsed += 10) {
+          const frame = countingFinishAt(startX, rank, count, elapsed);
+          assert.ok(frame.x >= previousX - 1e-8, `backward finish: ${count} survivors, rank ${rank}, start ${startX}`);
+          assert.ok(frame.x <= COUNT_FINISH_END_X + 1e-8);
+          if (frame.age >= 0 && crossing === undefined) crossing = elapsed;
+          previousX = frame.x;
+        }
+      }
+      assert.ok(crossing > previousCrossing);
+      previousCrossing = crossing;
+    }
+  }
+});
+
+test('finish silhouettes reserve space for measured percentage and received-vote labels', () => {
+  for (const scale of [43 / 57, 1.2, 1.85]) {
+    for (const labelLeft of [815, 829, 850, 885]) {
+      const fitted = countingFinishScale(scale, labelLeft);
+      assert.ok(fitted <= scale);
+      assert.ok(COUNT_FINISH_END_X + fitted * 32 + 8 <= labelLeft + 1e-8);
+    }
+  }
+});
 
 function withRandomSamples(samples, callback) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto');

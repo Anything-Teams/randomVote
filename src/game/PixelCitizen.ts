@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 
-export type Pose = 'idle' | 'walk' | 'run' | 'wave' | 'vote' | 'cheer' | 'clap' | 'encourage' | 'disappointed' | 'nervous' | 'surprised' | 'bow';
+export type Pose = 'idle' | 'walk' | 'run' | 'brake' | 'finish' | 'wave' | 'vote' | 'cheer' | 'clap' | 'encourage' | 'disappointed' | 'nervous' | 'surprised' | 'bow';
 const skinColors = [0xf2c09b, 0xd9a078, 0xf6d2b1, 0xb98062];
 const hairColors = [0x1b2337, 0x553a34, 0xa96940, 0x35425b];
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
@@ -13,6 +13,8 @@ export class PixelCitizen {
   readonly root: Phaser.GameObjects.Container;
   pose: Pose = 'idle';
   gestureProgress = 0;
+  locomotionSpeed = 1;
+  movementDirection = 1;
   private figure: Phaser.GameObjects.Container;
   private head: Phaser.GameObjects.Container;
   private leftArm: Limb;
@@ -29,6 +31,7 @@ export class PixelCitizen {
   private lastTime = 0;
   private lastPose: Pose = 'idle';
   private poseStart = 0;
+  private locomotionClock = 0;
   private motion: Motion = { y: 0, angle: 0, head: 0, sx: 1, sy: 1, la: 3, ra: -3, le: 0, re: 0, ll: 0, rl: 0, lk: 0, rk: 0, mouth: 1, brows: 0 };
 
   constructor(scene: Phaser.Scene, parent: Phaser.GameObjects.Container, x: number, y: number, scale: number, color: number, index: number) {
@@ -38,6 +41,7 @@ export class PixelCitizen {
     this.figure = scene.add.container(0, 0);
     this.root.add([this.shadow, this.figure]);
     this.offset = index * 593 + (index % 3) * 137;
+    this.locomotionClock = this.offset;
     this.tempo = 0.87 + (index * 7 % 11) * 0.025;
     this.personality = index % 4;
     const skin = skinColors[index % 4];
@@ -122,22 +126,54 @@ export class PixelCitizen {
     this.lastTime = time;
     if (this.lastPose !== this.pose) { this.lastPose = this.pose; this.poseStart = time; }
     const clock = time * this.tempo + this.offset;
-    const stride = clock / 145;
+    // Integrate cadence so an acceleration never jumps the current foot phase.
+    this.locomotionClock += delta * this.tempo * this.locomotionSpeed;
+    const stride = this.locomotionClock / 145;
     const breath = Math.sin(clock / 540);
     const p = this.personality;
     const target: Motion = { y: breath * 0.4, angle: Math.sin(clock / 1100) * 0.6, head: Math.sin(clock / 730) * 1.5, sx: 1, sy: 1, la: 4 + breath * 2, ra: -4 - breath * 2, le: 3, re: -3, ll: 0, rl: 0, lk: 0, rk: 0, mouth: 1, brows: 0 };
     if (this.pose === 'walk' || this.pose === 'run') {
       const running = this.pose === 'run';
       const swing = Math.sin(stride * (running ? 1.35 : 1));
-      target.ll = swing * (running ? 42 : 24); target.rl = -target.ll;
-      target.lk = Math.max(0, -swing) * (running ? 62 : 30); target.rk = Math.max(0, swing) * (running ? 62 : 30);
-      target.la = -swing * (running ? 48 : 25); target.ra = -target.la;
-      target.le = running ? -58 : -12 - Math.max(0, swing) * 12;
-      target.re = running ? 58 : 12 + Math.max(0, -swing) * 12;
-      target.y = -Math.abs(swing) * (running ? 3.3 : 1.5);
-      target.angle = running ? 8 : 2 + swing * 1.2;
+      const direction = this.movementDirection < 0 ? -1 : 1;
+      const reach = 0.93 + p * 0.035;
+      target.ll = swing * (running ? 42 : 24) * reach * direction; target.rl = -target.ll;
+      target.lk = Math.max(0, -swing) * (running ? 62 : 30) * direction; target.rk = Math.max(0, swing) * (running ? 62 : 30) * direction;
+      target.la = -swing * (running ? 42 + p * 4 : 25) * direction; target.ra = -target.la;
+      target.le = (running ? -52 - p * 4 : -12 - Math.max(0, swing) * 12) * direction;
+      target.re = (running ? 52 + p * 4 : 12 + Math.max(0, -swing) * 12) * direction;
+      target.y = -Math.abs(swing) * (running ? 2.9 + p * 0.25 : 1.5);
+      target.angle = (running ? 6.5 + p : 2 + swing * 1.2) * direction;
       target.head = -target.angle * 0.65 + Math.sin(stride - 0.7) * 1.5;
       target.sx = 1 + Math.abs(swing) * 0.012; target.sy = 1 - Math.abs(swing) * 0.012;
+      target.mouth = running ? 1.5 + Math.max(0, swing) * 0.6 : 1;
+      target.brows = running ? -0.5 : 0;
+    } else if (this.pose === 'brake') {
+      const progress = clamp(this.gestureProgress);
+      const step = Math.sin(stride * 1.7);
+      const reach = 24 * (1 - progress) + 8;
+      target.ll = step * reach; target.rl = -step * reach;
+      target.lk = 9 + Math.max(0, -step) * (28 - progress * 16);
+      target.rk = 9 + Math.max(0, step) * (28 - progress * 16);
+      target.la = -26 + step * 13; target.ra = 26 - step * 13;
+      target.le = -20; target.re = 20;
+      target.angle = 7 * (1 - progress) - 3 * progress;
+      target.head = -target.angle * 0.5;
+      target.y = 0.8 - Math.abs(step) * 1.1;
+      target.sy = 0.97; target.sx = 1.015;
+      target.mouth = 2; target.brows = -0.4;
+    } else if (this.pose === 'finish') {
+      // Catching the breath still has a planted step, shoulder motion and an individual response.
+      const step = Math.sin(stride * 0.75);
+      target.ll = step * 7; target.rl = -step * 7;
+      target.lk = Math.max(0, -step) * 12; target.rk = Math.max(0, step) * 12;
+      target.y = -Math.abs(step) * 0.7; target.angle = 2 + breath * 2;
+      target.head = -3 + Math.sin(clock / 300) * 2;
+      target.la = p === 1 ? -37 : 13 + breath * 6;
+      target.le = p === 1 ? -59 : -14;
+      target.ra = p === 0 ? -93 + Math.sin(clock / 170) * 11 : p === 2 ? -58 : -20 + breath * 5;
+      target.re = p === 0 ? -28 + Math.sin(clock / 190) * 18 : p === 2 ? 65 : 39;
+      target.mouth = 1.5 + Math.max(0, breath) * 1.1; target.brows = -0.4;
     } else if (this.pose === 'wave') {
       const wave = Math.sin(clock / (185 + p * 22));
       if (p !== 3) { target.ra = -117 - p * 6 + wave * 9; target.re = -24 + wave * 21; }
@@ -210,7 +246,7 @@ export class PixelCitizen {
       if (this.pose === 'encourage') { target.la = -24; target.ra = -84; target.le = -43; target.re = 25; target.mouth = 1.8; }
       if (this.pose === 'disappointed') { target.head = 9; target.brows = 1; target.mouth = 0.65; }
     }
-    const blend = reduced ? 1 : 1 - Math.exp(-delta / (this.pose === 'run' ? 38 : 65));
+    const blend = reduced ? 1 : 1 - Math.exp(-delta / (this.pose === 'run' || this.pose === 'brake' ? 38 : 65));
     (Object.keys(target) as (keyof Motion)[]).forEach(key => { this.motion[key] += (target[key] - this.motion[key]) * blend; });
     const m = this.motion;
     this.figure.setY(m.y).setAngle(m.angle).setScale(m.sx, m.sy); this.head.setAngle(m.head);
