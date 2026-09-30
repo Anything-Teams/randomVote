@@ -12,7 +12,7 @@
   "keywords": [],
   "author": "",
   "license": "MIT",
-  "description": "선거와 경마로 즐기는 픽셀 랜덤 추첨 웹 서비스",
+  "description": "선거, 경마, 장외 난투로 즐기는 픽셀 랜덤 추첨 웹 서비스",
   "dependencies": {
     "phaser": "^3.90.0",
     "react": "^19.3.0",

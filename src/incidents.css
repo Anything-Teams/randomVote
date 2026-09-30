@@ -104,6 +104,7 @@
   .incident-review .incident-rank-changes strong { font-size: 16px; }
 }
 @media (min-width: 600px) and (max-height: 500px) {
+  .story-active .incident-history { display: none; }
   .count-progress { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 2px; padding-top: 0; border: 0; }
   .count-progress small { grid-column: 2; grid-row: 1; margin: 0; text-align: right; font-size: 8px; }
   .count-progress .progress-track { grid-column: 1 / -1; margin: 0; height: 2px; }

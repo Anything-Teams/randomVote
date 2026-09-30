@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import GameStage from './GameStage';
 import BroadcastShow from './BroadcastShow';
 import RacingShow from './RacingShow';
+import ArenaShow from './ArenaShow';
 import { CANDIDATE_COLORS, MAX_CANDIDATES, createDrama, createElection, frameAt, type Candidate, type DramaFrame, type ElectionResult } from './election';
 import { countProgress, phaseFor, SHOW_DURATION } from './show';
 import { readSession, saveSession, type Entry } from './session';
@@ -19,7 +20,7 @@ export default function App() {
   const [saved] = useState(readSession);
   const [entries, setEntries] = useState<Entry[]>(saved.entries);
   const [topic, setTopic] = useState(templates.includes(saved.topic) ? saved.topic : templates[0]);
-  const [mode, setMode] = useState<GameMode>(saved.mode === 'racing' ? 'racing' : 'election');
+  const [mode, setMode] = useState<GameMode>(saved.mode ?? 'election');
   const [order, setOrder] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [status, setStatus] = useState<Status>('setup');
@@ -146,7 +147,7 @@ export default function App() {
     <div className={`site-shell ${status !== 'setup' ? 'show-mode' : ''}`}>
       <header className="site-header">
         <div className="brand"><span className="brand-icon" aria-hidden="true"><span /></span><span>PIXEL<span className="brand-accent">SHOW</span></span></div>
-        <nav className="game-picker" aria-label="추첨 게임 선택">{(['election', 'racing'] as const).map((value, index) => <button type="button" key={value} onClick={() => chooseGame(value)} aria-pressed={mode === value}><small aria-hidden="true">0{index + 1}</small>{games[value].label}</button>)}</nav>
+        <nav className="game-picker" aria-label="추첨 게임 선택">{(['election', 'racing', 'arena'] as const).map((value, index) => <button type="button" key={value} onClick={() => chooseGame(value)} aria-pressed={mode === value}><small aria-hidden="true">0{index + 1}</small>{games[value].label}</button>)}</nav>
         <span className="header-badge">RANDOM DRAW SHOW <span className="badge-star">✦</span> 001</span>
       </header>
 
@@ -197,12 +198,12 @@ export default function App() {
               <div className="preview-stage"><GameStage phase="declaration" candidates={candidates} winnerId="" topic={topic} preview reducedMotion={reducedMotion} /></div>
               <div className="preview-bottom"><div><span className="mini-label">TODAY'S ISSUE</span><strong>{topic}</strong></div><span className="preview-arrow" aria-hidden="true">✦</span></div>
               <p className="preview-caption">몸싸움부터 간식 뇌물까지, 60가지 사건이 판세를 뒤흔듭니다. 누가 끝까지 살아남을까요?</p>
-            </section> : <section className="preview-card sports-preview" aria-label={`${game.label} 미리보기`}><div className="preview-top"><span className="live-pill"><span /> PREVIEW</span><span>PIXEL SPORTS · CH 02</span></div><div className="sports-preview-body"><RacingShow {...sportsProps} /></div></section>}
+            </section> : <section className="preview-card sports-preview" aria-label={`${game.label} 미리보기`}><div className="preview-top"><span className="live-pill"><span /> PREVIEW</span><span>PIXEL SPORTS · CH 0{mode === 'racing' ? 2 : 3}</span></div><div className="sports-preview-body">{mode === 'racing' ? <RacingShow {...sportsProps} /> : <ArenaShow {...sportsProps} />}</div></section>}
           </div>
         ) : (
           mode === 'election' ? result && snapshot && <BroadcastShow result={result} frame={snapshot} drama={drama} phase={phase} topic={topic} elapsed={elapsed} finished={status === 'finished'} runId={runId} reducedMotion={reducedMotion} paused={paused} onPause={togglePause} onSkip={finishNow} onReplay={start} onReset={reset} /> : <section className={`sports-shell ${paused ? 'is-paused' : ''}`} aria-label={`${game.label} 경기`}>
             <div className="sports-toolbar"><span><b>{game.label}</b> {status === 'finished' ? '최종 순위 확정' : paused ? '일시정지' : `결과까지 ${Math.ceil((duration - elapsed) / 1000)}초`}</span>{status !== 'finished' && <button type="button" className="playback-button" onClick={togglePause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div>
-            <div className="sports-body" key={`${mode}-${runId}`}><RacingShow {...sportsProps} /></div>
+            <div className="sports-body" key={`${mode}-${runId}`}>{mode === 'racing' ? <RacingShow {...sportsProps} /> : <ArenaShow {...sportsProps} />}</div>
             <div className="sports-actions">{status === 'finished' ? <><button type="button" className="start-button" onClick={start}>같은 명단으로 다시 뽑기 <span aria-hidden="true">▶</span></button><button type="button" className="secondary-button" onClick={reset}>명단 수정하기</button></> : <button type="button" className="secondary-button" onClick={finishNow}>연출 건너뛰고 순위 보기</button>}</div>
           </section>
         )}

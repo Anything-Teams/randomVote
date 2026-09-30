@@ -52,12 +52,12 @@
   .racing-board { padding: 8px; gap: 5px; }
   .racing-board-heading > span { font-size: 7px; }
   .racing-board-heading h2 { font-size: 13px; margin-top: 3px; }
-  .racing-standings { --racing-rows: var(--racing-compact-count); }
-  .racing-horse-row { width: 50%; transform: translate(calc(var(--racing-column) * 100%), calc(var(--racing-row) * 100%)); padding: 2px 3px; gap: 3px; }
+  .racing-standings { --racing-rows: var(--racing-count); }
+  .racing-horse-row { width: 100%; transform: translateY(calc(var(--racing-rank) * 100%)); padding: 1px 3px; gap: 3px; }
   .racing-rank { width: 12px; font-size: 8px; }
-  .racing-silk { width: 17px; height: 17px; font-size: 8px; border-radius: 4px; }
-  .racing-horse-name { font-size: 9px; }
-  .racing-horse-state { font-size: 7px; }
+  .racing-silk { width: 13px; height: 13px; font-size: 7px; border-radius: 3px; }
+  .racing-horse-name { font-size: 9px; display: block; white-space: nowrap; text-overflow: ellipsis; }
+  .racing-horse-state { display: none; }
   .racing-board-note { font-size: 7px; }
 }
 @media (max-height: 500px) and (max-width: 599px) {

@@ -6,7 +6,7 @@ import './racing.css';
 type RacePhase = 'preview' | 'paddock' | 'countdown' | 'race' | 'straight' | 'photo' | 'winner';
 type Standing = { id: string; distance: number };
 type RaceView = { phase: RacePhase; standings: Standing[]; headline: string; detail: string };
-type RaceCamera = { key: string; ids: string[] };
+type RaceCamera = { key: string; ids: string[]; lanes: Map<string, number> };
 const clamp = (value: number, low = 0, high = 1) => Math.max(low, Math.min(high, value));
 const smooth = (value: number) => { const t = clamp(value); return t * t * (3 - 2 * t); };
 const coats = ['#935c40', '#453c3e', '#b58055', '#d8cfbc', '#715c51', '#bb7750'];
@@ -197,7 +197,16 @@ function render(context: CanvasRenderingContext2D, width: number, height: number
   if (straight) {
     const turf = context.createLinearGradient(0, 0, 0, height); turf.addColorStop(0, '#26454c'); turf.addColorStop(0.31, '#658b78'); turf.addColorStop(0.32, '#c6ac88'); turf.addColorStop(1, '#a38b68');
     context.fillStyle = turf; context.fillRect(0, 0, width, height);
-    const shownCandidates = phase === 'photo' ? order.slice(0, 2).map(id => props.candidates.find(candidate => candidate.id === id)!) : props.candidates;
+    const shownCandidates = (phase === 'photo' ? order.slice(0, 2) : standings.slice(0, 3).map(standing => standing.id)).map(id => props.candidates.find(candidate => candidate.id === id)!);
+    if (phase === 'straight') {
+      const cameraKey = `straight:${props.order.join('|')}`;
+      if (camera.key !== cameraKey) { camera.key = cameraKey; camera.lanes.clear(); }
+      const activeIds = new Set(shownCandidates.map(candidate => candidate.id));
+      camera.lanes.forEach((_, id) => { if (!activeIds.has(id)) camera.lanes.delete(id); });
+      shownCandidates.forEach(candidate => {
+        if (!camera.lanes.has(candidate.id)) camera.lanes.set(candidate.id, [0, 1, 2].find(lane => ![...camera.lanes.values()].includes(lane)) ?? 0);
+      });
+    }
     const count = shownCandidates.length;
     const laneSpace = Math.min(height * 0.66 / Math.max(3, count), 42);
     const baseY = height * 0.27 + (height * 0.66 - laneSpace * count) / 2;
@@ -209,15 +218,18 @@ function render(context: CanvasRenderingContext2D, width: number, height: number
       const index = props.candidates.findIndex(item => item.id === candidate.id);
       const rank = order.indexOf(candidate.id);
       const standing = standings.find(value => value.id === candidate.id)!;
-      const scale = phase === 'photo' ? clamp(Math.min(width / 250, height / 180), 0.45, 2.5) : Math.min(horseScale, laneSpace / 42 + 0.24);
+      const scale = phase === 'photo' ? clamp(Math.min(width / 250, height / 180), 0.45, 2.5) : clamp(Math.min(width / 370, height / 185), 0.42, 1.8);
       const x = phase === 'photo' ? finishX - 47 * scale + (rank === 0 ? 4 : -4) : clamp(width * 0.09 + (standing.distance - 0.79) / 0.22 * width * 0.7, 22, width - 18);
-      const y = phase === 'photo' ? height * (0.53 + lane * 0.34) : baseY + (lane + 0.86) * laneSpace;
+      const y = phase === 'photo' ? height * (0.53 + lane * 0.34) : height * (0.46 + (camera.lanes.get(candidate.id) ?? lane) * 0.22);
       horse(context, candidate, index, x, y, scale, 1, phase === 'photo' ? clock * 0.08 : clock, 1, reduced);
-      if (rank < 2) {
+      {
         box(context, x - 12, y - 70 * scale, 24, 16, 5, '#ffe19a');
         label(context, String(index + 1).padStart(2, '0'), x, y - 70 * scale + 8, 10, '#17303c', true);
       }
-      if (phase === 'photo') label(context, `${rank + 1}위 ${candidate.name}`, width * 0.06, y + 12, clamp(width * 0.68 / (candidate.name.length + 4), 8, 13), '#203945');
+      if (phase === 'photo') {
+        const size = clamp(width * 0.68 / (candidate.name.length + 4), 8, 13);
+        label(context, `${String(index + 1).padStart(2, '0')} ${candidate.name}`, width * 0.06, Math.min(y + 12, height - size / 2 - 5), size, '#203945');
+      }
     });
     if (phase === 'photo') {
       context.strokeStyle = '#f9d282'; context.lineWidth = 3; context.strokeRect(4, 4, width - 8, height - 8);
@@ -305,7 +317,7 @@ export default function RacingShow(props: SportsStageProps) {
     if (!element || !context) return;
     let width = 1, height = 1, ratio = 1, frame = 0, previous = performance.now(), clock = 0, boardAt = -1000, viewKey = '';
     let previousStandings: Standing[] = [], calloutUntil = 0, callout = '';
-    const camera: RaceCamera = { key: '', ids: [] };
+    const camera: RaceCamera = { key: '', ids: [], lanes: new Map() };
     const resize = () => {
       const rect = element.getBoundingClientRect(); width = Math.max(1, rect.width); height = Math.max(1, rect.height); ratio = Math.min(2, window.devicePixelRatio || 1);
       element.width = Math.round(width * ratio); element.height = Math.round(height * ratio);
