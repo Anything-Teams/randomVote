@@ -112,6 +112,7 @@ body { overflow: hidden; }
 .voting-counter { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid #dbe0dc; font-size: 10px; color: #738782; }
 .voting-counter strong { font: 900 23px monospace; color: #17233d; }
 button.moving-row { font: inherit; color: #17233d; text-align: left; border-radius: 0; transition: transform 950ms cubic-bezier(.22,.7,.2,1), background 500ms, box-shadow 500ms; }
+.animated-leaderboard.is-resizing .moving-row { transition: background 500ms, box-shadow 500ms; }
 .moving-row .vote-info { width: 100%; }
 .moving-row .vote-track { display: block; }
 .moving-row.is-cheered { background: #fff0e9; box-shadow: inset 0 0 0 1px #d67379; }

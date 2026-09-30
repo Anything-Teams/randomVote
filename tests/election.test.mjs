@@ -218,6 +218,25 @@ test('race moments report actual counted-vote gaps and exclude withdrawn candida
   assert.ok(final.placesGained > 0);
 });
 
+test('live race news uses the same vote-gap rounding as the UI and canvas', () => {
+  const totalVotes = 5_755_059;
+  const votes = Object.fromEntries(candidates.map(candidate => [candidate.id, candidate.id === '0' ? 575_514 : 575_505]));
+  const result = {
+    candidates, winnerId: '0', totalVotes, votes,
+    percentages: Object.fromEntries(candidates.map(candidate => [candidate.id, votes[candidate.id] / totalVotes * 100])),
+    events: [], eliminatedIds: [],
+  };
+  const leaderShare = 10.880555555555556;
+  const runnerShare = 10.684876543209876;
+  const frame = { progress: 4, percentages: Object.fromEntries(candidates.map(candidate => [candidate.id,
+    candidate.id === '0' ? leaderShare : candidate.id === '1' ? runnerShare : (100 - leaderShare - runnerShare) / 8,
+  ])) };
+  const live = raceMoment(result, frame);
+  assert.equal(live.countedVotes, 230_202);
+  assert.equal(live.gapVotes, 450);
+  assert.equal(raceMoment(result, { progress: 100, percentages: result.percentages }).gapVotes, 9);
+});
+
 test('invalid candidate counts are rejected', () => {
   assert.throws(() => createElection(candidates.slice(0, 1)), RangeError);
   assert.throws(() => createElection([...candidates, candidates[0]]), RangeError);

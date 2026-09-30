@@ -6,7 +6,7 @@
 .cinematic-broadcast { border-color: #4a5c77; box-shadow: 0 18px 55px #0005; }
 .cinematic-broadcast .broadcast-head { height: 43px; background: #101a30; }
 .stage-screen { position: relative; overflow: hidden; isolation: isolate; container-type: inline-size; }
-.cinematic-broadcast canvas { image-rendering: auto; }
+.cinematic-broadcast canvas { image-rendering: pixelated; }
 .cinema-hud { position: absolute; top: 2.5%; left: 3%; right: 3%; display: flex; justify-content: space-between; gap: 12px; pointer-events: none; color: #eef3e5; font-size: clamp(10px, 1.65cqw, 16px); font-weight: 900; letter-spacing: 1px; text-shadow: 0 2px 5px #000; z-index: 4; }
 .cinema-hud span { background: #111d35be; padding: 5px 10px; border-left: 3px solid #fbd975; }
 .news-lower-third { position: absolute; z-index: 5; bottom: 3%; left: 3%; right: 3%; min-height: 9%; display: grid; grid-template-columns: auto minmax(0, 1fr); background: #112039ed; box-shadow: 0 8px 20px #0004; color: white; border-bottom: 3px solid #fbd975; animation: lower-third-in 650ms cubic-bezier(.18,.85,.32,1) both; }

@@ -51,6 +51,8 @@ export class PixelCitizen {
       const upper = scene.add.container(px, -14);
       const lower = scene.add.container(0, 7);
       rect(upper, -2, 0, 5, 8, 0x3b4c6e);
+      // Overlap the knee pivot so bending cannot expose a gap between the two segments.
+      rect(lower, -2, -2, 5, 4, 0x334160);
       rect(lower, -2, 0, 5, 6, 0x334160);
       rect(lower, -3, 5, 8, 3, 0x162039);
       rect(lower, -2, 5, 6, 1, 0x667188);
@@ -63,7 +65,9 @@ export class PixelCitizen {
     const makeArm = (px: number): Limb => {
       const upper = scene.add.container(px, -28);
       const lower = scene.add.container(0, 7);
+      rect(upper, -3, -2, 6, 5, color);
       rect(upper, -2, 0, 5, 8, color);
+      rect(lower, -2, -2, 5, 4, color);
       rect(lower, -2, 0, 5, 5, color);
       rect(lower, -2, 4, 5, 5, skin);
       rect(lower, -2, 5, 1, 3, Phaser.Display.Color.IntegerToColor(skin).darken(12).color);
@@ -73,6 +77,9 @@ export class PixelCitizen {
     };
     this.leftArm = makeArm(-9);
     this.rightArm = makeArm(9);
+    // The chin ends at -31 and the shirt begins at -30; the neck bridges both during head turns.
+    rect(this.figure, -3, -35, 6, 7, skin);
+    rect(this.figure, 2, -34, 1, 6, Phaser.Display.Color.IntegerToColor(skin).darken(12).color);
     rect(this.figure, -8, -30, 16, 18, color);
     rect(this.figure, -6, -29, 12, 2, Phaser.Display.Color.IntegerToColor(color).lighten(15).color);
     rect(this.figure, 5, -27, 3, 14, Phaser.Display.Color.IntegerToColor(color).darken(10).color);
@@ -89,13 +96,19 @@ export class PixelCitizen {
     rect(this.head, 6, -7, 2, 5, hair);
     if (index % 2 === 0) rect(this.head, -4, -8, 8, 2, hair);
     if (index % 5 === 2) rect(this.head, -6, -13, 5, 2, hair);
-    this.eyes = [rect(this.head, -4, -1, 2, 2, 0x182137), rect(this.head, 3, -1, 2, 2, 0x182137)];
-    this.brows = [rect(this.head, -5, -4, 4, 1, hair), rect(this.head, 2, -4, 4, 1, hair)];
-    this.mouth = rect(this.head, -1, 4, 3, 1, 0x9d594e);
+    // Preserve the resting pixel bounds while scaling and rotating around each feature's center.
+    this.eyes = [rect(this.head, -3, 0, 2, 2, 0x182137).setOrigin(0.5), rect(this.head, 4, 0, 2, 2, 0x182137).setOrigin(0.5)];
+    this.brows = [rect(this.head, -3, -3.5, 4, 1, hair).setOrigin(0.5), rect(this.head, 4, -3.5, 4, 1, hair).setOrigin(0.5)];
+    this.mouth = rect(this.head, 0.5, 4.5, 3, 1, 0x9d594e).setOrigin(0.5);
     if (index % 3 === 1) {
       rect(this.head, -6, -3, 6, 1, 0x26334c);
       rect(this.head, 1, -3, 6, 1, 0x26334c);
+      rect(this.head, -6, 2, 6, 1, 0x26334c);
+      rect(this.head, 1, 2, 6, 1, 0x26334c);
+      [-6, -1, 1, 6].forEach(x => rect(this.head, x, -2, 1, 4, 0x26334c));
       rect(this.head, -1, -1, 3, 1, 0x26334c);
+      rect(this.head, -8, -2, 2, 1, 0x26334c);
+      rect(this.head, 7, -2, 2, 1, 0x26334c);
     }
   }
 
@@ -178,7 +191,7 @@ export class PixelCitizen {
     this.leftLeg.upper.setAngle(m.ll); this.rightLeg.upper.setAngle(m.rl);
     this.leftLeg.lower.setAngle(m.lk); this.rightLeg.lower.setAngle(m.rk);
     this.mouth.setScale(1, m.mouth);
-    this.brows.forEach((brow, index) => { brow.y = -4 + m.brows; brow.angle = this.pose === 'nervous' ? (index ? -8 : 8) : 0; });
+    this.brows.forEach((brow, index) => { brow.y = -3.5 + m.brows; brow.angle = this.pose === 'nervous' ? (index ? -8 : 8) : 0; });
     const blinkAt = clock % (3100 + p * 470); const blink = reduced || blinkAt < 2950 + p * 470 ? 1 : 0.12;
     this.eyes.forEach(eye => { eye.scaleY += (blink - eye.scaleY) * Math.min(1, delta / 24); });
     this.shadow.setScale(1 + m.y * 0.025, 1).setAlpha(0.26 + m.y * 0.009);

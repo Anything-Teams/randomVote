@@ -4,17 +4,15 @@ import { ElectionScene, STAGE_WIDTH, STAGE_HEIGHT, type StageState } from '../sr
 import { CANDIDATE_COLORS, createDrama, frameAt, type ElectionEvent, type ElectionResult } from '../src/election';
 import { STORY_CATALOG, type StoryKind } from '../src/storyCatalog';
 
-const candidates = CANDIDATE_COLORS.map((color, index) => ({ id: String(index + 1), name: `후보 ${index + 1}`, color }));
+// Exercise the full 16-character input limit in the winner and both story labels.
+const longNames: Record<number, string> = { 0: '가나다라마바사아자차카타파하다라', 2: '가나다라마바사아자차카타파하가나', 6: 'WWWWWWWWWWWWWWWW' };
+const candidates = CANDIDATE_COLORS.map((color, index) => ({ id: String(index + 1), name: longNames[index] ?? `후보 ${index + 1}`, color }));
 const host = document.querySelector<HTMLDivElement>('#stage')!;
 let game: Phaser.Game | undefined;
-let timer: number | undefined;
-let freezeTimer: number | undefined;
 let selectedKind: StoryKind | 'winner' = 'brawl';
 
-function preview(kind: StoryKind | 'winner') {
+function preview(kind: StoryKind | 'winner', freeze = false) {
   selectedKind = kind;
-  if (timer) window.clearInterval(timer);
-  if (freezeTimer) window.clearTimeout(freezeTimer);
   document.querySelector('#status')!.textContent = '재생 중';
   game?.destroy(true);
   const template = STORY_CATALOG.find(story => story.kind === kind);
@@ -26,24 +24,29 @@ function preview(kind: StoryKind | 'winner') {
   const drama = createDrama(result);
   const initial = frameAt(drama, 32);
   const state: StageState = { phase: kind === 'winner' ? 'winner' : 'counting', candidates, winnerId: '1', topic: '오늘 커피 쏠 사람은?', percentages: initial.percentages, finalPercentages: percentages, progress: 32, totalVotes: result.totalVotes, preview: false, reducedMotion: false, elapsed: 14_000, cheeringId: '3', events: result.events };
-  const began = performance.now();
-  game = new Phaser.Game({ type: Phaser.CANVAS, parent: host, width: STAGE_WIDTH, height: STAGE_HEIGHT, pixelArt: true, antialias: false, banner: false, scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }, scene: [new ElectionScene(() => state)] });
-  timer = window.setInterval(() => {
-    const age = performance.now() - began;
-    state.progress = kind === 'winner' ? 100 : Math.min(45, 32 + age / 250);
-    state.elapsed = kind === 'winner' ? 26_000 + age : 14_000 + age;
-    state.percentages = kind === 'winner' ? percentages : frameAt(drama, state.progress).percentages;
-  }, 50);
+  class PreviewScene extends ElectionScene {
+    override create() {
+      super.create();
+      let began: number | undefined;
+      // Use the animation clock so a background tab cannot freeze an unfinished entrance.
+      this.events.on(Phaser.Scenes.Events.UPDATE, (time: number) => {
+        began ??= time;
+        const age = time - began;
+        state.progress = kind === 'winner' ? 100 : Math.min(45, 32 + age / 250);
+        state.elapsed = kind === 'winner' ? 26_000 + age : 14_000 + age;
+        state.percentages = kind === 'winner' ? percentages : frameAt(drama, state.progress).percentages;
+      });
+      if (freeze) this.time.delayedCall(kind === 'winner' ? 3100 : 1250, () => {
+        this.scene.pause();
+        document.querySelector('#status')!.textContent = '중간 장면 정지됨';
+      });
+    }
+  }
+  const scene = new PreviewScene(() => state);
+  game = new Phaser.Game({ type: Phaser.CANVAS, parent: host, width: STAGE_WIDTH, height: STAGE_HEIGHT, pixelArt: true, antialias: false, banner: false, scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }, scene: [scene] });
   document.querySelectorAll<HTMLButtonElement>('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.kind === kind)));
 }
 document.querySelectorAll<HTMLButtonElement>('button[data-kind]').forEach(button => button.addEventListener('click', () => preview(button.dataset.kind as StoryKind | 'winner')));
-document.querySelector('#freeze')!.addEventListener('click', () => {
-  preview(selectedKind);
-  freezeTimer = window.setTimeout(() => {
-    if (timer) window.clearInterval(timer);
-    game?.scene.pause('election-show');
-    document.querySelector('#status')!.textContent = '중간 장면 정지됨';
-  }, selectedKind === 'winner' ? 3100 : 1250);
-});
+document.querySelector('#freeze')!.addEventListener('click', () => preview(selectedKind, true));
 new ResizeObserver(() => game?.scale.refresh()).observe(host);
 preview('brawl');

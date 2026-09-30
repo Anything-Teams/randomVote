@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import GameStage from './GameStage';
 import type { DramaFrame, ElectionResult } from './election';
 import { countBeat, COUNT_START, elapsedAtProgress, newsBeat, SHOW_DURATION, winnerPromise, type ShowPhase } from './show';
@@ -21,6 +21,7 @@ const phases: ShowPhase[] = ['declaration', 'voting', 'counting', 'winner'];
 
 export default function BroadcastShow({ result, frame, phase, topic, elapsed, finished, runId, reducedMotion, onSkip, onReplay, onReset }: Props) {
   const [cheeringId, setCheeringId] = useState<string>();
+  const board = useRef<HTMLDivElement>(null);
   const hasTally = phase === 'winner' || frame.progress > 0.5;
   const eliminated = new Set(result.events.filter(event => event.eliminatedId && frame.progress >= event.progress).map(event => event.eliminatedId!));
   const sorted = [...result.candidates].filter(candidate => !eliminated.has(candidate.id)).sort((a, b) => frame.percentages[b.id] - frame.percentages[a.id]);
@@ -37,6 +38,23 @@ export default function BroadcastShow({ result, frame, phase, topic, elapsed, fi
   const beat = event ? { id: event.id, tag: event.eliminatedId ? '후보 탈락' : '돌발 사건', title: event.title, detail: event.detail, urgent: true } : normalBeat;
   const boxBeat = countBeat(elapsed);
   const counting = phase === 'counting' || phase === 'winner';
+  useEffect(() => {
+    const element = board.current;
+    if (!element) return;
+    let reset: number | undefined;
+    const resize = new ResizeObserver(() => {
+      // A viewport change moves every lane at once; avoid animating through other rows.
+      element.classList.add('is-resizing');
+      window.clearTimeout(reset);
+      reset = window.setTimeout(() => element.classList.remove('is-resizing'), 180);
+    });
+    resize.observe(element);
+    return () => {
+      resize.disconnect();
+      window.clearTimeout(reset);
+      element.classList.remove('is-resizing');
+    };
+  }, [counting]);
   const winner = result.candidates.find(candidate => candidate.id === result.winnerId)!;
   const finalGap = result.votes[winner.id] - Math.max(...result.candidates.filter(candidate => candidate.id !== winner.id).map(candidate => result.votes[candidate.id]));
   const cheering = result.candidates.find(candidate => candidate.id === cheeringId);
@@ -72,7 +90,7 @@ export default function BroadcastShow({ result, frame, phase, topic, elapsed, fi
       {counting ? <>
         <div className="count-progress"><div><span>개표율</span><strong>{frame.progress.toFixed(1)}%</strong></div><div className="progress-track"><span style={{ width: `${frame.progress}%` }} /></div><small>집계 {format.format(countedVotes)}표</small></div>
         {phase === 'counting' && <div className={`margin-card race-margin ${closeRace ? 'close-race' : ''}`}><span>{event ? event.actors.map(id => result.candidates.find(candidate => candidate.id === id)?.name).filter(Boolean).join(' · ') : cheering ? `♥ ${cheering.name} · ${eliminated.has(cheering.id) ? '사건으로 탈락' : hasTally ? `현재 ${cheeringRank}위` : '응원 중'}` : hasTally ? `${leader.name} ↔ ${runner.name}` : '첫 표가 들어오고 있습니다'}</span><strong>{event ? event.eliminatedId ? '탈락!' : '사건 발생' : hasTally ? format.format(gapVotes) : '—'}<small>{!event && hasTally ? '표 차이' : ''}</small></strong></div>}
-        <div className="animated-leaderboard live-count-board" aria-label="후보별 실시간 득표율">
+        <div ref={board} className="animated-leaderboard live-count-board" aria-label="후보별 실시간 득표율">
           {result.candidates.map((candidate, index) => {
             const rank = sorted.findIndex(item => item.id === candidate.id);
             const dropped = eliminated.has(candidate.id);

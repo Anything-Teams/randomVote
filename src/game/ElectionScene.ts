@@ -31,6 +31,7 @@ type NewspaperCard = { candidate: Candidate; card: Phaser.GameObjects.Container;
 const ink = 0x14223b;
 const gold = 0xfbd975;
 const paper = 0xf5eedc;
+const COUNT_BAR_WIDTH = 520;
 const colorOf = (candidate: Candidate) => Phaser.Display.Color.HexStringToColor(candidate.color).color;
 const format = new Intl.NumberFormat('ko-KR');
 
@@ -39,6 +40,7 @@ export class ElectionScene extends Phaser.Scene {
   private currentPhase: ShowPhase | null = null;
   private root!: Phaser.GameObjects.Container;
   private phaseStart = 0;
+  private clockReady = false;
   private citizens: PixelCitizen[] = [];
   private voters: Voter[] = [];
   private race: RaceSlot[] = [];
@@ -92,7 +94,10 @@ export class ElectionScene extends Phaser.Scene {
     this.readState = readState;
   }
 
-  create() { this.switchPhase(this.readState().phase, true); }
+  create() {
+    this.clockReady = false;
+    this.switchPhase(this.readState().phase, true);
+  }
 
   private rect(parent: Phaser.GameObjects.Container, x: number, y: number, w: number, h: number, color: number, alpha = 1) {
     const rectangle = this.add.rectangle(x, y, w, h, color, alpha).setOrigin(0, 0);
@@ -104,6 +109,13 @@ export class ElectionScene extends Phaser.Scene {
     const label = this.add.text(x, y, value, { fontFamily: '"Malgun Gothic", "Apple SD Gothic Neo", sans-serif', fontSize: `${size}px`, fontStyle: 'bold', color });
     if (center) label.setOrigin(0.5, 0);
     parent.add(label);
+    return label;
+  }
+
+  private fitLabel(label: Phaser.GameObjects.Text, width: number, maximum: number, minimum = 10) {
+    label.setWordWrapWidth(0).setFontSize(maximum);
+    let size = maximum;
+    while (label.width > width && size > minimum) label.setFontSize(--size);
     return label;
   }
 
@@ -236,7 +248,8 @@ export class ElectionScene extends Phaser.Scene {
       }
       slot.nameBand.setFillStyle(colorOf(candidate));
       slot.number.setPosition(-width / 2 + 16, 8).setText(`기호 ${index + 1}`);
-      slot.name.setY(height - 29).setText(candidate.name).setFontSize(candidate.name.length > 9 ? 14 : 19).setWordWrapWidth(width - 12);
+      slot.name.setY(height - 29).setText(candidate.name);
+      this.fitLabel(slot.name, width - 14, candidate.name.length > 9 ? 14 : 19);
       if (isNew && !state.preview && !state.reducedMotion) {
         slot.card.setAlpha(0).setScale(0.82).setY(y + 32);
         this.tweens.add({ targets: slot.card, y, scaleX: 1, scaleY: 1, alpha: 1, delay: 480 + index * 280, duration: 640, ease: 'Back.out' });
@@ -283,7 +296,7 @@ export class ElectionScene extends Phaser.Scene {
     this.text(news, '픽 셀 일 보', 0, -255, 55, '#162838', true);
     this.text(news, '특별판 / 제 001호', 524, -247, 15, '#5d625b').setOrigin(1, 0);
     this.text(news, '호외', -505, -151, 26, '#d64e3c');
-    this.paperHeadline = this.text(news, state.topic || '오늘의 당선자를 뽑습니다', 10, -151, state.topic.length > 30 ? 23 : 37, '#17293b', true).setWordWrapWidth(870);
+    this.paperHeadline = this.text(news, state.topic || '오늘의 당선자를 뽑습니다', 10, -151, state.topic.length > 30 ? 23 : 37, '#17293b', true).setWordWrapWidth(870, true);
     const invitation = this.add.container(0, 44);
     news.add(invitation);
     this.newspaperInvitation = invitation;
@@ -389,9 +402,9 @@ export class ElectionScene extends Phaser.Scene {
     for (let i = 0; i < 10; i++) floor.lineBetween(640, 551, i * 142, 720);
     [570, 600, 650, 710].forEach(y => floor.lineBetween(0, y, 1280, y));
     this.root.add(floor);
-    this.countingTitle = this.text(this.root, '전국 실시간 개표', 50, 76, 20, '#b4cfd6');
-    this.countingHeadline = this.text(this.root, '단 한 표도 놓치지 마세요', 616, 48, 31, '#fff1c7', true).setWordWrapWidth(790).setDepth(20);
-    this.countingLocation = this.text(this.root, '첫 지역의 표가 도착합니다', 951, 83, 16, '#9ebcc6').setOrigin(1, 0);
+    this.countingTitle = this.text(this.root, '전국 실시간 개표', 50, 88, 18, '#b4cfd6');
+    this.countingHeadline = this.text(this.root, '단 한 표도 놓치지 마세요', 616, 43, 31, '#fff1c7', true).setWordWrapWidth(790).setDepth(20);
+    this.countingLocation = this.text(this.root, '첫 지역의 표가 도착합니다', 951, 88, 16, '#9ebcc6').setOrigin(1, 0);
     this.countingCue = this.text(this.root, '모든 후보가 같은 결승선을 향합니다', 640, 574, 18, '#bdd4d7', true);
     this.rect(this.root, 976, 118, 261, 441, 0x142d3e).setStrokeStyle(2, 0x3c6975);
     this.text(this.root, '선두 격차', 1106, 132, 15, '#9fc4cb', true);
@@ -399,9 +412,9 @@ export class ElectionScene extends Phaser.Scene {
     this.countdownLabel = this.text(this.root, '끝까지 따라붙습니다', 1106, 210, 14, '#b7d0d4', true);
     const grid = this.add.graphics().setDepth(0);
     grid.lineStyle(1, 0x6ea8b4, 0.17);
-    for (let i = 0; i < 5; i++) grid.lineBetween(294 + i * 139, 128, 294 + i * 139, 558);
+    for (let i = 0; i < 5; i++) grid.lineBetween(294 + i * COUNT_BAR_WIDTH / 4, 128, 294 + i * COUNT_BAR_WIDTH / 4, 558);
     this.root.add(grid);
-    [0, 1, 2].forEach(index => this.countingAxis.push(this.text(this.root, '', 294 + index * 278, 109, 12, '#8faeba', index > 0)));
+    [0, 1, 2].forEach(index => this.countingAxis.push(this.text(this.root, '', 294 + index * COUNT_BAR_WIDTH / 2, 112, 12, '#8faeba', index > 0)));
     state.candidates.forEach((candidate, index) => {
       const { x, y, width, height } = this.racePosition(index, state.candidates.length);
       const panel = this.add.container(x, y).setDepth(2);
@@ -409,19 +422,20 @@ export class ElectionScene extends Phaser.Scene {
       const frame = this.rect(panel, 0, 0, width, height - 3, 0x1b3047, 0.85).setStrokeStyle(1, 0x30495e, 0.7);
       const glow = this.rect(panel, 0, 0, width, height - 3, colorOf(candidate), 0.035);
       this.rect(panel, 0, 0, 4, height - 3, colorOf(candidate));
-      const position = this.text(panel, String(index + 1), 24, height / 2 - 11, 19, '#8dadc1', true);
-      const support = this.text(panel, '♥', 53, height / 2 - 10, 16, '#ff9b9b').setVisible(candidate.id === state.cheeringId);
-      this.text(panel, candidate.name, 70, height / 2 - 12, candidate.name.length > 12 ? 11 : candidate.name.length > 9 ? 13 : 17, '#f9f0dc').setWordWrapWidth(174);
-      const badge = this.text(panel, '', 70, height / 2 + 10, 11, '#9cbdc8');
-      const barHeight = Math.min(24, height * 0.38);
-      this.rect(panel, 252, height / 2 - barHeight / 2 + 3, 556, barHeight, 0x091b2d, 0.6);
-      const bar = this.rect(panel, 252, height / 2 - barHeight / 2, 1, barHeight, colorOf(candidate));
+      const middle = Math.round(height / 2);
+      const position = this.text(panel, String(index + 1), 24, middle - 11, 19, '#8dadc1', true);
+      const support = this.text(panel, '♥', 53, middle - 10, 16, '#ff9b9b').setVisible(candidate.id === state.cheeringId);
+      this.fitLabel(this.text(panel, candidate.name, 70, middle - 12, 17, '#f9f0dc'), 174, candidate.name.length > 9 ? 13 : 17);
+      const badge = this.text(panel, '', 70, middle + 10, 11, '#9cbdc8');
+      const barHeight = Math.min(24, Math.round(height * 0.38 / 2) * 2);
+      this.rect(panel, 252, middle - barHeight / 2 + 3, COUNT_BAR_WIDTH, barHeight, 0x091b2d, 0.6);
+      const bar = this.rect(panel, 252, middle - barHeight / 2, 1, barHeight, colorOf(candidate));
       bar.setStrokeStyle(1, 0xffffff, 0.15);
-      const cap = this.rect(panel, 252, height / 2 - barHeight / 2, 4, barHeight, 0xf6efd6, 0.65);
+      const cap = this.rect(panel, 252, middle - barHeight / 2, 4, barHeight, 0xf6efd6, 0.65);
       const scale = Math.min(1.85, height / 57);
       const citizen = this.citizen(panel, candidate, index, 252, height - 5, scale);
       citizen.pose = 'idle';
-      const percentage = this.text(panel, '0.00%', width - 13, height / 2 - 11, height > 70 ? 23 : 18, candidate.color).setOrigin(1, 0);
+      const percentage = this.text(panel, '0.00%', width - 13, middle - 11, height > 70 ? 23 : 18, candidate.color).setOrigin(1, 0);
       if (!state.reducedMotion) {
         panel.setAlpha(0);
         this.tweens.add({ targets: panel, alpha: 1, duration: 380, delay: index * 27, ease: 'Cubic.out' });
@@ -433,8 +447,8 @@ export class ElectionScene extends Phaser.Scene {
   }
 
   private racePosition(index: number, count: number) {
-    const height = Math.min(110, 430 / count);
-    const top = 128 + (430 - count * height) / 2;
+    const height = Math.min(110, Math.floor(430 / count));
+    const top = 128 + Math.round((430 - count * height) / 2);
     return { x: 42, y: top + index * height, width: 910, height };
   }
 
@@ -461,11 +475,11 @@ export class ElectionScene extends Phaser.Scene {
       leaders.forEach((candidate, index) => {
         const row = index * 145;
         this.text(portrait, index ? '맹추격' : '현재 선두', 0, row - 13, 12, index ? '#9ed8d2' : '#fbd975', true);
-        this.text(portrait, candidate.name, 0, row + 5, candidate.name.length > 12 ? 12 : 15, '#f7f0dc', true).setWordWrapWidth(224);
-        const citizen = this.citizen(portrait, candidate, state.candidates.findIndex(item => item.id === candidate.id), index ? 19 : -16, row + 107, 1.6);
+        this.fitLabel(this.text(portrait, candidate.name, 0, row + 5, 15, '#f7f0dc', true), 224, 15);
+        const citizen = this.citizen(portrait, candidate, state.candidates.findIndex(item => item.id === candidate.id), 0, row + 100, 1.4);
         citizen.pose = index ? 'run' : 'nervous';
         this.countingProfileCitizens.push(citizen);
-        this.countingProfilePercentages.push(this.text(portrait, '', index ? -25 : 35, row + 81, 19, candidate.color, true));
+        this.countingProfilePercentages.push(this.text(portrait, '', 0, row + 108, 19, candidate.color, true));
       });
       this.root.sort('depth');
     }
@@ -483,10 +497,10 @@ export class ElectionScene extends Phaser.Scene {
     if (this.storyActive || time - this.countingCalloutAt < 2500) return;
     this.countingCalloutAt = time;
     this.countingCalloutUntil = time + 1500;
-    this.countingHeadline?.setText(`${leader.name} 후보, 새 선두!`).setFontSize(leader.name.length > 10 ? 25 : 34).setColor('#fbd975').setAlpha(1);
+    this.countingHeadline?.setText(`${leader.name} 후보, 새 선두!`).setFontSize(leader.name.length > 10 ? 25 : 32).setColor('#fbd975').setAlpha(1);
     if (!state.reducedMotion && this.countingHeadline) {
-      this.countingHeadline.setY(55);
-      this.tweens.add({ targets: this.countingHeadline, y: 48, duration: 380, ease: 'Cubic.out' });
+      this.countingHeadline.setY(46);
+      this.tweens.add({ targets: this.countingHeadline, y: 43, duration: 380, ease: 'Cubic.out' });
       const slot = this.race.find(item => item.candidate.id === leader.id);
       if (slot) this.burst(slot.panel.x + slot.citizen.root.x, slot.panel.y + slot.height / 2, colorOf(leader), 8, 100);
     }
@@ -629,12 +643,14 @@ export class ElectionScene extends Phaser.Scene {
       const citizen = this.citizen(layer, candidate, state.candidates.findIndex(item => item.id === candidate.id), x, 446, scale);
       citizen.pose = 'nervous';
       if (index) citizen.root.setScale(-scale, scale);
-      const name = this.text(layer, candidate.name, x, 465, candidate.name.length > 12 ? 13 : 17, '#f8efda', true).setWordWrapWidth(multiple ? 228 : 330);
+      const name = this.fitLabel(this.text(layer, candidate.name, x, 465, 17, '#f8efda', true), multiple ? 228 : 330, 17, 11);
       return { candidate, citizen, name, side, scale };
     });
     const props = Array.from({ length: event.kind === 'scandal' ? 8 : event.kind === 'comeback' ? 6 : 2 }, (_, index) =>
       this.storyProp(layer, event.prop, 640 + (index % 2 ? 1 : -1) * 36, 370, [gold, 0x6dd0c2, 0xec8068][index % 3]).setVisible(false));
-    const stamp = this.text(layer, event.kind === 'scandal' ? '후보 탈락' : event.kind === 'alliance' ? '손을 맞잡다!' : event.kind === 'blackout' ? '비상 개표!' : event.kind === 'comeback' ? '맹추격!' : event.kind === 'mishap' ? '앗…!' : '쿵!', 640, 310, event.kind === 'scandal' ? 58 : 45, event.kind === 'scandal' ? '#ef705d' : '#fbd975', true).setStroke('#1a3043', 5).setAlpha(0);
+    const stampY = event.kind === 'scandal' || event.kind === 'brawl' ? 310 : event.kind === 'alliance' || event.kind === 'blackout' ? 204 : event.kind === 'mishap' ? 226 : 218;
+    const stampSize = event.kind === 'scandal' ? 58 : event.kind === 'brawl' ? 45 : event.kind === 'alliance' || event.kind === 'blackout' ? 28 : 34;
+    const stamp = this.text(layer, event.kind === 'scandal' ? '후보 탈락' : event.kind === 'alliance' ? '손을 맞잡다!' : event.kind === 'blackout' ? '비상 개표!' : event.kind === 'comeback' ? '맹추격!' : event.kind === 'mishap' ? '앗…!' : '쿵!', 640, stampY, stampSize, event.kind === 'scandal' ? '#ef705d' : '#fbd975', true).setStroke('#1a3043', 5).setAlpha(0);
     this.storyActive = { event, startedAt: time, duration: 2300, layer, actors, props, stamp, lamp, darkness, beam, impactFired: false };
     this.countingCalloutUntil = 0;
     this.countingHeadline?.setAlpha(0);
@@ -677,7 +693,7 @@ export class ElectionScene extends Phaser.Scene {
     } else if (cut.event.kind === 'scandal') {
       cut.props.forEach((prop, index) => {
         const p = Phaser.Math.Clamp((local - 260 - index * 76) / 760, 0, 1);
-        prop.setVisible(local > 260 + index * 76).setPosition(675 + (index % 2 ? 1 : -1) * p * (62 + index * 9), 364 - Math.sin(p * Math.PI) * 54 + p * 101).setAngle((index % 2 ? 1 : -1) * p * 63);
+        prop.setVisible(local > 260 + index * 76).setPosition(675 + (index % 2 ? 1 : -1) * p * (62 + index * 9), 364 - Math.sin(p * Math.PI) * 54 + p * 61).setAngle((index % 2 ? 1 : -1) * p * 63).setScale(0.8);
       });
       if (body) {
         const exit = Phaser.Math.Clamp((local - 1320) / 780, 0, 1);
@@ -691,12 +707,12 @@ export class ElectionScene extends Phaser.Scene {
       if (body) {
         const slip = motion(0, 1, 300, 900);
         const stand = motion(0, 1, 1310, 1940);
-        body.citizen.root.setPosition(540 + slip * 154, 446 + slip * 19 - stand * 19).setAngle(slip * (1 - stand) * 62);
+        body.citizen.root.setPosition(540 + slip * 154, 446 - slip * 36 + stand * 36).setAngle(slip * (1 - stand) * 62);
         body.citizen.pose = local < 300 ? 'walk' : local < 1460 ? 'surprised' : 'bow';
         body.name.setX(body.citizen.root.x);
       }
       cut.props.forEach((prop, index) => prop.setVisible(local > 230).setPosition(index ? motion(576, 784, 550, 1220) : 612, index ? 375 - Math.sin(Phaser.Math.Clamp((local - 550) / 800, 0, 1) * Math.PI) * 93 + motion(0, 67, 550, 1300) : 451).setAngle(index ? motion(0, 163, 550, 1350) : -8));
-      cut.stamp.setAlpha(local > 700 && local < 1420 ? 1 : 0).setAngle(-10);
+      cut.stamp.setAlpha(local > 700 && local < 1420 ? 1 : 0).setAngle(-10).setY(226).setFontSize(34);
     } else if (cut.event.kind === 'alliance') {
       cut.actors.forEach(actor => {
         const distance = motion(166, 47, 220, 840);
@@ -706,12 +722,12 @@ export class ElectionScene extends Phaser.Scene {
         actor.name.setX(640 + actor.side * 151);
       });
       cut.props.forEach((prop, index) => prop.setVisible(local > 930).setPosition(640 + (index ? 1 : -1) * 37, 380 - Math.sin((local - 930) / 440) * 4).setScale(0.6));
-      cut.stamp.setAlpha(Phaser.Math.Clamp((local - 1030) / 300, 0, 1)).setFontSize(34).setY(252);
+      cut.stamp.setAlpha(Phaser.Math.Clamp((local - 1030) / 300, 0, 1)).setFontSize(28).setY(204);
     } else if (cut.event.kind === 'blackout') {
       cut.darkness.setFillStyle(0x020713).setAlpha(local < 310 ? 1 - local / 310 * 0.65 : local < 1620 ? 0.96 : 0.96 - (local - 1620) / 600 * 0.25);
       cut.beam.setAlpha(local < 450 ? 0 : local < 1670 ? 0.28 + Math.sin(local / 135) * 0.12 : 1);
       cut.lamp.setVisible(local > 310).setAlpha(0.55 + Math.sin(local / 120) * 0.35);
-      cut.stamp.setAlpha(local > 550 ? 1 : 0).setFontSize(36).setY(265);
+      cut.stamp.setAlpha(local > 550 ? 1 : 0).setFontSize(28).setY(204);
       if (body) { body.citizen.pose = 'surprised'; body.citizen.root.setAngle(Math.sin(local / 250) * 4); }
       cut.props.forEach((prop, index) => prop.setVisible(local > 630).setPosition(605 + index * 78, 390).setAngle(-19 + index * 20));
     } else if (cut.event.kind === 'comeback') {
@@ -720,8 +736,8 @@ export class ElectionScene extends Phaser.Scene {
         body.citizen.pose = local < 1540 ? 'run' : 'cheer';
         body.name.setX(body.citizen.root.x);
       }
-      cut.props.forEach((prop, index) => prop.setVisible(local > 300 + index * 100).setPosition(396 + index * 86, 454 + Math.sin(local / 240 + index) * 11).setAngle(Math.sin(local / 190 + index) * 10).setScale(0.8));
-      cut.stamp.setAlpha(Phaser.Math.Clamp((local - 700) / 350, 0, 1)).setY(275).setFontSize(43);
+      cut.props.forEach((prop, index) => prop.setVisible(local > 300 + index * 100).setPosition(396 + index * 86, 419 + Math.sin(local / 240 + index) * 11).setAngle(Math.sin(local / 190 + index) * 10).setScale(0.8));
+      cut.stamp.setAlpha(Phaser.Math.Clamp((local - 700) / 350, 0, 1)).setY(218).setFontSize(34);
     }
     const impactAt = cut.event.kind === 'scandal' ? 1260 : cut.event.kind === 'brawl' ? 845 : 920;
     if (!cut.impactFired && local > impactAt) {
@@ -783,11 +799,11 @@ export class ElectionScene extends Phaser.Scene {
       slot.previous = raw;
       slot.previousRank = rank;
       slot.displayed = Phaser.Math.Linear(slot.displayed, raw, state.reducedMotion ? 1 : 1 - Math.exp(-delta / (finalSlow ? 170 : 110)));
-      const width = eliminated ? (slot.eliminationWidth ?? 0) * Phaser.Math.Clamp(slot.displayed / (slot.eliminationShare ?? 1), 0, 1) : 556 * Phaser.Math.Clamp((slot.displayed - minimum) / (maximum - minimum), 0.012, 1);
-      const barHeight = Math.min(24, slot.height * 0.38);
+      const width = Math.round(eliminated ? (slot.eliminationWidth ?? 0) * Phaser.Math.Clamp(slot.displayed / (slot.eliminationShare ?? 1), 0, 1) : COUNT_BAR_WIDTH * Phaser.Math.Clamp((slot.displayed - minimum) / (maximum - minimum), 0.012, 1));
+      const barHeight = Math.min(24, Math.round(slot.height * 0.38 / 2) * 2);
       slot.bar.setDisplaySize(Math.max(1, width), barHeight).setAlpha(eliminated ? 0.25 : 1);
       slot.cap.setX(252 + width - 4).setAlpha(eliminated ? 0 : 0.68);
-      slot.citizen.root.setX(252 + width + 3).setAlpha(eliminated ? 0.23 : 1);
+      slot.citizen.root.setX(252 + Math.max(width, 32) + 3).setAlpha(eliminated ? 0.23 : 1);
       slot.percentage.setText(`${raw.toFixed(2)}%`).setAlpha(eliminated ? 0.36 : 1);
       slot.position.setText(eliminated ? '×' : String(rank + 1)).setColor(rank === 0 ? '#fbd975' : '#a6c5cc');
       slot.badge.setText(eliminated ? '후보 탈락' : slot.height > 62 ? rank === 0 ? '선두' : growth > 0.001 ? '표가 몰립니다' : '추격 중' : '').setColor(eliminated ? '#e88073' : '#9cbdc8');
@@ -841,7 +857,7 @@ export class ElectionScene extends Phaser.Scene {
     this.rect(this.root, 389, 484, 502, 89, colorOf(candidate));
     this.rect(this.root, 329, 552, 622, 63, gold);
     this.rect(this.root, 279, 613, 722, 37, 0xe6bc58);
-    this.text(this.root, candidate.name, 640, 565, candidate.name.length > 10 ? 33 : 45, '#14223b', true);
+    this.fitLabel(this.text(this.root, candidate.name, 640, 505, 45, '#14223b', true), 460, candidate.name.length > 10 ? 33 : 45, 23);
     this.winner = this.citizen(this.root, candidate, state.candidates.indexOf(candidate), 640, 480, 5.9);
     this.winner.pose = 'cheer';
     // The celebration has a second beat: a wonderfully serious prop arrives to claim the promise.
@@ -913,7 +929,7 @@ export class ElectionScene extends Phaser.Scene {
     this.victoryPayoffCaption = caption;
     this.rect(caption, -177, -16, 354, 105, paper).setStrokeStyle(3, 0xc4b591);
     this.text(caption, '공약 이행 안내', 0, -2, 15, '#a16b48', true);
-    this.text(caption, payoff, 0, 24, 22, '#2b3a47', true).setAlign('center');
+    this.fitLabel(this.text(caption, payoff, 0, 24, 20, '#2b3a47', true).setAlign('center'), 316, 20, 16);
     const sweat = this.add.container(702, 208).setVisible(false);
     this.root.add(sweat);
     this.victoryPayoffSweat = sweat;
@@ -942,6 +958,10 @@ export class ElectionScene extends Phaser.Scene {
   }
 
   update(time: number, delta: number) {
+    if (!this.clockReady) {
+      this.phaseStart = time;
+      this.clockReady = true;
+    }
     const state = this.readState();
     if (this.currentPhase !== state.phase) this.switchPhase(state.phase);
     else if (state.preview && this.signature(state) !== this.previewSignature) this.syncNewspaperCandidates(state);

@@ -81,7 +81,7 @@ export function raceMoment(result: ElectionResult, frame: DramaFrame, previousFr
   const countedVotes = Math.floor(result.totalVotes * frame.progress / 100);
   const gapPoints = Math.max(0, frame.percentages[leader.id] - frame.percentages[runner.id]);
   const gapVotes = frame.progress >= 100 ? result.votes[leader.id] - result.votes[runner.id]
-    : Math.max(0, Math.floor(countedVotes * frame.percentages[leader.id] / 100) - Math.floor(countedVotes * frame.percentages[runner.id] / 100));
+    : Math.max(0, Math.round(countedVotes * gapPoints / 100));
   const previous = previousFrame ? [...result.candidates].filter(candidate => previousFrame.percentages[candidate.id] > 0)
     .sort((a, b) => previousFrame.percentages[b.id] - previousFrame.percentages[a.id]) : [];
   let climber: Candidate | undefined;
