@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
 import { ElectionScene, STAGE_HEIGHT, STAGE_WIDTH, type StageState } from './game/ElectionScene';
 import type { Candidate, ElectionEvent } from './election';
-import type { ShowPhase } from './show';
+import { SHOW_DURATION, type ShowPhase, type StoryOutcome } from './show';
 
 type Props = {
   phase: ShowPhase;
@@ -19,16 +19,29 @@ type Props = {
   elapsed?: number;
   cheeringId?: string;
   events?: ElectionEvent[];
+  storyOutcomes?: StoryOutcome[];
+  paused?: boolean;
 };
 const EMPTY_PERCENTAGES: Record<string, number> = {};
 const EMPTY_EVENTS: ElectionEvent[] = [];
+const EMPTY_OUTCOMES: StoryOutcome[] = [];
 
-export default function GameStage({ phase, candidates, winnerId, topic, percentages = EMPTY_PERCENTAGES, finalPercentages = EMPTY_PERCENTAGES, progress = 0, totalVotes = 0, preview = false, runId = 0, reducedMotion = false, elapsed = 0, cheeringId, events = EMPTY_EVENTS }: Props) {
+export default function GameStage({ phase, candidates, winnerId, topic, percentages = EMPTY_PERCENTAGES, finalPercentages = EMPTY_PERCENTAGES, progress = 0, totalVotes = 0, preview = false, runId = 0, reducedMotion = false, elapsed = 0, cheeringId, events = EMPTY_EVENTS, storyOutcomes = EMPTY_OUTCOMES, paused = false }: Props) {
   const host = useRef<HTMLDivElement>(null);
-  const state = useRef<StageState>({ phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events });
+  const gameRef = useRef<Phaser.Game | null>(null);
+  const sampledAt = useRef(performance.now());
+  const state = useRef<StageState>({ phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events, storyOutcomes, paused });
   useEffect(() => {
-    state.current = { phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events };
-  }, [phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events]);
+    if (state.current.elapsed !== elapsed || state.current.paused !== paused) sampledAt.current = performance.now();
+    state.current = { phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events, storyOutcomes, paused };
+  }, [phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events, storyOutcomes, paused]);
+
+  useEffect(() => {
+    const game = gameRef.current;
+    if (!game) return;
+    if (paused) game.scene.pause('election-show');
+    else game.scene.resume('election-show');
+  }, [paused]);
 
   useEffect(() => {
     if (!host.current) return;
@@ -46,11 +59,17 @@ export default function GameStage({ phase, candidates, winnerId, topic, percenta
         antialias: false,
         banner: false,
         scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
-        scene: [new ElectionScene(() => state.current)],
+        scene: [new ElectionScene(() => {
+          const snapshot = state.current;
+          // Advance between React's 50 ms samples so action choreography stays at canvas frame rate.
+          return snapshot.preview || snapshot.paused || snapshot.elapsed >= SHOW_DURATION ? snapshot
+            : { ...snapshot, elapsed: Math.min(SHOW_DURATION, snapshot.elapsed + Math.min(50, performance.now() - sampledAt.current)) };
+        })],
       });
+      gameRef.current = game;
       resize.observe(host.current);
     });
-    return () => { cancelAnimationFrame(animationFrame); resize.disconnect(); game?.destroy(true); };
+    return () => { cancelAnimationFrame(animationFrame); resize.disconnect(); game?.destroy(true); gameRef.current = null; };
   }, [runId]);
 
   const sceneName = phase === 'declaration' ? '신문 속보와 출마 선언' : phase === 'voting' ? '시민들의 투표' : phase === 'counting' ? '초접전 개표 방송' : '당선 세리머니';

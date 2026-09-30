@@ -17,9 +17,11 @@ export default function App() {
   const [result, setResult] = useState<ElectionResult | null>(null);
   const [drama, setDrama] = useState<DramaFrame[]>([]);
   const [elapsed, setElapsed] = useState(0);
+  const [paused, setPaused] = useState(false);
   const [runId, setRunId] = useState(0);
   const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const timer = useRef<number | null>(null);
+  const playback = useRef({ elapsed: 0, startedAt: 0, paused: false });
   const nextId = useRef(saved.entries.length + 1);
 
   useEffect(() => () => { if (timer.current !== null) window.clearInterval(timer.current); }, []);
@@ -57,6 +59,7 @@ export default function App() {
     setResult(election);
     setDrama(frames);
     setElapsed(0);
+    setPaused(false);
     setRunId(previous => previous + 1);
     setError('');
     window.scrollTo(0, 0);
@@ -66,10 +69,12 @@ export default function App() {
       return;
     }
     setStatus('running');
-    const startTime = performance.now();
+    playback.current = { elapsed: 0, startedAt: performance.now(), paused: false };
     if (timer.current !== null) window.clearInterval(timer.current);
     timer.current = window.setInterval(() => {
-      const next = Math.min(SHOW_DURATION, performance.now() - startTime);
+      const clock = playback.current;
+      if (clock.paused) return;
+      const next = Math.min(SHOW_DURATION, clock.elapsed + performance.now() - clock.startedAt);
       setElapsed(next);
       if (next >= SHOW_DURATION) {
         if (timer.current !== null) window.clearInterval(timer.current);
@@ -83,6 +88,8 @@ export default function App() {
     if (timer.current !== null) window.clearInterval(timer.current);
     timer.current = null;
     setElapsed(SHOW_DURATION);
+    setPaused(false);
+    playback.current.paused = false;
     setStatus('finished');
   }
 
@@ -92,8 +99,25 @@ export default function App() {
     setResult(null);
     setDrama([]);
     setElapsed(0);
+    setPaused(false);
+    playback.current.paused = false;
     setStatus('setup');
     window.scrollTo(0, 0);
+  }
+
+  function togglePause() {
+    if (status !== 'running') return;
+    const clock = playback.current;
+    if (clock.paused) {
+      clock.startedAt = performance.now();
+      clock.paused = false;
+    } else {
+      clock.elapsed = Math.min(SHOW_DURATION, clock.elapsed + performance.now() - clock.startedAt);
+      if (clock.elapsed >= SHOW_DURATION) { finishNow(); return; }
+      clock.paused = true;
+      setElapsed(clock.elapsed);
+    }
+    setPaused(clock.paused);
   }
 
   return (
@@ -154,7 +178,7 @@ export default function App() {
             </section>
           </div>
         ) : (
-          result && snapshot && <BroadcastShow result={result} frame={snapshot} phase={phase} topic={topic.trim()} elapsed={elapsed} finished={status === 'finished'} runId={runId} reducedMotion={reducedMotion} onSkip={finishNow} onReplay={start} onReset={reset} />
+          result && snapshot && <BroadcastShow result={result} frame={snapshot} drama={drama} phase={phase} topic={topic.trim()} elapsed={elapsed} finished={status === 'finished'} runId={runId} reducedMotion={reducedMotion} paused={paused} onPause={togglePause} onSkip={finishNow} onReplay={start} onReset={reset} />
         )}
       </main>
       <footer className="site-footer"><span>PIXEL ELECTION © 2026</span><span>공정한 추첨 · 거창한 발표 · 실제 투표 아님</span></footer>

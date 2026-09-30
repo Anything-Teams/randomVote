@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import type { Candidate, ElectionEvent } from '../election';
-import { countBeat, type ShowPhase } from '../show';
+import { COUNT_START, WINNER_START, STORY_DURATION, STORY_RESOLVE_AT, countBeat, storyBeat, resolvedEvents, type ShowPhase, type StoryOutcome } from '../show';
 import { PixelCitizen } from './PixelCitizen';
 
 export const STAGE_WIDTH = 1280;
@@ -19,12 +19,14 @@ export type StageState = {
   elapsed: number;
   cheeringId?: string;
   events?: ElectionEvent[];
+  storyOutcomes?: StoryOutcome[];
+  paused?: boolean;
 };
 type Voter = { citizen: PixelCitizen; ballot: Phaser.GameObjects.Rectangle; offset: number; duration: number; lastDrop: number };
-type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; support: Phaser.GameObjects.Text; bar: Phaser.GameObjects.Rectangle; cap: Phaser.GameObjects.Rectangle; displayed: number; previous: number; previousRank: number; reactedAt: number; voteAt: number; width: number; height: number; eliminationShare?: number; eliminationWidth?: number };
+type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; support: Phaser.GameObjects.Text; bar: Phaser.GameObjects.Rectangle; cap: Phaser.GameObjects.Rectangle; displayed: number; previous: number; previousRank: number; reactedAt: number; voteAt: number; width: number; height: number; movingUntil: number; direction: number; eliminationShare?: number; eliminationWidth?: number };
 type VoteMote = { rectangle: Phaser.GameObjects.Rectangle; candidateId: string; age: number; startX: number; startY: number; life: number };
-type StoryActor = { candidate: Candidate; citizen: PixelCitizen; name: Phaser.GameObjects.Text; side: number; scale: number };
-type StoryCut = { event: ElectionEvent; startedAt: number; duration: number; layer: Phaser.GameObjects.Container; actors: StoryActor[]; props: Phaser.GameObjects.Container[]; stamp: Phaser.GameObjects.Text; lamp: Phaser.GameObjects.Arc; darkness: Phaser.GameObjects.Rectangle; beam: Phaser.GameObjects.Graphics; impactFired: boolean };
+type StoryActor = { candidate: Candidate; citizen: PixelCitizen; name: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle; side: number; scale: number };
+type StoryCut = { event: ElectionEvent; layer: Phaser.GameObjects.Container; dimmer: Phaser.GameObjects.Rectangle; title: Phaser.GameObjects.Text; stageLabel: Phaser.GameObjects.Text; evidence: Phaser.GameObjects.Text; dialogue: Phaser.GameObjects.Container; detail: Phaser.GameObjects.Text; verdict: Phaser.GameObjects.Container; actors: StoryActor[]; props: Phaser.GameObjects.Container[]; stamp: Phaser.GameObjects.Text; lamp: Phaser.GameObjects.Arc; darkness: Phaser.GameObjects.Rectangle; beam: Phaser.GameObjects.Graphics; impactFired: boolean; verdictStarted: boolean };
 type Confetti = { rectangle: Phaser.GameObjects.Rectangle; speed: number; drift: number };
 type Spark = { rectangle: Phaser.GameObjects.Rectangle; vx: number; vy: number; age: number; life: number; gravity: number };
 type NewspaperCard = { candidate: Candidate; card: Phaser.GameObjects.Container; citizen: PixelCitizen; background: Phaser.GameObjects.Rectangle; portrait: Phaser.GameObjects.Rectangle; rules: Phaser.GameObjects.Rectangle[]; nameBand: Phaser.GameObjects.Rectangle; number: Phaser.GameObjects.Text; name: Phaser.GameObjects.Text };
@@ -41,6 +43,7 @@ export class ElectionScene extends Phaser.Scene {
   private root!: Phaser.GameObjects.Container;
   private phaseStart = 0;
   private clockReady = false;
+  private animationTime = 0;
   private citizens: PixelCitizen[] = [];
   private voters: Voter[] = [];
   private race: RaceSlot[] = [];
@@ -84,10 +87,10 @@ export class ElectionScene extends Phaser.Scene {
   private countingAxis: Phaser.GameObjects.Text[] = [];
   private countingVotes: VoteMote[] = [];
   private countingLastProgress = -1;
-  private storySeen = new Set<string>();
   private storyEliminated = new Set<string>();
-  private storyQueue: ElectionEvent[] = [];
   private storyActive?: StoryCut;
+  private lastCheeringId = '';
+  private cheerWaveUntil = 0;
 
   constructor(readState: () => StageState) {
     super('election-show');
@@ -96,6 +99,7 @@ export class ElectionScene extends Phaser.Scene {
 
   create() {
     this.clockReady = false;
+    this.animationTime = 0;
     this.switchPhase(this.readState().phase, true);
   }
 
@@ -389,9 +393,7 @@ export class ElectionScene extends Phaser.Scene {
     this.countingVotes = [];
     this.countingAxis = [];
     this.countingLastProgress = -1;
-    this.storySeen.clear();
     this.storyEliminated.clear();
-    this.storyQueue = [];
     this.storyActive = undefined;
     for (let i = 0; i < 10; i++) {
       this.rect(this.root, 42 + i * 124, 94, 100, 442, i % 2 ? 0x14293b : 0x11243a);
@@ -441,7 +443,7 @@ export class ElectionScene extends Phaser.Scene {
         this.tweens.add({ targets: panel, alpha: 1, duration: 380, delay: index * 27, ease: 'Cubic.out' });
       }
       const value = state.percentages[candidate.id] ?? 0;
-      this.race.push({ candidate, panel, citizen, percentage, badge, position, glow, frame, support, bar, cap, displayed: value, previous: value, previousRank: index, reactedAt: -10000, voteAt: -10000, width, height });
+      this.race.push({ candidate, panel, citizen, percentage, badge, position, glow, frame, support, bar, cap, displayed: value, previous: value, previousRank: index, reactedAt: -10000, voteAt: -10000, width, height, movingUntil: 0, direction: 0 });
     });
     this.root.sort('depth');
   }
@@ -620,65 +622,74 @@ export class ElectionScene extends Phaser.Scene {
     }
   }
 
-  private startStory(state: StageState, event: ElectionEvent, time: number) {
+
+  private startStory(state: StageState, event: ElectionEvent) {
     const layer = this.add.container(0, 0).setDepth(500);
     this.root.add(layer);
-    this.rect(layer, 0, 0, 1280, 720, 0x061022, 0.62);
-    const darkness = this.rect(layer, 302, 132, 676, 426, 0x193247).setStrokeStyle(3, 0x93b7be);
-    this.rect(layer, 316, 143, 648, 5, event.kind === 'scandal' ? 0xf47761 : gold);
-    this.text(layer, event.title, 640, 164, event.title.length > 27 ? 21 : 27, '#fff2cc', true).setWordWrapWidth(616);
-    this.text(layer, event.detail, 640, 504, 17, '#d3e3e0', true).setWordWrapWidth(606);
+    const dimmer = this.rect(layer, 0, 0, 1280, 720, 0x061022, 0.62);
+    const darkness = this.rect(layer, 302, 126, 676, 458, 0x193247).setStrokeStyle(3, 0x93b7be);
+    this.rect(layer, 316, 135, 648, 5, event.kind === 'scandal' ? 0xf47761 : gold);
+    const title = this.text(layer, event.title, 640, 146, 25, '#fff2cc', true).setWordWrapWidth(616, true);
+    const stageLabel = this.text(layer, '사건 예고', 956, 116, 14, '#c6e2df').setOrigin(1, 0);
+    const evidence = this.fitLabel(this.text(layer, `단서 · ${event.evidence}`, 640, 512, 16, '#fbd975', true), 608, 16, 13);
+    const detail = this.text(layer, event.detail, 640, 540, 14, '#d3e3e0', true).setWordWrapWidth(606, true);
+    const dialogue = this.add.container(640, 236).setVisible(false);
+    layer.add(dialogue);
+    this.rect(dialogue, -281, -17, 562, 40, paper).setStrokeStyle(2, 0xb8a987);
+    this.fitLabel(this.text(dialogue, `“${event.dialogue}”`, 0, -9, 17, '#334b53', true), 536, 17, 13);
     const beam = this.add.graphics();
     beam.fillStyle(gold, 0.13);
     beam.fillTriangle(640, 180, 420, 488, 860, 488);
     layer.add(beam);
-    const lamp = this.add.circle(640, 216, 10, 0xff8466).setVisible(false);
+    const lamp = this.add.circle(640, 219, 9, 0xff8466).setVisible(false);
     layer.add(lamp);
     const multiple = event.kind === 'brawl' || event.kind === 'alliance';
-    const actors: StoryActor[] = event.actors.slice(0, multiple ? 2 : 1).map((id, index) => {
-      const candidate = state.candidates.find(item => item.id === id) ?? state.candidates[index];
+    const actors: StoryActor[] = event.actors.slice(0, multiple ? 2 : 1).flatMap((id, index) => {
+      const candidate = state.candidates.find(item => item.id === id);
+      if (!candidate) return [];
       const side = index ? 1 : -1;
-      const scale = multiple ? 3.9 : 4.25;
-      const x = multiple ? 640 + side * 166 : 640;
+      const scale = 3.6;
+      const x = multiple ? 640 + side * 166 : event.kind === 'mishap' ? 540 : event.kind === 'comeback' ? 447 : 640;
       const citizen = this.citizen(layer, candidate, state.candidates.findIndex(item => item.id === candidate.id), x, 446, scale);
       citizen.pose = 'nervous';
       if (index) citizen.root.setScale(-scale, scale);
-      const name = this.fitLabel(this.text(layer, candidate.name, x, 465, 17, '#f8efda', true), multiple ? 228 : 330, 17, 11);
-      return { candidate, citizen, name, side, scale };
+      const width = multiple ? 236 : event.kind === 'comeback' ? 268 : 338;
+      const plate = this.rect(layer, x - width / 2, 181, width, 32, colorOf(candidate)).setStrokeStyle(1, 0xf1e5c5, 0.5);
+      const name = this.fitLabel(this.text(layer, candidate.name, x, 186, 22, '#172d3a', true), width - 14, 22, 13);
+      return [{ candidate, citizen, name, plate, side, scale }];
     });
     const props = Array.from({ length: event.kind === 'scandal' ? 8 : event.kind === 'comeback' ? 6 : 2 }, (_, index) =>
       this.storyProp(layer, event.prop, 640 + (index % 2 ? 1 : -1) * 36, 370, [gold, 0x6dd0c2, 0xec8068][index % 3]).setVisible(false));
-    const stampY = event.kind === 'scandal' || event.kind === 'brawl' ? 310 : event.kind === 'alliance' || event.kind === 'blackout' ? 204 : event.kind === 'mishap' ? 226 : 218;
-    const stampSize = event.kind === 'scandal' ? 58 : event.kind === 'brawl' ? 45 : event.kind === 'alliance' || event.kind === 'blackout' ? 28 : 34;
-    const stamp = this.text(layer, event.kind === 'scandal' ? '후보 탈락' : event.kind === 'alliance' ? '손을 맞잡다!' : event.kind === 'blackout' ? '비상 개표!' : event.kind === 'comeback' ? '맹추격!' : event.kind === 'mishap' ? '앗…!' : '쿵!', 640, stampY, stampSize, event.kind === 'scandal' ? '#ef705d' : '#fbd975', true).setStroke('#1a3043', 5).setAlpha(0);
-    this.storyActive = { event, startedAt: time, duration: 2300, layer, actors, props, stamp, lamp, darkness, beam, impactFired: false };
+    const stampY = event.kind === 'scandal' || event.kind === 'brawl' ? 345 : 398;
+    const stampSize = event.kind === 'brawl' ? 45 : event.kind === 'alliance' || event.kind === 'blackout' ? 28 : 34;
+    const stamp = this.text(layer, event.kind === 'scandal' ? '증거 발견!' : event.kind === 'alliance' ? '손을 맞잡다!' : event.kind === 'blackout' ? '비상 개표!' : event.kind === 'comeback' ? '맹추격!' : event.kind === 'mishap' ? '앗…!' : '쿵!', 640, stampY, stampSize, event.kind === 'scandal' ? '#ef705d' : '#fbd975', true).setStroke('#1a3043', 4).setAlpha(0);
+    const verdict = this.add.container(640, 214).setVisible(false);
+    layer.add(verdict);
+    this.rect(verdict, -304, 0, 608, 322, 0x102c40).setStrokeStyle(3, event.eliminatedId ? 0xee8070 : gold);
+    const outcome = state.storyOutcomes?.find(item => item.eventId === event.id);
+    this.text(verdict, outcome?.title ?? '사건 판정', 0, 14, 24, event.eliminatedId ? '#ff9e8b' : '#fff1c7', true).setWordWrapWidth(576, true).setAlign('center');
+    const results = outcome?.actors ?? actors.map(actor => ({ id: actor.candidate.id, name: actor.candidate.name, color: actor.candidate.color, beforeRank: 0, afterRank: 0, label: '집계 반영 중' }));
+    results.slice(0, 2).forEach((actor, index) => {
+      const y = 94 + index * 74;
+      this.rect(verdict, -282, y, 564, 64, 0x203f51).setStrokeStyle(1, 0x72959e, 0.5);
+      this.rect(verdict, -282, y, 5, 64, Phaser.Display.Color.HexStringToColor(actor.color).color);
+      this.fitLabel(this.text(verdict, actor.name, -260, y + 19, 22, '#f8f0db'), 250, 22, 13);
+      this.fitLabel(this.text(verdict, actor.label, 263, y + 15, 29, actor.afterRank === null ? '#ff907e' : '#fbd975').setOrigin(1, 0), 220, 29, 18);
+    });
+    this.text(verdict, outcome?.summary ?? '사건 판정이 새로운 집계에 반영됩니다.', 0, 255, 14, '#c9dfdc', true).setWordWrapWidth(566, true).setAlign('center');
+    this.storyActive = { event, layer, dimmer, title, stageLabel, evidence, dialogue, detail, verdict, actors, props, stamp, lamp, darkness, beam, impactFired: false, verdictStarted: false };
     this.countingCalloutUntil = 0;
     this.countingHeadline?.setAlpha(0);
-    if (!state.reducedMotion) {
-      layer.setAlpha(0);
-      this.tweens.add({ targets: layer, alpha: 1, duration: 180, ease: 'Cubic.out' });
-    }
     this.root.sort('depth');
   }
 
-  private updateStory(state: StageState, time: number) {
-    (state.events ?? []).forEach(event => {
-      if (event.progress > state.progress || this.storySeen.has(event.id)) return;
-      this.storySeen.add(event.id);
-      this.storyQueue.push(event);
-      if (event.eliminatedId) this.storyEliminated.add(event.eliminatedId);
-    });
-    if (!this.storyActive && this.storyQueue.length) this.startStory(state, this.storyQueue.shift()!, time);
-    const cut = this.storyActive;
-    if (!cut) return;
-    const local = time - cut.startedAt;
-    const t = Phaser.Math.Clamp(local / cut.duration, 0, 1);
+  private animateStoryAction(cut: StoryCut, local: number, state: StageState) {
     const motion = (from: number, to: number, start: number, end: number) => Phaser.Math.Linear(from, to, Phaser.Math.Easing.Cubic.InOut(Phaser.Math.Clamp((local - start) / (end - start), 0, 1)));
     const body = cut.actors[0];
     if (state.reducedMotion) {
       cut.actors.forEach(actor => { actor.citizen.pose = cut.event.kind === 'alliance' || cut.event.kind === 'comeback' ? 'cheer' : 'surprised'; });
       cut.stamp.setAlpha(1);
-      cut.props.forEach((prop, index) => prop.setVisible(true).setPosition(578 + index % 4 * 39, 435 + Math.floor(index / 4) * 28));
+      cut.props.forEach((prop, index) => prop.setVisible(true).setPosition(578 + index % 4 * 39, 402 + Math.floor(index / 4) * 26).setScale(0.75));
     } else if (cut.event.kind === 'brawl') {
       cut.actors.forEach(actor => {
         const approach = motion(166, 33, 300, 840);
@@ -696,10 +707,9 @@ export class ElectionScene extends Phaser.Scene {
         prop.setVisible(local > 260 + index * 76).setPosition(675 + (index % 2 ? 1 : -1) * p * (62 + index * 9), 364 - Math.sin(p * Math.PI) * 54 + p * 61).setAngle((index % 2 ? 1 : -1) * p * 63).setScale(0.8);
       });
       if (body) {
-        const exit = Phaser.Math.Clamp((local - 1320) / 780, 0, 1);
         body.citizen.pose = local < 900 ? 'nervous' : 'surprised';
-        body.citizen.root.setPosition(640 + Phaser.Math.Easing.Cubic.In(exit) * 234, 446 + exit * 64).setAngle(exit * 48).setAlpha(1 - exit * 0.8);
-        body.name.setX(body.citizen.root.x).setAlpha(1 - exit);
+        body.citizen.root.setPosition(640, 446).setAngle(local > 1100 ? -4 : 0);
+        body.name.setX(640);
       }
       const stamp = Phaser.Math.Clamp((local - 1050) / 250, 0, 1);
       cut.stamp.setAlpha(stamp).setScale(2.2 - Phaser.Math.Easing.Cubic.In(stamp) * 1.2).setAngle(-9);
@@ -712,7 +722,7 @@ export class ElectionScene extends Phaser.Scene {
         body.name.setX(body.citizen.root.x);
       }
       cut.props.forEach((prop, index) => prop.setVisible(local > 230).setPosition(index ? motion(576, 784, 550, 1220) : 612, index ? 375 - Math.sin(Phaser.Math.Clamp((local - 550) / 800, 0, 1) * Math.PI) * 93 + motion(0, 67, 550, 1300) : 451).setAngle(index ? motion(0, 163, 550, 1350) : -8));
-      cut.stamp.setAlpha(local > 700 && local < 1420 ? 1 : 0).setAngle(-10).setY(226).setFontSize(34);
+      cut.stamp.setAlpha(local > 700 && local < 1420 ? 1 : 0).setAngle(-10).setY(398).setFontSize(34);
     } else if (cut.event.kind === 'alliance') {
       cut.actors.forEach(actor => {
         const distance = motion(166, 47, 220, 840);
@@ -722,12 +732,12 @@ export class ElectionScene extends Phaser.Scene {
         actor.name.setX(640 + actor.side * 151);
       });
       cut.props.forEach((prop, index) => prop.setVisible(local > 930).setPosition(640 + (index ? 1 : -1) * 37, 380 - Math.sin((local - 930) / 440) * 4).setScale(0.6));
-      cut.stamp.setAlpha(Phaser.Math.Clamp((local - 1030) / 300, 0, 1)).setFontSize(28).setY(204);
+      cut.stamp.setAlpha(Phaser.Math.Clamp((local - 1030) / 300, 0, 1)).setFontSize(28).setY(398);
     } else if (cut.event.kind === 'blackout') {
       cut.darkness.setFillStyle(0x020713).setAlpha(local < 310 ? 1 - local / 310 * 0.65 : local < 1620 ? 0.96 : 0.96 - (local - 1620) / 600 * 0.25);
       cut.beam.setAlpha(local < 450 ? 0 : local < 1670 ? 0.28 + Math.sin(local / 135) * 0.12 : 1);
       cut.lamp.setVisible(local > 310).setAlpha(0.55 + Math.sin(local / 120) * 0.35);
-      cut.stamp.setAlpha(local > 550 ? 1 : 0).setFontSize(28).setY(204);
+      cut.stamp.setAlpha(local > 550 ? 1 : 0).setFontSize(28).setY(398);
       if (body) { body.citizen.pose = 'surprised'; body.citizen.root.setAngle(Math.sin(local / 250) * 4); }
       cut.props.forEach((prop, index) => prop.setVisible(local > 630).setPosition(605 + index * 78, 390).setAngle(-19 + index * 20));
     } else if (cut.event.kind === 'comeback') {
@@ -737,19 +747,101 @@ export class ElectionScene extends Phaser.Scene {
         body.name.setX(body.citizen.root.x);
       }
       cut.props.forEach((prop, index) => prop.setVisible(local > 300 + index * 100).setPosition(396 + index * 86, 419 + Math.sin(local / 240 + index) * 11).setAngle(Math.sin(local / 190 + index) * 10).setScale(0.8));
-      cut.stamp.setAlpha(Phaser.Math.Clamp((local - 700) / 350, 0, 1)).setY(218).setFontSize(34);
+      cut.stamp.setAlpha(Phaser.Math.Clamp((local - 700) / 350, 0, 1)).setY(398).setFontSize(34);
     }
     const impactAt = cut.event.kind === 'scandal' ? 1260 : cut.event.kind === 'brawl' ? 845 : 920;
     if (!cut.impactFired && local > impactAt) {
       cut.impactFired = true;
       this.storyBurst(cut.layer, 640, cut.event.kind === 'scandal' ? 353 : 402, cut.event.kind === 'scandal' ? 0xef705d : gold, cut.event.kind === 'blackout' ? 8 : 22);
     }
-    if (t > 0.9) cut.layer.setAlpha(Math.max(0, (1 - t) / 0.1));
-    if (local >= cut.duration) {
-      this.citizens = this.citizens.filter(citizen => citizen.root.parentContainer !== cut.layer);
-      this.sparks = this.sparks.filter(spark => spark.rectangle.parentContainer !== cut.layer);
-      this.destroyPhase(cut.layer);
-      this.storyActive = undefined;
+  }
+
+  private finishStory() {
+    const cut = this.storyActive;
+    if (!cut) return;
+    this.citizens = this.citizens.filter(citizen => citizen.root.parentContainer !== cut.layer);
+    this.sparks = this.sparks.filter(spark => spark.rectangle.parentContainer !== cut.layer);
+    this.destroyPhase(cut.layer);
+    this.storyActive = undefined;
+  }
+
+  private updateStory(state: StageState, time: number) {
+    const events = state.events ?? [];
+    resolvedEvents(events, state.elapsed).forEach(event => {
+      if (event.eliminatedId) this.storyEliminated.add(event.eliminatedId);
+    });
+    const beat = storyBeat(events, state.elapsed);
+    if (!beat) { this.finishStory(); return; }
+    if (this.storyActive?.event.id !== beat.event.id) {
+      this.finishStory();
+      this.startStory(state, beat.event);
+    }
+    const cut = this.storyActive!;
+    const { age, stage } = beat;
+    cut.stageLabel.setText(`${beat.index}번째 사건 · ${stage === 'announcement' ? '당사자 등장' : stage === 'action' ? '현장 상황' : stage === 'verdict' ? '판정 공개' : '판세 반영'}`);
+    cut.layer.setAlpha(state.reducedMotion ? 1 : Math.min(1, age / 220));
+    cut.title.setVisible(stage === 'announcement' || stage === 'action');
+    cut.evidence.setVisible(stage === 'announcement' || stage === 'action');
+    cut.detail.setVisible(stage === 'announcement' || stage === 'action');
+    if (stage === 'announcement') {
+      cut.dialogue.setVisible(false);
+      cut.actors.forEach(actor => {
+        actor.name.setY(186);
+        actor.plate.setPosition(actor.name.x - actor.plate.width / 2, 181);
+        actor.citizen.pose = 'nervous';
+      });
+      const evidenceProp = cut.props[0];
+      evidenceProp?.setVisible(true).setPosition(640, 425).setScale(0.9);
+    } else if (stage === 'action') {
+      const actionAge = age - 1400;
+      // The collision gets a whole second to land before the figures recoil.
+      const local = actionAge < 900 ? actionAge / 900 * 820 : actionAge < 1850 ? 820 + (actionAge - 900) / 950 * 220 : 1040 + (actionAge - 1850) / 1350 * 1110;
+      this.animateStoryAction(cut, local, state);
+      cut.dialogue.setVisible(actionAge < 2100);
+      cut.actors.forEach(actor => {
+        actor.name.setY(464);
+        actor.plate.setPosition(actor.name.x - actor.plate.width / 2, 458);
+      });
+    } else {
+      if (!cut.verdictStarted) {
+        cut.verdictStarted = true;
+        cut.verdict.setVisible(true);
+        cut.dialogue.setVisible(false);
+        cut.stamp.setVisible(false);
+        cut.lamp.setVisible(false);
+        cut.beam.setAlpha(0.15);
+        cut.props.forEach(prop => prop.setAlpha(0.12));
+        cut.actors.forEach(actor => {
+          actor.name.setVisible(false);
+          actor.plate.setVisible(false);
+          actor.citizen.root.setAlpha(0.2);
+          actor.citizen.pose = cut.event.eliminatedId === actor.candidate.id ? 'surprised' : 'wave';
+        });
+        const bystanders = state.candidates.filter(candidate => !cut.event.actors.includes(candidate.id) && !this.storyEliminated.has(candidate.id))
+          .sort((a, b) => Number(b.id === state.cheeringId) - Number(a.id === state.cheeringId)).slice(0, 2);
+        bystanders.forEach((candidate, index) => {
+          const x = index ? 1016 : 264;
+          const citizen = this.citizen(cut.layer, candidate, state.candidates.findIndex(item => item.id === candidate.id), x, 444, 2.2);
+          citizen.pose = cut.event.eliminatedId ? 'surprised' : index ? 'nervous' : 'wave';
+          this.text(cut.layer, '동료 후보', x, 465, 12, '#cfe0dc', true);
+          this.countingReactions.set(candidate.id, { pose: cut.event.eliminatedId ? 'surprised' : 'wave', until: time + 2500 });
+        });
+        this.storyBurst(cut.layer, 640, 237, cut.event.eliminatedId ? 0xef705d : gold, 12);
+      }
+      const verdictAge = age - STORY_RESOLVE_AT;
+      if (cut.event.eliminatedId) {
+        const actor = cut.actors.find(item => item.candidate.id === cut.event.eliminatedId);
+        if (actor) {
+          const exit = Phaser.Math.Easing.Cubic.In(Phaser.Math.Clamp(verdictAge / 1200, 0, 1));
+          actor.citizen.root.setPosition(640 + exit * 270, 446 + exit * 65).setAngle(exit * 43).setAlpha(0.2 * (1 - exit));
+        }
+      }
+      if (stage === 'aftermath') {
+        const slide = state.reducedMotion ? 1 : Phaser.Math.Easing.Cubic.InOut(Phaser.Math.Clamp((age - 6400) / 720, 0, 1));
+        cut.layer.setScale(1 - slide * 0.62).setPosition(868 * slide, 70 * slide);
+        cut.dimmer.setAlpha(0.62 * (1 - slide));
+        cut.layer.setAlpha(Math.min(1, (STORY_DURATION - age) / 250));
+      }
     }
   }
 
@@ -776,8 +868,8 @@ export class ElectionScene extends Phaser.Scene {
     this.marginText?.setText(`${format.format(gapVotes)}표`);
     this.countdownLabel?.setText(state.progress >= 90 ? `${gap.toFixed(2)}%p · 끝까지 초접전` : `${gap.toFixed(2)}%p 차이`);
     this.countingLocation?.setText(`개표 ${state.progress.toFixed(1)}% · ${active}명 경쟁 중`);
-    const late = state.elapsed > 23000;
-    const finalSlow = state.elapsed > 25200;
+    const late = state.elapsed > WINNER_START - 6000;
+    const finalSlow = state.elapsed > WINNER_START - 800;
     this.countingCue?.setText(beat.state === 'sealed' ? '남은 지역의 표가 들어옵니다…' : finalSlow ? '마지막 한 표까지…' : late ? '상위권이 붙었습니다. 결승선은 아직입니다' : '득표율과 캐릭터의 움직임을 함께 지켜보세요');
     if (this.storyActive) this.countingHeadline?.setAlpha(0);
     else if (time > this.countingCalloutUntil) this.countingHeadline?.setText(late ? `막판 추격 · 단 ${format.format(gapVotes)}표 차!` : '모든 후보에게 남아 있는 한 표').setFontSize(late ? 32 : 28).setColor(late ? '#fbd975' : '#d6e6e3').setAlpha(1);
@@ -792,6 +884,10 @@ export class ElectionScene extends Phaser.Scene {
         slot.eliminationWidth = slot.bar.displayWidth;
       }
       const growth = raw - slot.previous;
+      if (Math.abs(growth) > 0.001) {
+        slot.movingUntil = time + (growth > 0 ? 800 : 650);
+        slot.direction = Math.sign(growth);
+      }
       if (rank <= slot.previousRank - 2 && !eliminated && time - slot.reactedAt > 1500) {
         slot.reactedAt = time;
         this.countingReactions.set(slot.candidate.id, { pose: index % 2 ? 'wave' : 'cheer', until: time + 850 });
@@ -806,13 +902,14 @@ export class ElectionScene extends Phaser.Scene {
       slot.citizen.root.setX(252 + Math.max(width, 32) + 3).setAlpha(eliminated ? 0.23 : 1);
       slot.percentage.setText(`${raw.toFixed(2)}%`).setAlpha(eliminated ? 0.36 : 1);
       slot.position.setText(eliminated ? '×' : String(rank + 1)).setColor(rank === 0 ? '#fbd975' : '#a6c5cc');
-      slot.badge.setText(eliminated ? '후보 탈락' : slot.height > 62 ? rank === 0 ? '선두' : growth > 0.001 ? '표가 몰립니다' : '추격 중' : '').setColor(eliminated ? '#e88073' : '#9cbdc8');
+      slot.badge.setText(eliminated ? '후보 탈락' : slot.height > 62 ? rank === 0 ? '선두' : slot.direction > 0 && time < slot.movingUntil ? '표가 몰립니다' : '추격 중' : '').setColor(eliminated ? '#e88073' : '#9cbdc8');
       const support = slot.candidate.id === state.cheeringId;
       slot.support.setVisible(support);
       slot.frame.setStrokeStyle(rank === 0 || support ? 2 : 1, rank === 0 ? colorOf(slot.candidate) : support ? 0xffaaae : 0x30495e);
       slot.glow.setAlpha(eliminated ? 0.012 : rank === 0 ? 0.08 + (state.reducedMotion ? 0 : Math.sin(time / 380) * 0.015) : support ? 0.06 : 0.028);
       const reaction = this.countingReactions.get(slot.candidate.id);
-      slot.citizen.pose = eliminated ? 'bow' : reaction && reaction.until > time ? reaction.pose : growth > 0.003 ? index % 2 ? 'walk' : 'run' : late && rank < 3 ? rank ? 'run' : 'nervous' : index % 4 === 1 ? 'nervous' : 'idle';
+      const waiting = Math.floor((time + index * 711) / (1800 + index % 3 * 180)) % 7;
+      slot.citizen.pose = eliminated ? 'bow' : reaction && reaction.until > time ? reaction.pose : time < slot.movingUntil ? slot.direction > 0 ? index % 2 ? 'walk' : 'run' : 'nervous' : late && rank < 3 ? rank ? 'run' : 'nervous' : waiting === 1 ? 'wave' : waiting === 4 && index % 3 === 0 ? 'bow' : index % 4 === 1 ? 'nervous' : 'idle';
       if (gaining && !eliminated && !state.reducedMotion && time - slot.voteAt > 460 + index * 29) {
         slot.voteAt = time;
         const startX = slot.panel.x + 252 + width - 61;
@@ -957,25 +1054,48 @@ export class ElectionScene extends Phaser.Scene {
     }
   }
 
-  update(time: number, delta: number) {
+  update(rawTime: number, delta: number) {
     if (!this.clockReady) {
-      this.phaseStart = time;
+      this.phaseStart = rawTime;
       this.clockReady = true;
     }
     const state = this.readState();
+    if (state.paused) return;
+    // Only active frames advance small reactions and character movement.
+    // The shared show clock still decides every phase and story verdict.
+    if (!state.preview) {
+      delta = Phaser.Math.Clamp(delta, 0, 50);
+      this.animationTime += delta;
+    }
+    const time = state.preview ? rawTime : this.animationTime;
     if (this.currentPhase !== state.phase) this.switchPhase(state.phase);
     else if (state.preview && this.signature(state) !== this.previewSignature) this.syncNewspaperCandidates(state);
-    const local = time - this.phaseStart;
+    const local = state.preview ? rawTime - this.phaseStart : Math.max(0, state.elapsed - (state.phase === 'voting' ? 5000 : state.phase === 'counting' ? COUNT_START : state.phase === 'winner' ? WINNER_START : 0));
+    if ((state.cheeringId ?? '') !== this.lastCheeringId) {
+      this.lastCheeringId = state.cheeringId ?? '';
+      this.cheerWaveUntil = time + 1800;
+      const slot = this.race.find(item => item.candidate.id === state.cheeringId);
+      const selected = slot?.citizen ?? this.newspaperCards.get(state.cheeringId ?? '')?.citizen;
+      if (slot) this.countingReactions.set(slot.candidate.id, { pose: 'wave', until: this.cheerWaveUntil });
+      if (selected && !state.reducedMotion) {
+        const point = selected.root.getWorldTransformMatrix().transformPoint(0, -28);
+        const position = this.root.getWorldTransformMatrix().applyInverse(point.x, point.y);
+        this.burst(position.x, position.y, 0xffa7b1, 12, 100);
+        const heart = this.text(this.root, '♥', position.x, position.y - 8, 25, '#ffc2ca', true).setDepth(250);
+        this.root.sort('depth');
+        this.tweens.add({ targets: heart, y: position.y - 42, alpha: 0, duration: 900, ease: 'Sine.out', onComplete: () => heart.destroy() });
+      }
+    }
     if (state.phase === 'declaration') {
       this.paperHeadline?.setText(state.topic || '오늘의 당선자를 뽑습니다').setFontSize(state.topic.length > 30 ? 23 : 37);
       if (!state.preview && state.candidates.length) this.citizens.forEach((citizen, index) => {
         const focus = Math.floor(local / (4800 / state.candidates.length)) % state.candidates.length;
-        citizen.pose = focus === index ? 'wave' : index % 3 === 1 && local > 3800 ? 'bow' : 'idle';
+        citizen.pose = state.candidates[index]?.id === state.cheeringId && time < this.cheerWaveUntil || focus === index ? 'wave' : index % 3 === 1 && local > 3800 ? 'bow' : 'idle';
       });
       if (state.preview) this.newspaperCards.forEach((slot, id) => {
         const identity = Number(id) || 1;
         const beat = Math.floor((local + identity * 617) / (2300 + identity % 4 * 230)) % 5;
-        slot.citizen.pose = beat === 0 ? 'wave' : beat === 3 && identity % 3 === 1 ? 'bow' : 'idle';
+        slot.citizen.pose = id === state.cheeringId && time < this.cheerWaveUntil || beat === 0 ? 'wave' : beat === 3 && identity % 3 === 1 ? 'bow' : 'idle';
       });
     }
     if (state.phase === 'voting') {

@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 const compiled = await build({ entryPoints: ['src/election.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { CANDIDATE_COLORS, MAX_CANDIDATES, randomInt, createElection, createDrama, frameAt } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const compiledShow = await build({ entryPoints: ['src/show.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { countProgress, elapsedAtProgress, countBeat, raceMoment, phaseFor, COUNT_START, WINNER_START, SHOW_DURATION } = await import(`data:text/javascript;base64,${Buffer.from(compiledShow.outputFiles[0].text).toString('base64')}`);
+const { countProgress, elapsedAtProgress, countBeat, storyBeat, resolvedEvents, storyOutcome, raceMoment, phaseFor, COUNT_START, WINNER_START, SHOW_DURATION, STORY_DURATION, STORY_RESOLVE_AT } = await import(`data:text/javascript;base64,${Buffer.from(compiledShow.outputFiles[0].text).toString('base64')}`);
 const compiledCatalog = await build({ entryPoints: ['src/storyCatalog.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { STORY_CATALOG } = await import(`data:text/javascript;base64,${Buffer.from(compiledCatalog.outputFiles[0].text).toString('base64')}`);
 const candidates = Array.from({ length: MAX_CANDIDATES }, (_, index) => ({ id: String(index), name: `후보 ${index}`, color: CANDIDATE_COLORS[index] }));
@@ -166,32 +166,37 @@ test('withdrawal chances respect their exact probability boundaries and keep two
   }
 });
 
-test('the thirty second live count pauses briefly at tallies and the final seal', () => {
+test('the fifty eight second count pauses incidents until their verdict and then applies the result', () => {
   let previous = 0;
   for (let elapsed = 0; elapsed <= SHOW_DURATION; elapsed += 50) {
     const progress = countProgress(elapsed);
     assert.ok(progress >= previous && progress >= 0 && progress <= 100);
     previous = progress;
   }
-  assert.equal(SHOW_DURATION, 30_000);
+  assert.equal(SHOW_DURATION, 58_000);
   assert.equal(COUNT_START, 9_000);
-  assert.equal(WINNER_START, 26_000);
+  assert.equal(WINNER_START, 52_000);
   assert.equal(phaseFor(0), 'declaration');
   assert.equal(phaseFor(4999), 'declaration');
   assert.equal(phaseFor(5000), 'voting');
   assert.equal(phaseFor(COUNT_START), 'counting');
   assert.equal(phaseFor(15000), 'counting');
   assert.equal(phaseFor(WINNER_START), 'winner');
-  for (let local = 3500; local <= 4200; local += 50) assert.equal(countProgress(COUNT_START + local), 28);
-  for (let local = 8600; local <= 9300; local += 50) assert.equal(countProgress(COUNT_START + local), 64);
-  for (let local = 12500; local <= 13400; local += 50) assert.equal(countProgress(COUNT_START + local), 90);
+  for (const [start, end, value] of [[3200, 3800, 28], [4500, 9100, 32], [15900, 20500, 58], [27300, 31900, 78], [37600, 39000, 90]]) {
+    for (let local = start; local <= end; local += 50) assert.equal(countProgress(COUNT_START + local), value);
+  }
   assert.equal(countBeat(COUNT_START).state, 'opening');
-  assert.equal(countBeat(COUNT_START + 3500).state, 'settled');
-  assert.equal(countBeat(COUNT_START + 4200).box, 2);
-  assert.equal(countBeat(COUNT_START + 8600).state, 'settled');
-  assert.equal(countBeat(COUNT_START + 12500).state, 'sealed');
-  assert.equal(countBeat(COUNT_START + 12500).secondsUntilReveal, 1);
-  assert.equal(countBeat(COUNT_START + 13400).state, 'revealing');
+  assert.equal(countBeat(COUNT_START + 3199).state, 'opening');
+  assert.equal(countBeat(COUNT_START + 3200).state, 'settled');
+  assert.equal(countBeat(COUNT_START + 3799).box, 1);
+  assert.equal(countBeat(COUNT_START + 3800).box, 2);
+  assert.equal(countBeat(COUNT_START + 12899).state, 'opening');
+  assert.equal(countBeat(COUNT_START + 12900).state, 'settled');
+  assert.equal(countBeat(COUNT_START + 37599).state, 'settled');
+  assert.equal(countBeat(COUNT_START + 37600).state, 'sealed');
+  assert.equal(countBeat(COUNT_START + 37600).secondsUntilReveal, 2);
+  assert.equal(countBeat(COUNT_START + 38999).state, 'sealed');
+  assert.equal(countBeat(COUNT_START + 39000).state, 'revealing');
   assert.equal(countProgress(SHOW_DURATION), 100);
 });
 
@@ -199,11 +204,82 @@ test('progress inverse returns the first hold edge and keeps incident scenes rea
   for (let progress = 0; progress <= 100; progress += 0.5) {
     assert.ok(Math.abs(countProgress(elapsedAtProgress(progress)) - progress) < 0.0001);
   }
-  assert.equal(elapsedAtProgress(28), COUNT_START + 3500);
-  assert.equal(elapsedAtProgress(64), COUNT_START + 8600);
-  assert.equal(elapsedAtProgress(90), COUNT_START + 12500);
-  assert.ok(elapsedAtProgress(58) - elapsedAtProgress(32) > 2500);
-  assert.ok(elapsedAtProgress(78) - elapsedAtProgress(58) > 2500);
+  assert.equal(elapsedAtProgress(28), COUNT_START + 3200);
+  assert.equal(elapsedAtProgress(32), 13_500);
+  assert.equal(elapsedAtProgress(58), 24_900);
+  assert.equal(elapsedAtProgress(78), 36_300);
+  assert.equal(elapsedAtProgress(90), COUNT_START + 37600);
+  assert.ok(elapsedAtProgress(58) - elapsedAtProgress(32) > STORY_DURATION);
+  assert.ok(elapsedAtProgress(78) - elapsedAtProgress(58) > STORY_DURATION);
+});
+
+test('each incident has exact announcement, action, verdict, and aftermath boundaries', () => {
+  const result = withRandomSamples(Array(160).fill(0), () => createElection(candidates));
+  assert.equal(STORY_DURATION, 8400);
+  assert.equal(STORY_RESOLVE_AT, 4600);
+  for (const [index, event] of result.events.entries()) {
+    const start = elapsedAtProgress(event.progress);
+    assert.equal(storyBeat(result.events, start - 1), undefined);
+    for (const [age, stage] of [[0, 'announcement'], [1399, 'announcement'], [1400, 'action'], [4599, 'action'], [4600, 'verdict'], [6399, 'verdict'], [6400, 'aftermath'], [8399, 'aftermath']]) {
+      const beat = storyBeat(result.events, start + age);
+      assert.equal(beat.event.id, event.id);
+      assert.equal(beat.index, index + 1);
+      assert.equal(beat.age, age);
+      assert.equal(beat.stage, stage);
+    }
+    assert.equal(storyBeat(result.events, start + STORY_DURATION), undefined);
+    assert.equal(countProgress(start), event.progress);
+    assert.equal(countProgress(start + STORY_RESOLVE_AT), event.progress);
+    assert.ok(countProgress(start + STORY_RESOLVE_AT + 50) > event.progress);
+    assert.equal(countProgress(start + STORY_DURATION), [45, 62, 82][index]);
+  }
+});
+
+test('a scandal is resolved at the verdict rather than its announcement', () => {
+  const result = withRandomSamples(Array(160).fill(0), () => createElection(candidates));
+  const frames = createDrama(result);
+  for (const event of result.events.filter(event => event.eliminatedId)) {
+    const start = elapsedAtProgress(event.progress);
+    assert.ok(!resolvedEvents(result.events, start).some(item => item.id === event.id));
+    assert.ok(!resolvedEvents(result.events, start + STORY_RESOLVE_AT - 1).some(item => item.id === event.id));
+    assert.ok(resolvedEvents(result.events, start + STORY_RESOLVE_AT).some(item => item.id === event.id));
+    const verdictFrame = frameAt(frames, countProgress(start + STORY_RESOLVE_AT));
+    assert.ok(verdictFrame.percentages[event.eliminatedId] > 0);
+    const afterFrame = frameAt(frames, countProgress(start + STORY_DURATION));
+    assert.equal(afterFrame.percentages[event.eliminatedId], 0);
+  }
+});
+
+test('story outcomes describe the real before and after actor ranks', () => {
+  for (let firstKind = 0; firstKind < 5; firstKind++) {
+    const result = withRandomSamples([0, firstKind], () => createElection(candidates));
+    const frames = createDrama(result);
+    for (const event of result.events) {
+      const outcome = storyOutcome(result, event, frames);
+      const beforeOrder = ranking(frameAt(frames, event.progress).percentages).filter(id => frameAt(frames, event.progress).percentages[id] > 0);
+      const afterProgress = event.progress === 32 ? 45 : event.progress === 58 ? 62 : 82;
+      const afterFrame = frameAt(frames, afterProgress);
+      const afterOrder = ranking(afterFrame.percentages).filter(id => afterFrame.percentages[id] > 0);
+      assert.equal(outcome.eventId, event.id);
+      assert.equal(outcome.actors.length, event.actors.length);
+      for (const actor of outcome.actors) {
+        assert.equal(actor.beforeRank, beforeOrder.indexOf(actor.id) + 1);
+        assert.equal(actor.afterRank, afterOrder.includes(actor.id) ? afterOrder.indexOf(actor.id) + 1 : null);
+        assert.equal(actor.name, result.candidates.find(candidate => candidate.id === actor.id).name);
+        assert.ok(outcome.title.includes(actor.name) && outcome.summary.includes(actor.name));
+        if (actor.afterRank === null) assert.equal(actor.label, '후보 탈락');
+        else if (actor.beforeRank === actor.afterRank) assert.equal(actor.label, `${actor.afterRank}위 유지`);
+        else assert.equal(actor.label, `${actor.beforeRank}위 → ${actor.afterRank}위`);
+      }
+    }
+    const firstOutcome = storyOutcome(result, result.events[0], frames);
+    if (['brawl', 'mishap', 'blackout'].includes(result.events[0].kind)) {
+      assert.equal(firstOutcome.actors[0].beforeRank, 1);
+      assert.equal(firstOutcome.actors[0].afterRank, candidates.length);
+    }
+    if (result.events[0].kind === 'brawl') assert.equal(firstOutcome.actors[1].afterRank, 1);
+    if (result.events[0].kind === 'comeback' || result.events[0].kind === 'alliance') assert.equal(firstOutcome.actors[0].afterRank, 1);
+  }
 });
 
 test('race moments report actual counted-vote gaps and exclude withdrawn candidates', () => {

@@ -1,18 +1,21 @@
-import type { Candidate, DramaFrame, ElectionResult } from './election';
+import { frameAt, type Candidate, type DramaFrame, type ElectionEvent, type ElectionResult } from './election';
 
 export type ShowPhase = 'declaration' | 'voting' | 'counting' | 'winner';
-export const SHOW_DURATION = 30_000;
+export const SHOW_DURATION = 58_000;
 export const COUNT_START = 9_000;
-export const WINNER_START = 26_000;
+export const WINNER_START = 52_000;
+export const STORY_DURATION = 8_400;
+export const STORY_RESOLVE_AT = 4_600;
 
 export function phaseFor(elapsed: number): ShowPhase {
   return elapsed < 5_000 ? 'declaration' : elapsed < COUNT_START ? 'voting' : elapsed < WINNER_START ? 'counting' : 'winner';
 }
 
-// Incoming batches keep the live graph moving. Short pauses mark the two
-// confirmed district tallies and the seal on the last box.
-const countClock = [[0, 0], [3_500, 28], [4_200, 28], [8_600, 64],
-  [9_300, 64], [12_500, 90], [13_400, 90], [17_000, 100]];
+// Each incident pauses the tally until its verdict. The following 3.8 seconds
+// visibly apply that incident's result while the aftermath remains on screen.
+const countClock = [[0, 0], [3_200, 28], [3_800, 28], [4_500, 32],
+  [9_100, 32], [12_900, 45], [15_900, 58], [20_500, 58], [24_300, 62],
+  [27_300, 78], [31_900, 78], [35_700, 82], [37_600, 90], [39_000, 90], [43_000, 100]];
 
 export function countProgress(elapsed: number): number {
   const local = elapsed - COUNT_START;
@@ -34,6 +37,60 @@ export function elapsedAtProgress(progress: number): number {
   return COUNT_START + previousTime + (bounded - previousValue) / (nextValue - previousValue) * (nextTime - previousTime);
 }
 
+export type StoryStage = 'announcement' | 'action' | 'verdict' | 'aftermath';
+export type StoryBeat = { event: ElectionEvent; index: number; age: number; stage: StoryStage };
+
+export function storyBeat(events: ElectionEvent[], elapsed: number): StoryBeat | undefined {
+  const index = events.findIndex(event => {
+    const age = elapsed - elapsedAtProgress(event.progress);
+    return age >= 0 && age < STORY_DURATION;
+  });
+  if (index < 0) return undefined;
+  const event = events[index];
+  const age = elapsed - elapsedAtProgress(event.progress);
+  const stage: StoryStage = age < 1_400 ? 'announcement' : age < STORY_RESOLVE_AT ? 'action' : age < 6_400 ? 'verdict' : 'aftermath';
+  return { event, index: index + 1, age, stage };
+}
+
+export function resolvedEvents(events: ElectionEvent[], elapsed: number): ElectionEvent[] {
+  return events.filter(event => elapsed >= elapsedAtProgress(event.progress) + STORY_RESOLVE_AT);
+}
+
+export type StoryActorOutcome = {
+  id: string;
+  name: string;
+  color: string;
+  beforeRank: number;
+  afterRank: number | null;
+  label: string;
+};
+export type StoryOutcome = { eventId: string; title: string; summary: string; actors: StoryActorOutcome[] };
+
+export function storyOutcome(result: ElectionResult, event: ElectionEvent, frames: DramaFrame[]): StoryOutcome {
+  const before = frameAt(frames, event.progress);
+  const after = frameAt(frames, event.progress <= 32 ? 45 : event.progress <= 58 ? 62 : 82);
+  const rank = (frame: DramaFrame, id: string) => {
+    const order = [...result.candidates].filter(candidate => frame.percentages[candidate.id] > 0)
+      .sort((a, b) => frame.percentages[b.id] - frame.percentages[a.id]);
+    const index = order.findIndex(candidate => candidate.id === id);
+    return index < 0 ? null : index + 1;
+  };
+  const actors: StoryActorOutcome[] = event.actors.flatMap(id => {
+    const candidate = result.candidates.find(item => item.id === id);
+    if (!candidate) return [];
+    const beforeRank = rank(before, id) ?? 0;
+    const afterRank = rank(after, id);
+    const label = afterRank === null ? '후보 탈락' : beforeRank === afterRank ? `${afterRank}위 유지` : `${beforeRank}위 → ${afterRank}위`;
+    return [{ ...candidate, beforeRank, afterRank, label }];
+  });
+  const names = actors.map(actor => actor.name).join(' · ');
+  const changes = actors.map(actor => `${actor.name} ${actor.label}`).join(' · ');
+  const headings = { brawl: '대결 판정', scandal: '후보 탈락', comeback: '추격 결과', mishap: '실수 판정', alliance: '연대 결과', blackout: '정전 후 판세' };
+  const title = `${names} ${headings[event.kind]}`;
+  const summary = event.eliminatedId ? `${changes}. 남은 후보들의 집계가 이어집니다.` : `${changes}. ${event.kind === 'mishap' || event.kind === 'blackout' ? '후보 자격은 유지됩니다.' : '이 결과가 실시간 판세에 반영됩니다.'}`;
+  return { eventId: event.id, title, summary, actors };
+}
+
 export type CountingBeat = {
   id: 'first' | 'second' | 'last';
   box: 1 | 2 | 3;
@@ -46,14 +103,14 @@ export type CountingBeat = {
 
 export function countBeat(elapsed: number): CountingBeat {
   const local = elapsed - COUNT_START;
-  if (local < 3_500) return { id: 'first', box: 1, state: 'opening', label: '첫 번째 투표함', location: '중앙광장', detail: '첫 지역의 표가 들어옵니다. 실시간 득표율을 지켜보세요.' };
-  if (local < 4_200) return { id: 'first', box: 1, state: 'settled', label: '첫 번째 투표함 집계 완료', location: '중앙광장', detail: '초반 집계가 끝났습니다. 강변마을의 표가 곧 들어옵니다.' };
-  if (local < 8_600) return { id: 'second', box: 2, state: 'opening', label: '두 번째 투표함', location: '강변마을', detail: '강변마을의 표와 후보들의 소식이 함께 들어옵니다.' };
-  if (local < 12_500) return { id: 'second', box: 2, state: 'settled', label: '접전 속 후속 집계', location: '강변마을', detail: local < 9_300 ? '강변마을 집계 완료. 외곽 투표소의 표를 기다립니다.' : '외곽 투표소의 표가 합류합니다. 선두 격차가 좁혀지고 있습니다.' };
-  if (local < 13_400) return {
+  if (local < 3_200) return { id: 'first', box: 1, state: 'opening', label: '첫 번째 투표함', location: '중앙광장', detail: '첫 지역의 표가 들어옵니다. 실시간 득표율을 지켜보세요.' };
+  if (local < 3_800) return { id: 'first', box: 1, state: 'settled', label: '첫 번째 투표함 집계 완료', location: '중앙광장', detail: '초반 집계가 끝났습니다. 강변마을의 표가 곧 들어옵니다.' };
+  if (local < 12_900) return { id: 'second', box: 2, state: 'opening', label: '두 번째 투표함', location: '강변마을', detail: '강변마을의 표와 후보들의 소식이 함께 들어옵니다.' };
+  if (local < 37_600) return { id: 'second', box: 2, state: 'settled', label: '사건이 바꾼 판세', location: '강변마을', detail: '사건의 판정과 새로운 표가 실시간 득표율에 반영됩니다.' };
+  if (local < 39_000) return {
     id: 'last', box: 3, state: 'sealed', label: '마지막 투표함 도착', location: '언덕동',
     detail: '봉인된 마지막 투표함. 이 안의 표가 오늘의 주인공을 결정합니다.',
-    secondsUntilReveal: Math.max(1, Math.ceil((13_400 - local) / 1_000)),
+    secondsUntilReveal: Math.max(1, Math.ceil((39_000 - local) / 1_000)),
   };
   return { id: 'last', box: 3, state: 'revealing', label: '마지막 투표함 개봉', location: '언덕동', detail: '봉인을 풀었습니다. 마지막 한 표까지 확인합니다.' };
 }
@@ -109,7 +166,7 @@ export function newsBeat(phase: ShowPhase, result: ElectionResult, frame: DramaF
   const storyTime = elapsed ?? elapsedAtProgress(frame.progress);
   const beat = countBeat(storyTime);
   const gapText = new Intl.NumberFormat('ko-KR').format(gapVotes);
-  if (beat.id === 'first') return { id: 'first-box', tag: '초반 판세', title: `${leader.name} 후보 선두 · ${runner.name} 후보 뒤쫓는 중`, detail: `현재 ${gapText}표 차이. 첫 지역의 집계가 계속됩니다.`, urgent: false };
+  if (beat.id === 'first') return { id: 'first-box', tag: '초반 판세', title: `${leader.name} 후보 선두 · ${runner.name} 후보 뒤쫓는 중`, detail: `현재 ${gapText}표 차이. ${beat.state === 'settled' ? '첫 집계 완료, 다음 지역의 표를 기다립니다.' : '첫 지역의 집계가 계속됩니다.'}`, urgent: false };
   if (beat.id === 'second' && beat.state === 'opening') return { id: 'second-box', tag: '판세 변화', title: `${leader.name} · ${runner.name}, ${gapText}표 차이`, detail: '표가 들어올 때마다 후보들의 표정이 달라지고 있습니다.', urgent: close };
   if (beat.id === 'second') return { id: 'tight-race', tag: close ? '초접전' : '후속 집계', title: `${leader.name} · ${runner.name}${third ? ` · ${third.name}` : ''}, 마지막까지 접전`, detail: `선두 격차 ${gapText}표. 마지막 투표함에 승부가 걸렸습니다.`, urgent: close };
   if (beat.state === 'sealed') return { id: 'last-sealed', tag: '마지막 투표함', title: '아직 누구도 안심할 수 없습니다', detail: '언덕동 투표함의 봉인을 곧 해제합니다. 여러분의 후보를 지켜보세요.', urgent: true };

@@ -1,15 +1,10 @@
-import { STORY_CATALOG, type StoryKind } from './storyCatalog';
+import { STORY_CATALOG, type StoryKind, type StoryTemplate } from './storyCatalog';
 
 export type { StoryKind } from './storyCatalog';
 export type Candidate = { id: string; name: string; color: string };
-export type ElectionEvent = {
-  id: string;
+export type ElectionEvent = StoryTemplate & {
   progress: number;
-  kind: StoryKind;
   actors: string[];
-  title: string;
-  detail: string;
-  prop: string;
   eliminatedId?: string;
 };
 export type ElectionResult = {
