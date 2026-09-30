@@ -10,9 +10,10 @@ const longNames: Record<number, string> = { 0: '가나다라마바사아자차�
 const candidates = CANDIDATE_COLORS.map((color, index) => ({ id: String(index + 1), name: longNames[index] ?? `후보 ${index + 1}`, color }));
 const host = document.querySelector<HTMLDivElement>('#stage')!;
 let game: Phaser.Game | undefined;
-let selectedKind: StoryKind | 'winner' = 'brawl';
+type PreviewKind = StoryKind | 'winner' | 'voting';
+let selectedKind: PreviewKind = 'brawl';
 
-function preview(kind: StoryKind | 'winner', freezeAt?: number) {
+function preview(kind: PreviewKind, freezeAt?: number) {
   selectedKind = kind;
   document.querySelector('#status')!.textContent = '재생 중';
   game?.destroy(true);
@@ -24,8 +25,8 @@ function preview(kind: StoryKind | 'winner', freezeAt?: number) {
   const result: ElectionResult = { candidates, winnerId: '1', totalVotes: 4_000_000, votes: Object.fromEntries(candidates.map(candidate => [candidate.id, Math.round(percentages[candidate.id] * 40_000)])), percentages, events: event ? [event] : [], eliminatedIds: kind === 'scandal' ? ['3'] : [] };
   const drama = createDrama(result);
   const initial = frameAt(drama, 32);
-  const startAt = kind === 'winner' ? WINNER_START : elapsedAtProgress(32);
-  const state: StageState = { phase: kind === 'winner' ? 'winner' : 'counting', candidates, winnerId: '1', topic: '오늘 커피 쏠 사람은?', percentages: initial.percentages, finalPercentages: percentages, progress: 32, totalVotes: result.totalVotes, preview: false, reducedMotion: false, elapsed: startAt, cheeringId: '3', events: result.events, storyOutcomes: event ? [storyOutcome(result, event, drama)] : [] };
+  const startAt = kind === 'voting' ? 5000 : kind === 'winner' ? WINNER_START : elapsedAtProgress(32);
+  const state: StageState = { phase: kind === 'voting' ? 'voting' : kind === 'winner' ? 'winner' : 'counting', candidates, winnerId: '1', topic: '오늘 커피 쏠 사람은?', percentages: initial.percentages, finalPercentages: percentages, progress: kind === 'voting' ? 0 : 32, totalVotes: result.totalVotes, preview: false, reducedMotion: false, elapsed: startAt, cheeringId: '3', events: result.events, storyOutcomes: event ? [storyOutcome(result, event, drama)] : [] };
   class PreviewScene extends ElectionScene {
     private began: number | undefined;
     override update(time: number, delta: number) {
@@ -33,12 +34,12 @@ function preview(kind: StoryKind | 'winner', freezeAt?: number) {
       const stopAt = freezeAt === undefined ? undefined : kind === 'winner' ? 3100 : freezeAt;
       const age = stopAt === undefined ? time - this.began : Math.min(stopAt, time - this.began);
       state.elapsed = startAt + age;
-      state.progress = kind === 'winner' ? 100 : countProgress(state.elapsed);
-      state.percentages = kind === 'winner' ? percentages : frameAt(drama, state.progress).percentages;
+      state.progress = kind === 'voting' ? 0 : kind === 'winner' ? 100 : countProgress(state.elapsed);
+      state.percentages = kind === 'voting' || kind === 'winner' ? percentages : frameAt(drama, state.progress).percentages;
       super.update(time, delta);
       if (freezeAt !== undefined && age >= stopAt!) {
         this.scene.pause();
-        document.querySelector('#status')!.textContent = '중간 장면 정지됨';
+        document.querySelector('#status')!.textContent = kind === 'voting' ? `투표소 ${age / 1000}초 장면 정지됨` : '중간 장면 정지됨';
       }
     }
   }
@@ -46,7 +47,7 @@ function preview(kind: StoryKind | 'winner', freezeAt?: number) {
   game = new Phaser.Game({ type: Phaser.CANVAS, parent: host, width: STAGE_WIDTH, height: STAGE_HEIGHT, pixelArt: true, antialias: false, banner: false, scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH }, scene: [scene] });
   document.querySelectorAll<HTMLButtonElement>('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.kind === kind)));
 }
-document.querySelectorAll<HTMLButtonElement>('button[data-kind]').forEach(button => button.addEventListener('click', () => preview(button.dataset.kind as StoryKind | 'winner')));
+document.querySelectorAll<HTMLButtonElement>('button[data-kind]').forEach(button => button.addEventListener('click', () => preview(button.dataset.kind as PreviewKind)));
 document.querySelectorAll<HTMLButtonElement>('button[data-freeze]').forEach(button => button.addEventListener('click', () => preview(selectedKind, Number(button.dataset.freeze))));
 new ResizeObserver(() => game?.scale.refresh()).observe(host);
 preview('brawl');

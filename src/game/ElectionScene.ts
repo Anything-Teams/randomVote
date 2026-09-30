@@ -371,8 +371,11 @@ export class ElectionScene extends Phaser.Scene {
       this.voters.push({ citizen, ballot, offset: i * 347, duration: 4650 + i % 5 * 173, lastDrop: -1 });
     }
     for (let i = 0; i < 4; i++) {
-      const flag = this.rect(this.root, 806 + i * 117, 176, 52, 30, i % 2 ? 0xff7957 : gold);
-      this.rect(this.root, 804 + i * 117, 176, 4, 90, ink);
+      const poleX = 864 + i * 90;
+      // All four poles sit on the roof at y=202, clear of the station sign.
+      this.rect(this.root, poleX, 116, 4, 86, ink);
+      this.rect(this.root, poleX - 4, 199, 12, 6, 0x253d41);
+      const flag = this.rect(this.root, poleX + 4, 119, 46, 28, i % 2 ? 0xff7957 : gold);
       if (!state.reducedMotion) this.tweens.add({ targets: flag, scaleX: 0.72, duration: 580, yoyo: true, repeat: -1, delay: i * 150, ease: 'Sine.inOut' });
     }
   }
