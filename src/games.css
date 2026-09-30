@@ -1,0 +1,33 @@
+.game-picker { display: flex; align-items: stretch; gap: 5px; }
+.game-picker button { display: flex; align-items: center; justify-content: center; gap: 7px; min-width: 83px; padding: 6px 12px; border: 1px solid #48566d; background: #22304b; color: #b9c8dd; font-size: 12px; font-weight: 850; transition: background 180ms, color 180ms; }
+.game-picker small { font: 800 9px monospace; color: #7e93b0; }
+.game-picker button:hover { border-color: #f9d56e; }
+.game-picker button[aria-pressed="true"] { background: #f9d56e; border-color: #f9d56e; color: #15213b; box-shadow: 2px 2px 0 #ff7654; }
+.game-picker button[aria-pressed="true"] small { color: #826134; }
+.game-instruction { padding: 11px 13px; border: 1px solid #d9dfd7; background: #f3f5eb; }
+.game-instruction b { font-size: 13px; }
+.game-instruction p { margin: 5px 0 0; font-size: 12px; line-height: 1.5; color: #687780; }
+.sports-shell { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.sports-toolbar { display: flex; flex: none; justify-content: space-between; align-items: center; color: #b3c7ce; background: #14263a; padding: 8px 12px; border: 1px solid #3e5668; font-size: 11px; }
+.sports-toolbar b { margin-right: 10px; color: #fbd975; }
+.sports-body, .sports-preview-body { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.sports-body > *, .sports-preview-body > * { flex: 1; min-height: 0; min-width: 0; }
+.sports-preview { border-color: #15213b; }
+.sports-actions { display: flex; flex: none; gap: 10px; }
+.sports-actions > button { flex: 1; min-width: 0; height: 36px; margin: 0; font-size: 12px; }
+.sports-actions > button:only-child { background: #17283e; color: #bdccd6; border-color: #40576b; }
+@media (max-width: 1100px) { .header-badge { display: none; } }
+@media (max-width: 760px), (max-height: 650px) {
+  .game-picker { gap: 4px; }
+  .game-picker button { min-width: 54px; padding: 4px 8px; gap: 4px; font-size: 11px; }
+  .game-picker small { display: none; }
+  .brand { font-size: 13px; gap: 6px; }
+  .site-header { gap: 8px; }
+  .sports-shell { gap: 6px; }
+  .sports-toolbar { padding: 5px 8px; font-size: 10px; }
+  .sports-actions { gap: 6px; }
+  .sports-actions > button { height: 28px; font-size: 10px; }
+  .game-instruction { padding: 7px 9px; }
+  .game-instruction b { font-size: 11px; }
+  .game-instruction p { font-size: 10px; line-height: 1.4; }
+}

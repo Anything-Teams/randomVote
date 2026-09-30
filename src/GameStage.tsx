@@ -11,6 +11,7 @@ type Props = {
   topic: string;
   percentages?: Record<string, number>;
   finalPercentages?: Record<string, number>;
+  finalVotes?: Record<string, number>;
   progress?: number;
   totalVotes?: number;
   preview?: boolean;
@@ -26,15 +27,15 @@ const EMPTY_PERCENTAGES: Record<string, number> = {};
 const EMPTY_EVENTS: ElectionEvent[] = [];
 const EMPTY_OUTCOMES: StoryOutcome[] = [];
 
-export default function GameStage({ phase, candidates, winnerId, topic, percentages = EMPTY_PERCENTAGES, finalPercentages = EMPTY_PERCENTAGES, progress = 0, totalVotes = 0, preview = false, runId = 0, reducedMotion = false, elapsed = 0, cheeringId, events = EMPTY_EVENTS, storyOutcomes = EMPTY_OUTCOMES, paused = false }: Props) {
+export default function GameStage({ phase, candidates, winnerId, topic, percentages = EMPTY_PERCENTAGES, finalPercentages = EMPTY_PERCENTAGES, finalVotes = EMPTY_PERCENTAGES, progress = 0, totalVotes = 0, preview = false, runId = 0, reducedMotion = false, elapsed = 0, cheeringId, events = EMPTY_EVENTS, storyOutcomes = EMPTY_OUTCOMES, paused = false }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
   const sampledAt = useRef(performance.now());
-  const state = useRef<StageState>({ phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events, storyOutcomes, paused });
+  const state = useRef<StageState>({ phase, candidates, winnerId, topic, percentages, finalPercentages, finalVotes, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events, storyOutcomes, paused });
   useEffect(() => {
     if (state.current.elapsed !== elapsed || state.current.paused !== paused) sampledAt.current = performance.now();
-    state.current = { phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events, storyOutcomes, paused };
-  }, [phase, candidates, winnerId, topic, percentages, finalPercentages, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events, storyOutcomes, paused]);
+    state.current = { phase, candidates, winnerId, topic, percentages, finalPercentages, finalVotes, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events, storyOutcomes, paused };
+  }, [phase, candidates, winnerId, topic, percentages, finalPercentages, finalVotes, progress, totalVotes, preview, reducedMotion, elapsed, cheeringId, events, storyOutcomes, paused]);
 
   useEffect(() => {
     const game = gameRef.current;

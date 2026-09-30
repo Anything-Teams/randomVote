@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import GameStage from './GameStage';
 import type { DramaFrame, ElectionEvent, ElectionResult } from './election';
-import { countBeat, COUNT_START, newsBeat, resolvedEvents, SHOW_DURATION, STORY_RESOLVE_AT, storyBeat, storyOutcome, winnerPromise, type ShowPhase, type StoryActorOutcome } from './show';
+import { countBeat, COUNT_START, finalResultGap, newsBeat, resolvedEvents, SHOW_DURATION, STORY_RESOLVE_AT, storyBeat, storyOutcome, tallyVotes, winnerPromise, type ShowPhase, type StoryActorOutcome } from './show';
 
 type Props = {
   result: ElectionResult;
@@ -92,8 +92,7 @@ export default function BroadcastShow({ result, frame, drama, phase, topic, elap
     resumeAfterReview.current = false;
   }
 
-  const winner = result.candidates.find(candidate => candidate.id === result.winnerId)!;
-  const finalGap = result.votes[winner.id] - Math.max(...result.candidates.filter(candidate => candidate.id !== winner.id).map(candidate => result.votes[candidate.id]));
+  const { winner, gapVotes: finalGap } = finalResultGap(result);
   const cheering = result.candidates.find(candidate => candidate.id === cheeringId);
   const cheeringRank = sorted.findIndex(candidate => candidate.id === cheeringId) + 1;
   const remaining = Math.max(0, Math.ceil((SHOW_DURATION - elapsed) / 1000));
@@ -111,10 +110,10 @@ export default function BroadcastShow({ result, frame, drama, phase, topic, elap
     <section className="broadcast-card cinematic-broadcast" aria-label="픽셀 선거 쇼">
       <div className="broadcast-head"><span className="live-pill"><span />{paused ? 'PAUSED · 잠깐 쉬어가는 중' : finished ? 'ELECTION COMPLETE' : 'LIVE · 특별 개표 방송'}</span><div className="broadcast-tools"><span>PIXEL TV / CH.01</span>{!finished && <button type="button" className="playback-button" onClick={onPause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div></div>
       <div className={`stage-screen ${sealed ? 'suspense' : ''}`}>
-        <GameStage phase={phase} candidates={result.candidates} winnerId={result.winnerId} topic={topic} percentages={frame.percentages} progress={frame.progress} totalVotes={result.totalVotes} runId={runId} reducedMotion={reducedMotion} elapsed={elapsed} cheeringId={cheeringId} events={result.events} storyOutcomes={outcomes} paused={paused} />
+        <GameStage phase={phase} candidates={result.candidates} winnerId={result.winnerId} topic={topic} percentages={frame.percentages} finalPercentages={result.percentages} finalVotes={result.votes} progress={frame.progress} totalVotes={result.totalVotes} runId={runId} reducedMotion={reducedMotion} elapsed={elapsed} cheeringId={cheeringId} events={result.events} storyOutcomes={outcomes} paused={paused} />
         <div className="cinema-hud" aria-hidden="true"><span>{cue ? `사건 ${String(cue.index).padStart(2, '0')} · ${stageLabels[stageIndex]}` : phase === 'counting' ? finalSprint ? '막판 접전 · 마지막 표' : '실시간 개표' : ['출마 특별판', '전국 투표 현장', '개표 특보', '당선 세리머니'][phases.indexOf(phase)]}</span><span>{paused ? '일시정지' : finished ? 'COMPLETE' : `결과까지 00:${String(remaining).padStart(2, '0')}`}</span></div>
         <div key={beat.id} className={`news-lower-third ${beat.urgent ? 'urgent' : ''}`}><span className="news-tag">{beat.tag}</span><div><strong>{beat.title}</strong><span>{phase === 'winner' ? winnerPromise(topic) : beat.detail}</span></div></div>
-        <div key={`${runId}-${phase}`} className="scene-wipe" aria-hidden="true" />
+        {phase !== 'winner' && <div key={`${runId}-${phase}`} className="scene-wipe" aria-hidden="true" />}
         {sealed && <div className="suspense-vignette" aria-hidden="true" />}
       </div>
       <div className="news-ticker"><span>{event ? '사건 속보' : 'PIXEL NEWS'}</span><div><p>{topic}　 ◆　 {beat.detail}　 ◆　 모든 후보 동일 확률　 ◆　 {topic}　 ◆　 {beat.detail}</p></div></div>
@@ -146,10 +145,11 @@ export default function BroadcastShow({ result, frame, drama, phase, topic, elap
             const selected = candidate.id === cheeringId;
             const impact = phase === 'counting' ? latestOutcome?.actors.find(actor => actor.id === candidate.id) : undefined;
             const change = impact?.afterRank !== null && impact?.afterRank !== undefined ? impact.beforeRank - impact.afterRank : 0;
+            const received = dropped ? 0 : tallyVotes(candidate.id, frame.percentages, frame.progress, result.totalVotes, result.votes);
             const slot = phase === 'winner' ? [...result.candidates].sort((a, b) => frame.percentages[b.id] - frame.percentages[a.id]).findIndex(item => item.id === candidate.id) : index;
             const style = { '--rank': slot, '--compact-row': Math.floor(slot / 2), '--compact-column': slot % 2, '--candidate-color': candidate.color } as CSSProperties;
             return <button type="button" className={`vote-row moving-row ${hasTally && rank === 0 ? 'is-leading' : ''} ${selected ? 'is-cheered' : ''} ${dropped ? 'is-disqualified' : ''} ${event?.actors.includes(candidate.id) ? 'event-actor' : ''} ${phase === 'winner' && candidate.id === winner.id ? 'elected' : ''}`} key={candidate.id} style={style} onClick={() => setCheeringId(previous => previous === candidate.id ? undefined : candidate.id)} aria-label={`${candidate.name} 응원${dropped ? ' · 탈락' : ''}`} aria-pressed={selected} title={`${candidate.name}${dropped ? ' · 사건으로 탈락' : ' 응원 · 당선 확률은 변하지 않습니다'}`}>
-              <span className="vote-info"><span className="rank">{dropped ? '×' : hasTally ? String(rank + 1).padStart(2, '0') : '—'}</span><span className="vote-color" style={{ backgroundColor: candidate.color }} /><span className="vote-name">{selected && <span className="cheer-heart">♥ </span>}{candidate.name}</span>{change !== 0 && <span className={`row-event-marker ${change > 0 ? 'is-up' : 'is-down'}`} title={impact!.label}>{change > 0 ? '↑' : '↓'}{Math.abs(change)}</span>}<strong>{dropped ? '탈락' : hasTally ? `${frame.percentages[candidate.id].toFixed(2)}%` : '—'}</strong></span>
+              <span className="vote-info"><span className="rank">{dropped ? '×' : hasTally ? String(rank + 1).padStart(2, '0') : '—'}</span><span className="vote-color" style={{ backgroundColor: candidate.color }} /><span className="vote-name">{selected && <span className="cheer-heart">♥ </span>}{candidate.name}</span>{change !== 0 && <span className={`row-event-marker ${change > 0 ? 'is-up' : 'is-down'}`} title={impact!.label}>{change > 0 ? '↑' : '↓'}{Math.abs(change)}</span>}<span className="vote-tally"><strong>{dropped ? '탈락' : hasTally ? `${frame.percentages[candidate.id].toFixed(2)}%` : '—'}</strong><small aria-label={`받은 표 ${format.format(received)}표`}>{format.format(received)}표</small></span></span>
               <span className="vote-track"><span style={{ width: `${hasTally && !dropped ? frame.percentages[candidate.id] : 0}%`, backgroundColor: candidate.color }} /></span>
             </button>;
           })}
@@ -157,7 +157,7 @@ export default function BroadcastShow({ result, frame, drama, phase, topic, elap
         {history.length > 0 && <section className="incident-history" aria-label="지난 사건 기록"><h3>사건 기록 <span>눌러서 다시 보기</span></h3><div>{history.map((past, index) => <button type="button" key={past.id} className="history-entry" onClick={() => review(past)} aria-label={`${past.title} 사건 기록 보기`} title={outcomes.find(item => item.eventId === past.id)!.summary}>
           <b>{String(index + 1).padStart(2, '0')} · {kindLabels[past.kind]}</b><span>{past.title}</span>
         </button>)}</div></section>}
-        {phase === 'winner' && <div className="winner-summary"><span>{cheeringId === winner.id ? '♥ 응원한 후보가 당선됐어요!' : '✦ 사건 끝에 살아남은 주인공'}</span><strong>{winner.name}</strong><small>{format.format(result.votes[winner.id])}표 · {format.format(finalGap)}표 차</small><p>{winnerPromise(topic)}</p></div>}
+        {phase === 'winner' && <div className="winner-summary"><span>{cheeringId === winner.id ? '♥ 응원한 후보가 당선됐어요!' : '✦ 사건 끝에 살아남은 주인공'}</span><strong title={winner.name}>{winner.name}</strong><small>{format.format(result.votes[winner.id])}표 · {format.format(finalGap)}표 차</small><p>{winnerPromise(topic)}</p></div>}
       </> : <>
         {phase === 'voting' && <div className="voting-counter"><span>투표함에 모인 표</span><strong>{format.format(Math.floor(result.totalVotes * voteFraction))}</strong></div>}
         <div className="candidate-roll">{result.candidates.map((candidate, index) => <button type="button" key={candidate.id} aria-label={`${candidate.name} 응원`} aria-pressed={candidate.id === cheeringId} className={candidate.id === cheeringId ? 'is-cheered' : ''} style={{ animationDelay: `${index * 80}ms` }} onClick={() => setCheeringId(previous => previous === candidate.id ? undefined : candidate.id)}><span style={{ backgroundColor: candidate.color }}>{String(index + 1).padStart(2, '0')}</span><strong>{candidate.name}</strong><b aria-hidden="true">{candidate.id === cheeringId ? '♥' : '♡'}</b></button>)}</div>

@@ -47,6 +47,19 @@
 .incident-review .incident-rank-changes strong { font-size: 20px; }
 .incident-review-summary { color: #726143; }
 .incident-review > .secondary-button { width: 100%; height: 40px; }
+.moving-row .vote-info { min-height: 0; }
+.vote-tally { flex: none; display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.vote-tally small { display: block; margin-top: 2px; font-size: 10px; font-weight: 700; color: #7b817c; white-space: nowrap; }
+.moving-row .vote-track { margin-top: 2px; }
+
+@media (min-width: 761px) and (max-height: 900px) {
+  .animated-leaderboard { --ranking-rows: var(--compact-count); }
+  .moving-row { width: 50%; transform: translate(calc(var(--compact-column) * 100%), calc(var(--compact-row) * 100%)); padding: 2px 4px; }
+  .moving-row .vote-name, .moving-row .vote-info strong { font-size: 11px; }
+  .moving-row .rank { width: 12px; font-size: 9px; }
+  .vote-tally small { font-size: 9px; }
+  .moving-row .vote-track { display: none; }
+}
 
 @media (max-width: 760px), (max-height: 650px) {
   .broadcast-tools { gap: 6px; }
@@ -66,12 +79,18 @@
   .history-entry > span { display: none; }
   .history-entry b { font-size: 8px; }
   .row-event-marker { padding: 1px 2px; font-size: 8px; }
+  .moving-row { padding-block: 1px; }
+  .vote-tally { line-height: 1.05; }
+  .vote-tally small { margin-top: 1px; font-size: 8px; }
+  .moving-row .vote-track { display: none; }
 }
 @media (max-width: 760px) and (min-height: 501px) {
   .cinematic-layout.story-active { grid-template-rows: minmax(0, .65fr) minmax(0, 1.35fr); }
+  .cinematic-layout.phase-winner { grid-template-rows: minmax(0, .65fr) minmax(0, 1.35fr); }
 }
 @media (max-width: 599px) and (max-height: 500px) {
   .cinematic-layout.story-active { grid-template-rows: minmax(0, .6fr) minmax(0, 1.4fr); }
+  .cinematic-layout.phase-winner { grid-template-rows: minmax(0, .6fr) minmax(0, 1.4fr); }
   .incident-desk h3 { font-size: 12px; margin: 3px 0; }
   .incident-desk { padding: 4px 6px; }
   .incident-desk-meta b { padding: 1px 3px; }
@@ -83,4 +102,12 @@
   .incident-review p { font-size: 13px; }
   .incident-review blockquote { font-size: 16px; padding: 10px; margin: 12px 0; }
   .incident-review .incident-rank-changes strong { font-size: 16px; }
+}
+@media (min-width: 600px) and (max-height: 500px) {
+  .count-progress { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 2px; padding-top: 0; border: 0; }
+  .count-progress small { grid-column: 2; grid-row: 1; margin: 0; text-align: right; font-size: 8px; }
+  .count-progress .progress-track { grid-column: 1 / -1; margin: 0; height: 2px; }
+  .live-desk .winner-summary { flex-direction: row; align-items: center; gap: 6px; padding: 4px 6px; }
+  .winner-summary strong { min-width: 0; font-size: 14px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .winner-summary small { flex: none; font-size: 8px; }
 }

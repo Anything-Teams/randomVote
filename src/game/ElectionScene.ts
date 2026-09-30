@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import type { Candidate, ElectionEvent } from '../election';
-import { COUNT_START, WINNER_START, STORY_DURATION, STORY_RESOLVE_AT, countBeat, storyBeat, resolvedEvents, type ShowPhase, type StoryOutcome } from '../show';
-import { PixelCitizen } from './PixelCitizen';
+import { COUNT_START, WINNER_START, STORY_DURATION, STORY_RESOLVE_AT, countBeat, storyBeat, resolvedEvents, tallyVotes, type ShowPhase, type StoryOutcome } from '../show';
+import { PixelCitizen, type Pose } from './PixelCitizen';
 
 export const STAGE_WIDTH = 1280;
 export const STAGE_HEIGHT = 720;
@@ -11,6 +11,7 @@ export type StageState = {
   winnerId: string;
   percentages: Record<string, number>;
   finalPercentages: Record<string, number>;
+  finalVotes?: Record<string, number>;
   progress: number;
   totalVotes: number;
   topic: string;
@@ -23,11 +24,12 @@ export type StageState = {
   paused?: boolean;
 };
 type Voter = { citizen: PixelCitizen; ballot: Phaser.GameObjects.Rectangle; offset: number; duration: number; lastDrop: number };
-type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; support: Phaser.GameObjects.Text; bar: Phaser.GameObjects.Rectangle; cap: Phaser.GameObjects.Rectangle; displayed: number; previous: number; previousRank: number; reactedAt: number; voteAt: number; width: number; height: number; movingUntil: number; direction: number; eliminationShare?: number; eliminationWidth?: number };
+type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; receivedVotes: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; support: Phaser.GameObjects.Text; bar: Phaser.GameObjects.Rectangle; cap: Phaser.GameObjects.Rectangle; displayed: number; previous: number; previousRank: number; reactedAt: number; voteAt: number; width: number; height: number; movingUntil: number; direction: number; eliminationShare?: number; eliminationWidth?: number };
 type VoteMote = { rectangle: Phaser.GameObjects.Rectangle; candidateId: string; age: number; startX: number; startY: number; life: number };
 type StoryActor = { candidate: Candidate; citizen: PixelCitizen; name: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle; side: number; scale: number };
 type StoryCut = { event: ElectionEvent; layer: Phaser.GameObjects.Container; dimmer: Phaser.GameObjects.Rectangle; title: Phaser.GameObjects.Text; stageLabel: Phaser.GameObjects.Text; evidence: Phaser.GameObjects.Text; dialogue: Phaser.GameObjects.Container; detail: Phaser.GameObjects.Text; verdict: Phaser.GameObjects.Container; actors: StoryActor[]; props: Phaser.GameObjects.Container[]; stamp: Phaser.GameObjects.Text; lamp: Phaser.GameObjects.Arc; darkness: Phaser.GameObjects.Rectangle; beam: Phaser.GameObjects.Graphics; impactFired: boolean; verdictStarted: boolean };
 type Confetti = { rectangle: Phaser.GameObjects.Rectangle; speed: number; drift: number };
+type VictorySupporter = { citizen: PixelCitizen; x: number; y: number; delay: number; reaction: Pose; bubble: Phaser.GameObjects.Container; message: Phaser.GameObjects.Text };
 type Spark = { rectangle: Phaser.GameObjects.Rectangle; vx: number; vy: number; age: number; life: number; gravity: number };
 type NewspaperCard = { candidate: Candidate; card: Phaser.GameObjects.Container; citizen: PixelCitizen; background: Phaser.GameObjects.Rectangle; portrait: Phaser.GameObjects.Rectangle; rules: Phaser.GameObjects.Rectangle[]; nameBand: Phaser.GameObjects.Rectangle; number: Phaser.GameObjects.Text; name: Phaser.GameObjects.Text };
 const ink = 0x14223b;
@@ -68,6 +70,10 @@ export class ElectionScene extends Phaser.Scene {
   private victoryPayoffSweat?: Phaser.GameObjects.Container;
   private victoryPayoffStarted = false;
   private victoryPayoffPose: 'nervous' | 'surprised' = 'nervous';
+  private victorySupporters: VictorySupporter[] = [];
+  private victoryCrown?: Phaser.GameObjects.Container;
+  private victoryMomentAt = 0;
+  private victoryImpactFired = false;
   private lastBoxImpact = 0;
   private screenWindows: Phaser.GameObjects.Rectangle[] = [];
   private countingTitle?: Phaser.GameObjects.Text;
@@ -77,6 +83,7 @@ export class ElectionScene extends Phaser.Scene {
   private countingPortrait?: Phaser.GameObjects.Container;
   private countingProfileCitizens: PixelCitizen[] = [];
   private countingProfilePercentages: Phaser.GameObjects.Text[] = [];
+  private countingProfileVotes: Phaser.GameObjects.Text[] = [];
   private countingProfileKey = '';
   private countingBeatKey = '';
   private countingReactions = new Map<string, { pose: 'wave' | 'cheer' | 'surprised' | 'nervous'; until: number }>();
@@ -173,6 +180,8 @@ export class ElectionScene extends Phaser.Scene {
     this.voteCounter = undefined;
     this.marginText = undefined;
     this.winner = undefined;
+    this.victorySupporters = [];
+    this.victoryCrown = undefined;
     this.countdownLabel = undefined;
     this.ballotBox = undefined;
     this.lastFirework = -1;
@@ -189,7 +198,7 @@ export class ElectionScene extends Phaser.Scene {
         this.destroyPhase(old);
       } });
     }
-    if (!first && !state.reducedMotion) {
+    if (!first && !state.reducedMotion && phase !== 'winner') {
       this.root.setX(150).setAlpha(0);
       this.tweens.add({ targets: this.root, x: 0, alpha: 1, duration: 680, ease: 'Cubic.out' });
     }
@@ -393,6 +402,7 @@ export class ElectionScene extends Phaser.Scene {
     this.countingProfileKey = '';
     this.countingProfileCitizens = [];
     this.countingProfilePercentages = [];
+    this.countingProfileVotes = [];
     this.countingVotes = [];
     this.countingAxis = [];
     this.countingLastProgress = -1;
@@ -440,13 +450,22 @@ export class ElectionScene extends Phaser.Scene {
       const scale = Math.min(1.85, height / 57);
       const citizen = this.citizen(panel, candidate, index, 252, height - 5, scale);
       citizen.pose = 'idle';
-      const percentage = this.text(panel, '0.00%', width - 13, middle - 11, height > 70 ? 23 : 18, candidate.color).setOrigin(1, 0);
+      const percentage = this.text(panel, '0.00%', width - 13, 0, height > 70 ? 23 : 17, candidate.color).setOrigin(1, 0);
+      const receivedVotes = this.text(panel, '0표', width - 13, 0, height > 70 ? 14 : 11, '#d9e3df').setOrigin(1, 0);
+      let percentSize = height > 70 ? 23 : 17;
+      let voteSize = height > 70 ? 14 : 11;
+      while (percentage.height + receivedVotes.height + 1 > height - 11 && percentSize > 14) {
+        percentage.setFontSize(--percentSize);
+        if (voteSize > 9) receivedVotes.setFontSize(--voteSize);
+      }
+      percentage.setY(Math.floor((height - 3 - percentage.height - receivedVotes.height - 1) / 2));
+      receivedVotes.setY(percentage.y + percentage.height + 1);
       if (!state.reducedMotion) {
         panel.setAlpha(0);
         this.tweens.add({ targets: panel, alpha: 1, duration: 380, delay: index * 27, ease: 'Cubic.out' });
       }
       const value = state.percentages[candidate.id] ?? 0;
-      this.race.push({ candidate, panel, citizen, percentage, badge, position, glow, frame, support, bar, cap, displayed: value, previous: value, previousRank: index, reactedAt: -10000, voteAt: -10000, width, height, movingUntil: 0, direction: 0 });
+      this.race.push({ candidate, panel, citizen, percentage, receivedVotes, badge, position, glow, frame, support, bar, cap, displayed: value, previous: value, previousRank: index, reactedAt: -10000, voteAt: -10000, width, height, movingUntil: 0, direction: 0 });
     });
     this.root.sort('depth');
   }
@@ -466,6 +485,7 @@ export class ElectionScene extends Phaser.Scene {
     this.countingPortrait = undefined;
     this.countingProfileCitizens = [];
     this.countingProfilePercentages = [];
+    this.countingProfileVotes = [];
   }
 
   private countingProfiles(state: StageState, ranked: Candidate[]) {
@@ -478,18 +498,21 @@ export class ElectionScene extends Phaser.Scene {
       this.root.add(portrait);
       this.countingPortrait = portrait;
       leaders.forEach((candidate, index) => {
-        const row = index * 145;
+        const row = index * 155;
         this.text(portrait, index ? '맹추격' : '현재 선두', 0, row - 13, 12, index ? '#9ed8d2' : '#fbd975', true);
         this.fitLabel(this.text(portrait, candidate.name, 0, row + 5, 15, '#f7f0dc', true), 224, 15);
-        const citizen = this.citizen(portrait, candidate, state.candidates.findIndex(item => item.id === candidate.id), 0, row + 100, 1.4);
+        const citizen = this.citizen(portrait, candidate, state.candidates.findIndex(item => item.id === candidate.id), 0, row + 91, 1.2);
         citizen.pose = index ? 'run' : 'nervous';
         this.countingProfileCitizens.push(citizen);
-        this.countingProfilePercentages.push(this.text(portrait, '', 0, row + 108, 19, candidate.color, true));
+        const percentage = this.text(portrait, '0.00%', 0, row + 97, 16, candidate.color, true);
+        this.countingProfilePercentages.push(percentage);
+        this.countingProfileVotes.push(this.text(portrait, '', 0, percentage.y + percentage.height + 1, 11, '#d9e3df', true));
       });
       this.root.sort('depth');
     }
     leaders.forEach((candidate, index) => {
       this.countingProfilePercentages[index]?.setText(`${(state.percentages[candidate.id] ?? 0).toFixed(2)}%`);
+      this.countingProfileVotes[index]?.setText(`${format.format(tallyVotes(candidate.id, state.percentages, state.progress, state.totalVotes, state.finalVotes))}표`);
       const citizen = this.countingProfileCitizens[index];
       if (citizen) citizen.pose = index ? state.progress > 88 ? 'run' : 'wave' : state.progress > 88 ? 'nervous' : 'wave';
     });
@@ -904,6 +927,7 @@ export class ElectionScene extends Phaser.Scene {
       slot.cap.setX(252 + width - 4).setAlpha(eliminated ? 0 : 0.68);
       slot.citizen.root.setX(252 + Math.max(width, 32) + 3).setAlpha(eliminated ? 0.23 : 1);
       slot.percentage.setText(`${raw.toFixed(2)}%`).setAlpha(eliminated ? 0.36 : 1);
+      slot.receivedVotes.setText(`${format.format(eliminated ? 0 : tallyVotes(slot.candidate.id, state.percentages, state.progress, state.totalVotes, state.finalVotes))}표`).setAlpha(eliminated ? 0.36 : 1);
       slot.position.setText(eliminated ? '×' : String(rank + 1)).setColor(rank === 0 ? '#fbd975' : '#a6c5cc');
       slot.badge.setText(eliminated ? '후보 탈락' : slot.height > 62 ? rank === 0 ? '선두' : slot.direction > 0 && time < slot.movingUntil ? '표가 몰립니다' : '추격 중' : '').setColor(eliminated ? '#e88073' : '#9cbdc8');
       const support = slot.candidate.id === state.cheeringId;
@@ -942,6 +966,8 @@ export class ElectionScene extends Phaser.Scene {
   private victory(state: StageState) {
     this.background(0x23213f);
     this.victoryPayoffStarted = false;
+    this.victoryImpactFired = false;
+    this.victoryMomentAt = this.animationTime;
     const candidate = state.candidates.find(item => item.id === state.winnerId) ?? state.candidates[0];
     for (let i = 0; i < 4; i++) {
       const beam = this.add.graphics({ x: i < 2 ? 170 : 1110, y: -80 });
@@ -952,16 +978,35 @@ export class ElectionScene extends Phaser.Scene {
       if (!state.reducedMotion) this.tweens.add({ targets: beam, angle: i % 2 ? -27 : 27, duration: 2300, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
     }
     this.text(this.root, 'E L E C T E D', 640, 35, 18, '#ba9c66', true);
-    const title = this.text(this.root, '당 선 확 정', 640, 74, 66, '#fbd975', true);
+    const title = this.text(this.root, '당 선 확 정', 640, 64, 60, '#fbd975', true).setDepth(35);
     this.victoryPayoffTitle = title;
     this.rect(this.root, 389, 484, 502, 89, colorOf(candidate));
     this.rect(this.root, 329, 552, 622, 63, gold);
     this.rect(this.root, 279, 613, 722, 37, 0xe6bc58);
     this.fitLabel(this.text(this.root, candidate.name, 640, 505, 45, '#14223b', true), 460, candidate.name.length > 10 ? 33 : 45, 23);
-    this.winner = this.citizen(this.root, candidate, state.candidates.indexOf(candidate), 640, 480, 5.9);
-    this.winner.pose = 'cheer';
+    const runner = [...state.candidates].filter(item => item.id !== candidate.id)
+      .sort((a, b) => (state.finalVotes?.[b.id] ?? state.finalPercentages[b.id] ?? 0) - (state.finalVotes?.[a.id] ?? state.finalPercentages[a.id] ?? 0))[0];
+    [candidate, runner].filter((item): item is Candidate => !!item).forEach((finalist, index) => {
+      const result = this.add.container(index ? 1054 : 226, 158).setDepth(25);
+      this.root.add(result);
+      this.rect(result, -175, 0, 350, 109, 0x182c40, 0.9).setStrokeStyle(2, colorOf(finalist), 0.65);
+      this.fitLabel(this.text(result, `${index + 1}위 · ${finalist.name}`, 0, 10, 14, '#f7eed8', true), 320, 14, 10);
+      this.text(result, `${(state.finalPercentages[finalist.id] ?? 0).toFixed(2)}%`, 0, 34, 29, finalist.color, true);
+      this.text(result, `${format.format(tallyVotes(finalist.id, state.finalPercentages, 100, state.totalVotes, state.finalVotes))}표`, 0, 76, 17, '#e1e6d9', true);
+    });
+    this.winner = this.citizen(this.root, candidate, state.candidates.indexOf(candidate), 640, 480, 5);
+    this.winner.root.setDepth(20);
+    this.winner.pose = 'nervous';
+    const crown = this.add.container(0, -12).setVisible(state.reducedMotion);
+    this.winner.addHeadAccessory(crown);
+    this.rect(crown, -9, 0, 18, 4, gold);
+    this.rect(crown, -9, -7, 4, 8, gold);
+    this.rect(crown, -2, -11, 4, 12, gold);
+    this.rect(crown, 5, -7, 4, 8, gold);
+    this.rect(crown, -1, 1, 2, 2, 0xee785e);
+    this.victoryCrown = crown;
     // The celebration has a second beat: a wonderfully serious prop arrives to claim the promise.
-    const prop = this.add.container(state.reducedMotion ? 943 : 1460, 486).setVisible(false);
+    const prop = this.add.container(state.reducedMotion ? 875 : 1460, 440).setScale(0.65).setDepth(15).setVisible(false);
     this.root.add(prop);
     this.victoryPayoffProp = prop;
     this.victoryPayoffPose = /커피|점심|벌칙|청소/.test(state.topic) ? 'nervous' : 'surprised';
@@ -1036,25 +1081,37 @@ export class ElectionScene extends Phaser.Scene {
     this.rect(sweat, 3, 0, 7, 15, 0xa7e1e5);
     this.rect(sweat, 0, 7, 13, 14, 0xa7e1e5);
     this.rect(sweat, 2, 18, 9, 5, 0x6bb6cc);
-    if (!state.reducedMotion) {
-      this.winner.root.setX(-140);
-      this.tweens.add({ targets: this.winner.root, x: 640, duration: 1130, ease: 'Cubic.out', onComplete: () => {
-        this.burst(640, 479, colorOf(candidate), 18, 240);
-        this.tweens.add({ targets: this.winner!.root, y: 473, duration: 170, yoyo: true, ease: 'Sine.inOut' });
-      } });
-      title.setAlpha(0).setScale(1.35);
-      this.tweens.add({ targets: title, alpha: 1, scaleX: 1, scaleY: 1, delay: 750, duration: 650, ease: 'Back.out' });
-    }
-    for (let i = 0; i < 24; i++) {
-      const person = state.candidates[i % state.candidates.length];
-      const citizen = this.citizen(this.root, person, i + 9, 23 + i * 55, 748 + (i % 2) * 15, 2.1 + (i % 3) * 0.2);
-      citizen.pose = 'cheer';
-    }
+    if (!state.reducedMotion) title.setAlpha(0).setScale(1.7);
+    const others = state.candidates.filter(item => item.id !== candidate.id);
+    const split = Math.ceil(others.length / 2);
+    [others.slice(0, split), others.slice(split)].forEach((group, side) => {
+      const backCount = Math.ceil(group.length / 2);
+      group.forEach((person, index) => {
+        const front = index >= backCount;
+        const rowCount = front ? group.length - backCount : backCount;
+        const rowIndex = front ? index - backCount : index;
+        const x = (side ? 1104 : 180) + (rowIndex - (rowCount - 1) / 2) * 112;
+        const y = front ? 568 : 514;
+        const identity = state.candidates.findIndex(item => item.id === person.id);
+        const citizen = this.citizen(this.root, person, identity, x, y, front ? 2 : 1.7);
+        citizen.root.setDepth(front ? 12 : 8);
+        if (side) citizen.root.setScale(-(front ? 2 : 1.7), front ? 2 : 1.7);
+        citizen.pose = 'idle';
+        const reaction: Pose = person.id === runner?.id ? 'disappointed' : person.id === state.cheeringId ? 'clap' : (['cheer', 'clap', 'wave', 'encourage'] as Pose[])[identity % 4];
+        const bubble = this.add.container(x, y - (front ? 123 : 108)).setDepth(14).setAlpha(0).setVisible(index === 0);
+        this.root.add(bubble);
+        this.rect(bubble, -49, -9, 98, 29, paper).setStrokeStyle(1, colorOf(person));
+        this.rect(bubble, -3, 20, 6, 4, paper);
+        const message = this.text(bubble, person.id === runner?.id ? '아깝다…' : reaction === 'clap' ? '짝짝짝!' : reaction === 'wave' ? '축하해요!' : reaction === 'encourage' ? '잘 부탁해요!' : '와아!', 0, -3, 12, '#243c48', true);
+        this.victorySupporters.push({ citizen, x, y, delay: 460 + identity * 91, reaction, bubble, message });
+      });
+    });
     for (let i = 0; i < 100; i++) {
       const rectangle = this.add.rectangle((i * 179) % 1280, state.reducedMotion ? (i * 103) % 710 : -((i * 103) % 740), 8 + (i % 3) * 3, 5, [gold, 0xff7957, 0x64d5c8, 0xf5eedc][i % 4]);
       this.root.add(rectangle);
       this.confetti.push({ rectangle, speed: 140 + (i % 8) * 24, drift: (i % 5 - 2) * 21 });
     }
+    this.root.sort('depth');
   }
 
   update(rawTime: number, delta: number) {
@@ -1144,18 +1201,48 @@ export class ElectionScene extends Phaser.Scene {
     }
     if (state.phase === 'counting' && this.race.length) this.updateCounting(state, time, delta);
     if (state.phase === 'winner') {
-      const payoffAt = 2100;
+      const payoffAt = 4100;
       const payoffTime = local - payoffAt;
+      if (this.winner && !state.reducedMotion && local < payoffAt) {
+        const stamp = Phaser.Math.Clamp((local - 150) / 280, 0, 1);
+        const scale = 1.7 - Phaser.Math.Easing.Cubic.In(stamp) * 0.7;
+        this.victoryPayoffTitle?.setAlpha(local < 150 ? 0 : 1).setScale(scale).setAngle(local > 150 && local < 480 ? -4 * (1 - stamp) : 0);
+        const jump = Phaser.Math.Clamp((local - 410) / 640, 0, 1);
+        const flight = Math.sin(jump * Math.PI);
+        const landing = local > 1050 && local < 1240 ? Math.sin((local - 1050) / 190 * Math.PI) : 0;
+        this.winner.root.setPosition(640, 480 - flight * 63).setScale(5 * (1 - flight * 0.018 + landing * 0.075), 5 * (1 + flight * 0.032 - landing * 0.065));
+        this.victoryCrown?.setVisible(local > 1010).setAlpha(Phaser.Math.Clamp((local - 1010) / 240, 0, 1));
+      }
+      if (!this.victoryImpactFired && (state.reducedMotion || local >= 420)) {
+        this.victoryImpactFired = true;
+        if (!state.reducedMotion) {
+          this.burst(640, 178, gold, 30, 95);
+          this.burst(640, 479, gold, 20, 240);
+          const halo = this.add.ellipse(640, 476, 68, 17).setStrokeStyle(3, gold, 0.8).setDepth(18);
+          this.root.add(halo);
+          this.root.sort('depth');
+          this.tweens.add({ targets: halo, scaleX: 5.2, scaleY: 2.4, alpha: 0, duration: 620, ease: 'Cubic.out', onComplete: () => halo.destroy() });
+        }
+      }
+      this.victorySupporters.forEach((supporter, index) => {
+        const reactionAge = local - supporter.delay;
+        const cycle = (time - this.victoryMomentAt + index * 519) % (4200 + index % 3 * 360);
+        const ongoing: Pose = cycle < 2700 ? supporter.reaction : supporter.reaction === 'disappointed' ? 'encourage' : cycle < 3400 ? 'clap' : 'wave';
+        supporter.citizen.pose = state.reducedMotion ? supporter.reaction : reactionAge < 0 ? 'idle' : reactionAge < 620 ? 'surprised' : ongoing;
+        supporter.citizen.root.setY(supporter.y - (!state.reducedMotion && reactionAge > 0 && reactionAge < 400 ? Math.sin(reactionAge / 400 * Math.PI) * (index % 3 ? 6 : 11) : 0));
+        const speaking = reactionAge > 680 && reactionAge < 2240;
+        supporter.bubble.setAlpha(state.reducedMotion ? 0 : speaking ? Math.min(1, (reactionAge - 680) / 150, (2240 - reactionAge) / 220) : 0);
+      });
       if ((state.reducedMotion || local >= payoffAt) && !this.victoryPayoffStarted) {
         this.victoryPayoffStarted = true;
         this.victoryPayoffTitle?.setText('공약 이행 시작').setFontSize(52);
         this.victoryPayoffProp?.setVisible(true);
         this.victoryPayoffSweat?.setVisible(true);
         if (state.reducedMotion) {
-          this.victoryPayoffProp?.setX(943);
+          this.victoryPayoffProp?.setX(875);
           this.victoryPayoffCaption?.setAlpha(1);
         } else {
-          if (this.victoryPayoffProp) this.tweens.add({ targets: this.victoryPayoffProp, x: 943, duration: 570, ease: 'Cubic.out', onComplete: () => this.burst(943, 485, gold, 10, 90) });
+          if (this.victoryPayoffProp) this.tweens.add({ targets: this.victoryPayoffProp, x: 875, duration: 570, ease: 'Cubic.out', onComplete: () => this.burst(875, 440, gold, 10, 90) });
           if (this.victoryPayoffCaption) this.tweens.add({ targets: this.victoryPayoffCaption, alpha: 1, duration: 400, delay: 220, ease: 'Cubic.out' });
           if (this.victoryPayoffTitle) {
             this.tweens.killTweensOf(this.victoryPayoffTitle);
@@ -1164,7 +1251,7 @@ export class ElectionScene extends Phaser.Scene {
           }
         }
       }
-      if (this.winner) this.winner.pose = state.reducedMotion ? this.victoryPayoffPose : local < 1080 ? 'run' : local < 1580 ? 'bow' : local < payoffAt ? 'cheer' : payoffTime < 620 ? 'surprised' : this.victoryPayoffPose;
+      if (this.winner) this.winner.pose = state.reducedMotion ? this.victoryPayoffPose : local < 400 ? 'nervous' : local < payoffAt ? 'cheer' : payoffTime < 620 ? 'surprised' : local >= 6000 && (time - this.victoryMomentAt) % 6500 < 950 ? 'wave' : this.victoryPayoffPose;
       if (this.victoryPayoffStarted && this.victoryPayoffSweat && !state.reducedMotion) {
         const drop = Math.max(0, payoffTime) % 1100 / 1100;
         this.victoryPayoffSweat.setY(208 + drop * 19).setAlpha(1 - drop * 0.65);

@@ -1,0 +1,84 @@
+.racing-show { display: grid; grid-template-columns: minmax(0, 1fr) minmax(210px, 25%); flex: 1; min-width: 0; min-height: 0; height: 100%; gap: 14px; color: #203746; }
+.racing-stage, .racing-board { min-width: 0; min-height: 0; border: 2px solid #25444c; border-radius: 12px; overflow: hidden; }
+.racing-stage { display: flex; flex-direction: column; background: #244c4c; box-shadow: 0 10px 25px #112a3d24; }
+.racing-stage-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex: 0 0 32px; padding: 0 13px; color: #c0d5cc; font: 800 9px monospace; letter-spacing: 1px; background: #193741; }
+.racing-stage-top > span:first-child { color: #fff1c0; }
+.racing-stage-top i { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: #f2bc70; box-shadow: 0 0 0 3px #f2bc7022; }
+.racing-canvas-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+.racing-canvas { display: block; width: 100%; height: 100%; }
+.racing-phase-badge { position: absolute; top: 8px; left: 9px; pointer-events: none; padding: 4px 8px; border: 1px solid #dae6bf75; border-radius: 5px; background: #16373acc; color: #fff0b9; font: 800 10px monospace; letter-spacing: .4px; }
+.racing-commentary { flex: none; padding: 10px 14px; background: #f3d387; border-top: 2px solid #25444c; }
+.racing-commentary strong { display: block; font-size: clamp(13px, 1.5vw, 19px); line-height: 1.25; overflow-wrap: anywhere; }
+.racing-commentary p { margin: 4px 0 0; font-size: 11px; line-height: 1.35; color: #5e604d; }
+.racing-board { display: flex; flex-direction: column; gap: 10px; padding: 15px; background: #f6f4e8; }
+.racing-board-heading { flex: none; }
+.racing-board-heading > span { font: 900 9px monospace; letter-spacing: 1.3px; color: #688277; }
+.racing-board-heading h2 { margin: 5px 0 0; font-size: clamp(15px, 1.6vw, 21px); line-height: 1.2; letter-spacing: -.5px; }
+.racing-standings { position: relative; flex: 1; min-height: 0; margin: 0; padding: 0; list-style: none; --racing-rows: var(--racing-count); }
+.racing-horse-row { position: absolute; top: 0; left: 0; width: 100%; height: calc(100% / var(--racing-rows)); display: flex; align-items: center; gap: 5px; padding: 4px 6px; border: 0; border-top: 1px solid #dce4d6; border-left: 3px solid var(--racing-color); background: #ffffffc7; color: #203746; text-align: left; transform: translateY(calc(var(--racing-rank) * 100%)); transition: transform 700ms cubic-bezier(.22,.7,.2,1), background 350ms, box-shadow 350ms; }
+.racing-horse-row.racing-is-leading { background: #fff3ce; z-index: 1; }
+.racing-rank { width: 17px; flex: none; font: 900 10px monospace; color: #71877c; }
+.racing-silk { display: grid; place-items: center; flex: none; width: 23px; height: 23px; border-radius: 6px; background: var(--racing-color); color: #21363c; font: 900 10px monospace; box-shadow: inset 0 -2px 0 #203a3915; }
+.racing-horse-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; flex: 1; min-width: 0; font-size: 12px; line-height: 1.2; font-weight: 800; overflow-wrap: anywhere; }
+.racing-horse-state { flex: none; font-size: 9px; font-weight: 900; color: #9c8351; }
+.racing-board-note { flex: none; margin: 0; color: #75877d; font-size: 8px; line-height: 1.4; }
+.racing-empty { position: absolute; inset: 0; display: grid; place-content: center; margin: 0; text-align: center; font-size: 12px; line-height: 1.7; color: #779184; }
+.racing-phase-photo .racing-phase-badge { border-color: #efd493; background: #25474bcc; }
+.racing-phase-winner .racing-commentary { background: #f6d881; }
+@media (max-width: 760px) and (min-height: 501px) {
+  .racing-show { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr); gap: 8px; }
+  .racing-stage-top { flex-basis: 24px; padding: 0 9px; font-size: 8px; }
+  .racing-commentary { padding: 7px 9px; }
+  .racing-commentary strong { font-size: 13px; }
+  .racing-commentary p { font-size: 9px; margin-top: 3px; }
+  .racing-board { padding: 8px; gap: 5px; }
+  .racing-board-heading { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+  .racing-board-heading > span { font-size: 7px; letter-spacing: .6px; }
+  .racing-board-heading h2 { font-size: 14px; margin: 0; }
+  .racing-standings { --racing-rows: var(--racing-compact-count); }
+  .racing-horse-row { width: 50%; transform: translate(calc(var(--racing-column) * 100%), calc(var(--racing-row) * 100%)); padding: 3px 4px; gap: 3px; }
+  .racing-rank { width: 13px; font-size: 9px; }
+  .racing-silk { width: 19px; height: 19px; font-size: 9px; border-radius: 4px; }
+  .racing-horse-name { font-size: 10px; }
+  .racing-horse-state { font-size: 8px; }
+  .racing-board-note { font-size: 7px; }
+}
+@media (max-height: 500px) and (min-width: 600px) {
+  .racing-show { grid-template-columns: minmax(0, 1fr) minmax(235px, 40%); gap: 7px; }
+  .racing-stage-top { flex-basis: 24px; padding: 0 8px; font-size: 7px; letter-spacing: .4px; }
+  .racing-commentary { padding: 5px 8px; }
+  .racing-commentary strong { font-size: 11px; }
+  .racing-commentary p { font-size: 8px; margin-top: 2px; }
+  .racing-board { padding: 8px; gap: 5px; }
+  .racing-board-heading > span { font-size: 7px; }
+  .racing-board-heading h2 { font-size: 13px; margin-top: 3px; }
+  .racing-standings { --racing-rows: var(--racing-compact-count); }
+  .racing-horse-row { width: 50%; transform: translate(calc(var(--racing-column) * 100%), calc(var(--racing-row) * 100%)); padding: 2px 3px; gap: 3px; }
+  .racing-rank { width: 12px; font-size: 8px; }
+  .racing-silk { width: 17px; height: 17px; font-size: 8px; border-radius: 4px; }
+  .racing-horse-name { font-size: 9px; }
+  .racing-horse-state { font-size: 7px; }
+  .racing-board-note { font-size: 7px; }
+}
+@media (max-height: 500px) and (max-width: 599px) {
+  .racing-show { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, .95fr) minmax(0, 1.05fr); gap: 6px; }
+  .racing-stage-top { flex-basis: 20px; padding: 0 7px; font-size: 7px; letter-spacing: .3px; }
+  .racing-phase-badge { top: 5px; left: 6px; font-size: 8px; padding: 3px 5px; }
+  .racing-commentary { padding: 5px 7px; }
+  .racing-commentary strong { font-size: 11px; }
+  .racing-commentary p { font-size: 8px; line-height: 1.2; margin-top: 2px; }
+  .racing-board { padding: 6px; gap: 4px; }
+  .racing-board-heading { display: flex; align-items: center; justify-content: space-between; }
+  .racing-board-heading > span { font-size: 6px; letter-spacing: .4px; }
+  .racing-board-heading h2 { font-size: 12px; margin: 0; }
+  .racing-standings { --racing-rows: var(--racing-compact-count); }
+  .racing-horse-row { width: 50%; transform: translate(calc(var(--racing-column) * 100%), calc(var(--racing-row) * 100%)); padding: 2px 3px; gap: 2px; }
+  .racing-rank { width: 10px; font-size: 8px; }
+  .racing-silk { width: 15px; height: 15px; border-radius: 3px; font-size: 7px; }
+  .racing-horse-name { font-size: 9px; }
+  .racing-horse-state { font-size: 7px; }
+  .racing-board-note { font-size: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .racing-horse-row { transition: none; }
+}

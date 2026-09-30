@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 const compiled = await build({ entryPoints: ['src/election.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { CANDIDATE_COLORS, MAX_CANDIDATES, randomInt, createElection, createDrama, frameAt } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const compiledShow = await build({ entryPoints: ['src/show.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { countProgress, elapsedAtProgress, countBeat, storyBeat, resolvedEvents, storyOutcome, raceMoment, phaseFor, COUNT_START, WINNER_START, SHOW_DURATION, STORY_DURATION, STORY_RESOLVE_AT } = await import(`data:text/javascript;base64,${Buffer.from(compiledShow.outputFiles[0].text).toString('base64')}`);
+const { countProgress, elapsedAtProgress, countBeat, storyBeat, resolvedEvents, storyOutcome, finalResultGap, tallyVotes, raceMoment, phaseFor, COUNT_START, WINNER_START, SHOW_DURATION, STORY_DURATION, STORY_RESOLVE_AT } = await import(`data:text/javascript;base64,${Buffer.from(compiledShow.outputFiles[0].text).toString('base64')}`);
 const compiledCatalog = await build({ entryPoints: ['src/storyCatalog.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { STORY_CATALOG } = await import(`data:text/javascript;base64,${Buffer.from(compiledCatalog.outputFiles[0].text).toString('base64')}`);
 const candidates = Array.from({ length: MAX_CANDIDATES }, (_, index) => ({ id: String(index), name: `후보 ${index}`, color: CANDIDATE_COLORS[index] }));
@@ -311,6 +311,38 @@ test('live race news uses the same vote-gap rounding as the UI and canvas', () =
   assert.equal(live.countedVotes, 230_202);
   assert.equal(live.gapVotes, 450);
   assert.equal(raceMoment(result, { progress: 100, percentages: result.percentages }).gapVotes, 9);
+});
+
+test('final gaps preserve 94 vote and single vote finishes despite rounded percentages', () => {
+  const list = candidates.slice(0, 4);
+  for (const gapVotes of [94, 1]) {
+    const votes = { '0': 0, '1': 499_000, '2': 500_000 + gapVotes, '3': 500_000 };
+    const totalVotes = Object.values(votes).reduce((sum, count) => sum + count, 0);
+    const percentages = Object.fromEntries(list.map(candidate => [candidate.id, Number((votes[candidate.id] / totalVotes * 100).toFixed(2))]));
+    const result = { candidates: list, winnerId: '2', totalVotes, votes, percentages, events: [], eliminatedIds: ['0'] };
+    const final = finalResultGap(result);
+    assert.equal(final.winner.id, '2');
+    assert.equal(final.runner.id, '3');
+    assert.equal(final.winnerVotes, 500_000 + gapVotes);
+    assert.equal(final.runnerVotes, 500_000);
+    assert.equal(final.gapVotes, gapVotes);
+    const estimatedGap = Math.round(totalVotes * (percentages['2'] - percentages['3']) / 100);
+    assert.notEqual(estimatedGap, gapVotes);
+  }
+});
+
+test('candidate tallies share one rounded live count and preserve exact final votes', () => {
+  const percentages = { '0': 12.35, '1': 10.880555555555556 };
+  const finalVotes = { '0': 123_499, '1': 108_806 };
+  assert.equal(tallyVotes('0', percentages, 0, 1_000_000, finalVotes), 0);
+  assert.equal(tallyVotes('0', percentages, -1, 1_000_000, finalVotes), 0);
+  assert.equal(tallyVotes('0', percentages, 32, 1_000_000), 39_520);
+  assert.equal(tallyVotes('1', percentages, 4, 5_755_059), 25_047);
+  assert.equal(tallyVotes('0', percentages, 100, 1_000_000, finalVotes), 123_499);
+  assert.equal(tallyVotes('0', percentages, 120, 1_000_000, finalVotes), 123_499);
+  assert.equal(tallyVotes('0', percentages, 100, 1_000_000), 123_500);
+  assert.equal(tallyVotes('missing', percentages, 32, 1_000_000), 0);
+  assert.equal(tallyVotes('0', { '0': -2 }, 32, 1_000_000), 0);
 });
 
 test('invalid candidate counts are rejected', () => {

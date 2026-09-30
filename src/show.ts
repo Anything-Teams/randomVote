@@ -117,6 +117,33 @@ export function countBeat(elapsed: number): CountingBeat {
 
 export type NewsBeat = { id: string; tag: string; title: string; detail: string; urgent: boolean };
 
+export type FinalResultGap = {
+  winner: Candidate;
+  runner: Candidate;
+  gapVotes: number;
+  winnerVotes: number;
+  runnerVotes: number;
+};
+
+/** Shared integer tally for the DOM board and the canvas broadcast. */
+export function tallyVotes(candidateId: string, percentages: Record<string, number>, progress: number, totalVotes: number, finalVotes?: Record<string, number>): number {
+  const bounded = Math.max(0, Math.min(100, progress));
+  if (bounded === 0) return 0;
+  if (bounded === 100 && finalVotes?.[candidateId] !== undefined) return finalVotes[candidateId];
+  const countedVotes = Math.floor(totalVotes * bounded / 100);
+  return Math.round(countedVotes * Math.max(0, percentages[candidateId] ?? 0) / 100);
+}
+
+/** Final results use the recorded integer votes, never rounded percentages. */
+export function finalResultGap(result: ElectionResult): FinalResultGap {
+  const winner = result.candidates.find(candidate => candidate.id === result.winnerId)!;
+  const runner = [...result.candidates].filter(candidate => candidate.id !== winner.id)
+    .sort((a, b) => result.votes[b.id] - result.votes[a.id])[0];
+  const winnerVotes = result.votes[winner.id];
+  const runnerVotes = result.votes[runner.id];
+  return { winner, runner, gapVotes: winnerVotes - runnerVotes, winnerVotes, runnerVotes };
+}
+
 export type RaceMoment = {
   leader: Candidate;
   runner: Candidate;

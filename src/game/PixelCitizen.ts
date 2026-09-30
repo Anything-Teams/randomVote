@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 
-export type Pose = 'idle' | 'walk' | 'run' | 'wave' | 'vote' | 'cheer' | 'nervous' | 'surprised' | 'bow';
+export type Pose = 'idle' | 'walk' | 'run' | 'wave' | 'vote' | 'cheer' | 'clap' | 'encourage' | 'disappointed' | 'nervous' | 'surprised' | 'bow';
 const skinColors = [0xf2c09b, 0xd9a078, 0xf6d2b1, 0xb98062];
 const hairColors = [0x1b2337, 0x553a34, 0xa96940, 0x35425b];
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
@@ -112,6 +112,10 @@ export class PixelCitizen {
     }
   }
 
+  addHeadAccessory(accessory: Phaser.GameObjects.GameObject) {
+    this.head.add(accessory);
+  }
+
   update(time: number, reduced = false) {
     if (!this.root.active) return;
     const delta = Math.min(50, Math.max(1, this.lastTime ? time - this.lastTime : 16));
@@ -161,6 +165,27 @@ export class PixelCitizen {
       target.re = p === 2 ? 65 : -12 - Math.sin(clock / 235) * 14;
       target.head = Math.sin(clock / 370) * 3 - flight * 3; target.angle = Math.sin(clock / 475) * 1.8;
       target.mouth = 2.7; target.brows = -0.8;
+    } else if (this.pose === 'clap') {
+      const clap = (Math.sin(clock / (125 + p * 17)) + 1) / 2;
+      target.la = -52 - clap * 18; target.ra = 52 + clap * 18;
+      target.le = 19 - clap * 22; target.re = -19 + clap * 22;
+      target.y = -Math.sin(clock / (285 + p * 30)) * 0.65;
+      target.head = -2 + Math.sin(clock / 460) * 2;
+      target.angle = Math.sin(clock / 610) * 1.1;
+      target.mouth = 2; target.brows = -0.6;
+    } else if (this.pose === 'encourage') {
+      const hand = Math.sin(clock / (260 + p * 33));
+      target.ra = -84 + hand * 8; target.re = 25 + hand * 19;
+      target.la = -24; target.le = -43;
+      target.head = 4 + Math.sin(clock / 470) * 2;
+      target.angle = 2.5 + breath * 0.8;
+      target.mouth = 1.8; target.brows = -0.4;
+    } else if (this.pose === 'disappointed') {
+      const sigh = (Math.sin(clock / (900 + p * 95)) + 1) / 2;
+      target.la = 9; target.ra = -7; target.le = 8; target.re = -8;
+      target.head = 7 + sigh * 5; target.angle = -2 - sigh;
+      target.y = 0.7 + sigh * 0.6;
+      target.mouth = 0.65; target.brows = 1.1;
     } else if (this.pose === 'nervous') {
       target.la = 22 + p * 3; target.le = -38;
       target.ra = -31 + Math.sin(clock / (340 + p * 45)) * 4; target.re = 57 + Math.sin(clock / 430) * 7;
@@ -181,6 +206,9 @@ export class PixelCitizen {
       target.la = this.pose === 'cheer' ? 140 : 4; target.ra = this.pose === 'cheer' ? -140 : -4;
       target.le = 0; target.re = 0;
       target.mouth = this.pose === 'cheer' ? 2.7 : 1; target.brows = 0;
+      if (this.pose === 'clap') { target.la = -65; target.ra = 65; target.le = 5; target.re = -5; target.mouth = 2; }
+      if (this.pose === 'encourage') { target.la = -24; target.ra = -84; target.le = -43; target.re = 25; target.mouth = 1.8; }
+      if (this.pose === 'disappointed') { target.head = 9; target.brows = 1; target.mouth = 0.65; }
     }
     const blend = reduced ? 1 : 1 - Math.exp(-delta / (this.pose === 'run' ? 38 : 65));
     (Object.keys(target) as (keyof Motion)[]).forEach(key => { this.motion[key] += (target[key] - this.motion[key]) * blend; });

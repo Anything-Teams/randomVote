@@ -3,14 +3,14 @@ import Phaser from 'phaser';
 import { ElectionScene, STAGE_WIDTH, STAGE_HEIGHT, type StageState } from '../src/game/ElectionScene';
 import { CANDIDATE_COLORS, createDrama, frameAt, type ElectionEvent, type ElectionResult } from '../src/election';
 import { STORY_CATALOG, type StoryKind } from '../src/storyCatalog';
-import { countProgress, elapsedAtProgress, storyOutcome, WINNER_START } from '../src/show';
+import { countProgress, elapsedAtProgress, phaseFor, storyOutcome, SHOW_DURATION, WINNER_START } from '../src/show';
 
 // Exercise the full 16-character input limit in the winner and both story labels.
 const longNames: Record<number, string> = { 0: '가나다라마바사아자차카타파하다라', 2: '가나다라마바사아자차카타파하가나', 6: 'WWWWWWWWWWWWWWWW' };
 const candidates = CANDIDATE_COLORS.map((color, index) => ({ id: String(index + 1), name: longNames[index] ?? `후보 ${index + 1}`, color }));
 const host = document.querySelector<HTMLDivElement>('#stage')!;
 let game: Phaser.Game | undefined;
-type PreviewKind = StoryKind | 'winner' | 'voting';
+type PreviewKind = StoryKind | 'winner' | 'voting' | 'finale';
 let selectedKind: PreviewKind = 'brawl';
 
 function preview(kind: PreviewKind, freezeAt?: number) {
@@ -21,25 +21,38 @@ function preview(kind: PreviewKind, freezeAt?: number) {
   const event: ElectionEvent | undefined = template ? { ...template, progress: 32, actors: kind === 'brawl' || kind === 'alliance' ? ['3', '7'] : ['3'], ...(kind === 'scandal' ? { eliminatedId: '3' } : {}) } : undefined;
   const shares = Object.fromEntries(candidates.map(candidate => [candidate.id, candidate.id === '3' && kind === 'scandal' ? 0 : candidate.id === '1' ? 11.12 : kind === 'scandal' ? 11.11 : 9.875]));
   const sum = Object.values(shares).reduce((total, share) => total + share, 0);
-  const percentages = Object.fromEntries(candidates.map(candidate => [candidate.id, shares[candidate.id] / sum * 100]));
-  const result: ElectionResult = { candidates, winnerId: '1', totalVotes: 4_000_000, votes: Object.fromEntries(candidates.map(candidate => [candidate.id, Math.round(percentages[candidate.id] * 40_000)])), percentages, events: event ? [event] : [], eliminatedIds: kind === 'scandal' ? ['3'] : [] };
+  const totalVotes = 4_000_000;
+  const votes = Object.fromEntries(candidates.map(candidate => [candidate.id, Math.round(shares[candidate.id] / sum * totalVotes)]));
+  votes['1'] += totalVotes - Object.values(votes).reduce((total, count) => total + count, 0);
+  const percentages = Object.fromEntries(candidates.map(candidate => [candidate.id, votes[candidate.id] / totalVotes * 100]));
+  const result: ElectionResult = { candidates, winnerId: '1', totalVotes, votes, percentages, events: event ? [event] : [], eliminatedIds: kind === 'scandal' ? ['3'] : [] };
   const drama = createDrama(result);
-  const initial = frameAt(drama, 32);
-  const startAt = kind === 'voting' ? 5000 : kind === 'winner' ? WINNER_START : elapsedAtProgress(32);
-  const state: StageState = { phase: kind === 'voting' ? 'voting' : kind === 'winner' ? 'winner' : 'counting', candidates, winnerId: '1', topic: '오늘 커피 쏠 사람은?', percentages: initial.percentages, finalPercentages: percentages, progress: kind === 'voting' ? 0 : 32, totalVotes: result.totalVotes, preview: false, reducedMotion: false, elapsed: startAt, cheeringId: '3', events: result.events, storyOutcomes: event ? [storyOutcome(result, event, drama)] : [] };
+  const startAt = kind === 'voting' ? 5000 : kind === 'winner' ? WINNER_START : kind === 'finale' ? WINNER_START - 1200 : elapsedAtProgress(32);
+  const initialProgress = kind === 'voting' ? 0 : countProgress(startAt);
+  const initial = frameAt(drama, initialProgress);
+  const state: StageState = { phase: kind === 'voting' ? 'voting' : kind === 'winner' ? 'winner' : 'counting', candidates, winnerId: '1', topic: '오늘 커피 쏠 사람은?', percentages: kind === 'winner' || kind === 'voting' ? percentages : initial.percentages, finalPercentages: percentages, finalVotes: result.votes, progress: initialProgress, totalVotes: result.totalVotes, preview: false, reducedMotion: false, elapsed: startAt, cheeringId: '3', events: result.events, storyOutcomes: event ? [storyOutcome(result, event, drama)] : [] };
   class PreviewScene extends ElectionScene {
     private began: number | undefined;
+    private shownStatus = '';
     override update(time: number, delta: number) {
       this.began ??= time;
-      const stopAt = freezeAt === undefined ? undefined : kind === 'winner' ? 3100 : freezeAt;
-      const age = stopAt === undefined ? time - this.began : Math.min(stopAt, time - this.began);
-      state.elapsed = startAt + age;
-      state.progress = kind === 'voting' ? 0 : kind === 'winner' ? 100 : countProgress(state.elapsed);
-      state.percentages = kind === 'voting' || kind === 'winner' ? percentages : frameAt(drama, state.progress).percentages;
+      const age = freezeAt === undefined ? time - this.began : Math.min(freezeAt, time - this.began);
+      state.elapsed = Math.min(SHOW_DURATION, startAt + age);
+      if (kind === 'finale') state.phase = phaseFor(state.elapsed);
+      state.progress = kind === 'voting' ? 0 : countProgress(state.elapsed);
+      state.percentages = kind === 'voting' || state.phase === 'winner' ? percentages : frameAt(drama, state.progress).percentages;
+      // Keep the scene's animation clock running after the election clock reaches its end.
       super.update(time, delta);
-      if (freezeAt !== undefined && age >= stopAt!) {
+      if (kind === 'winner' || kind === 'finale') {
+        const status = state.phase === 'counting' ? '마지막 개표 재생 중' : state.elapsed >= SHOW_DURATION ? '당선 완료 · 애니메이션 계속 재생 중' : '당선 연출 재생 중';
+        if (status !== this.shownStatus) {
+          this.shownStatus = status;
+          document.querySelector('#status')!.textContent = status;
+        }
+      }
+      if (freezeAt !== undefined && age >= freezeAt) {
         this.scene.pause();
-        document.querySelector('#status')!.textContent = kind === 'voting' ? `투표소 ${age / 1000}초 장면 정지됨` : '중간 장면 정지됨';
+        document.querySelector('#status')!.textContent = `${kind === 'voting' ? '투표소' : kind === 'winner' ? '당선' : kind === 'finale' ? '마지막 개표 → 당선' : '사건'} ${age / 1000}초 장면 정지됨`;
       }
     }
   }

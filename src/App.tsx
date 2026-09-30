@@ -1,17 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import GameStage from './GameStage';
 import BroadcastShow from './BroadcastShow';
+import RacingShow from './RacingShow';
 import { CANDIDATE_COLORS, MAX_CANDIDATES, createDrama, createElection, frameAt, type Candidate, type DramaFrame, type ElectionResult } from './election';
 import { countProgress, phaseFor, SHOW_DURATION } from './show';
 import { readSession, saveSession, type Entry } from './session';
+import { createSportsOrder, SPORT_DURATION, type GameMode } from './sports';
 
 type Status = 'setup' | 'running' | 'finished';
 const templates = ['오늘 커피 쏠 사람은?', '점심값 낼 사람은?', '벌칙 받을 사람은?', '청소 담당은?', '발표할 사람은?'];
+const games = {
+  election: { label: '선거', noun: '후보', title: '오늘의 당선자를 뽑아볼까요?', detail: '60가지 사건이 판세를 뒤흔드는 픽셀 선거 쇼.', action: '선거 시작', instruction: '몸싸움과 돌발 사건을 지나, 마지막 한 표의 주인공을 지켜보세요.' },
+  racing: { label: '경마', noun: '말', title: '결승선까지, 순위는 모릅니다.', detail: '출발 게이트부터 마지막 직선까지, 순위를 뒤집는 픽셀 경마.', action: '경주 시작', instruction: '코너 추월부터 마지막 질주와 사진 판정까지, 모든 말의 순위를 지켜보세요.' },
+  arena: { label: '난투', noun: '선수', title: '모래판의 마지막 한 사람은?', detail: '전원이 동시에 맞붙는 모래판. 끝까지 버티는 픽셀 장외 난투.', action: '난투 시작', instruction: '모두 한꺼번에 싸웁니다. 모래판 밖으로 밀려난 순서대로 순위가 확정됩니다.' },
+} as const;
 
 export default function App() {
   const [saved] = useState(readSession);
   const [entries, setEntries] = useState<Entry[]>(saved.entries);
-  const [topic, setTopic] = useState(saved.topic);
+  const [topic, setTopic] = useState(templates.includes(saved.topic) ? saved.topic : templates[0]);
+  const [mode, setMode] = useState<GameMode>(saved.mode === 'racing' ? 'racing' : 'election');
+  const [order, setOrder] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [status, setStatus] = useState<Status>('setup');
   const [result, setResult] = useState<ElectionResult | null>(null);
@@ -25,11 +34,11 @@ export default function App() {
   const nextId = useRef(saved.entries.length + 1);
 
   useEffect(() => () => { if (timer.current !== null) window.clearInterval(timer.current); }, []);
-  useEffect(() => { saveSession({ entries, topic }); }, [entries, topic]);
+  useEffect(() => { saveSession({ entries, topic, mode }); }, [entries, topic, mode]);
 
-  const candidates: Candidate[] = useMemo(() => status === 'setup'
-    ? entries.map((entry, index) => ({ id: String(entry.id), name: entry.name.trim(), color: CANDIDATE_COLORS[index] })).filter(candidate => candidate.name)
-    : (result?.candidates ?? []), [entries, status, result]);
+  const candidates: Candidate[] = useMemo(() => entries.map((entry, index) => ({ id: String(entry.id), name: entry.name.trim(), color: CANDIDATE_COLORS[index] })).filter(candidate => candidate.name), [entries]);
+  const game = games[mode];
+  const duration = mode === 'election' ? SHOW_DURATION : SPORT_DURATION;
   const phase = status === 'setup' ? 'declaration' : phaseFor(elapsed);
   const progress = countProgress(elapsed);
   const snapshot = result && drama.length ? frameAt(drama, progress) : null;
@@ -47,24 +56,27 @@ export default function App() {
 
   function start() {
     const names = entries.map(entry => entry.name.trim()).filter(Boolean);
-    if (names.length < 2) { setError('후보를 2명 이상 입력해 주세요.'); return; }
-    if (names.length > MAX_CANDIDATES) { setError(`후보는 최대 ${MAX_CANDIDATES}명까지 입력할 수 있어요.`); return; }
+    if (names.length < 2) { setError(`${game.noun} 이름을 2개 이상 입력해 주세요.`); return; }
+    if (names.length > MAX_CANDIDATES) { setError(`최대 ${MAX_CANDIDATES}명까지 입력할 수 있어요.`); return; }
     if (new Set(names.map(name => name.toLocaleLowerCase('ko-KR'))).size !== names.length) {
-      setError('같은 이름의 후보가 있어요. 이름을 다르게 입력해 주세요.'); return;
+      setError('같은 이름이 있어요. 이름을 다르게 입력해 주세요.'); return;
     }
-    if (!topic.trim()) { setError('추첨 주제를 입력해 주세요.'); return; }
-    const list = candidates;
-    const election = createElection(list);
-    const frames = createDrama(election);
-    setResult(election);
-    setDrama(frames);
+    if (mode === 'election') {
+      const election = createElection(candidates);
+      setResult(election);
+      setDrama(createDrama(election));
+    } else {
+      setOrder(createSportsOrder(candidates));
+      setResult(null);
+      setDrama([]);
+    }
     setElapsed(0);
     setPaused(false);
     setRunId(previous => previous + 1);
     setError('');
     window.scrollTo(0, 0);
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setElapsed(SHOW_DURATION);
+      setElapsed(duration);
       setStatus('finished');
       return;
     }
@@ -74,9 +86,9 @@ export default function App() {
     timer.current = window.setInterval(() => {
       const clock = playback.current;
       if (clock.paused) return;
-      const next = Math.min(SHOW_DURATION, clock.elapsed + performance.now() - clock.startedAt);
+      const next = Math.min(duration, clock.elapsed + performance.now() - clock.startedAt);
       setElapsed(next);
-      if (next >= SHOW_DURATION) {
+      if (next >= duration) {
         if (timer.current !== null) window.clearInterval(timer.current);
         timer.current = null;
         setStatus('finished');
@@ -87,7 +99,7 @@ export default function App() {
   function finishNow() {
     if (timer.current !== null) window.clearInterval(timer.current);
     timer.current = null;
-    setElapsed(SHOW_DURATION);
+    setElapsed(duration);
     setPaused(false);
     playback.current.paused = false;
     setStatus('finished');
@@ -98,6 +110,7 @@ export default function App() {
     timer.current = null;
     setResult(null);
     setDrama([]);
+    setOrder([]);
     setElapsed(0);
     setPaused(false);
     playback.current.paused = false;
@@ -112,18 +125,28 @@ export default function App() {
       clock.startedAt = performance.now();
       clock.paused = false;
     } else {
-      clock.elapsed = Math.min(SHOW_DURATION, clock.elapsed + performance.now() - clock.startedAt);
-      if (clock.elapsed >= SHOW_DURATION) { finishNow(); return; }
+      clock.elapsed = Math.min(duration, clock.elapsed + performance.now() - clock.startedAt);
+      if (clock.elapsed >= duration) { finishNow(); return; }
       clock.paused = true;
       setElapsed(clock.elapsed);
     }
     setPaused(clock.paused);
   }
 
+  function chooseGame(next: GameMode) {
+    if (next === mode) return;
+    reset();
+    setError('');
+    setMode(next);
+  }
+
+  const sportsProps = { candidates, order, elapsed, duration: SPORT_DURATION, paused, preview: status === 'setup' };
+
   return (
     <div className={`site-shell ${status !== 'setup' ? 'show-mode' : ''}`}>
       <header className="site-header">
-        <div className="brand"><span className="brand-icon" aria-hidden="true"><span /></span><span>PIXEL<span className="brand-accent">ELECTION</span></span></div>
+        <div className="brand"><span className="brand-icon" aria-hidden="true"><span /></span><span>PIXEL<span className="brand-accent">SHOW</span></span></div>
+        <nav className="game-picker" aria-label="추첨 게임 선택">{(['election', 'racing'] as const).map((value, index) => <button type="button" key={value} onClick={() => chooseGame(value)} aria-pressed={mode === value}><small aria-hidden="true">0{index + 1}</small>{games[value].label}</button>)}</nav>
         <span className="header-badge">RANDOM DRAW SHOW <span className="badge-star">✦</span> 001</span>
       </header>
 
@@ -131,8 +154,8 @@ export default function App() {
         <div className="page-heading">
           <div>
             <div className="eyebrow"><span className="eyebrow-square" /> 아주 진지한 랜덤 추첨</div>
-            <h1>오늘의 당선자를 뽑아볼까요?</h1>
-            <p>후보를 적고 시작하세요. 사소한 결정을 거대한 픽셀 선거 쇼로 발표합니다.</p>
+            <h1>{game.title}</h1>
+            <p>{game.detail}</p>
           </div>
           <div className="heading-seal" aria-hidden="true"><span>VOTE</span><strong>★</strong><span>SHOW</span></div>
         </div>
@@ -140,48 +163,51 @@ export default function App() {
         {status === 'setup' ? (
           <div className="setup-grid">
             <section className="input-card" aria-labelledby="setup-title">
-              <div className="card-heading"><span className="card-index">01</span><div><h2 id="setup-title">선거 준비</h2><p>후보 2~10명과 추첨 주제를 정해 주세요.</p></div></div>
+              <div className="card-heading"><span className="card-index">0{mode === 'election' ? 1 : mode === 'racing' ? 2 : 3}</span><div><h2 id="setup-title">{game.label} 준비</h2><p>{game.noun} 이름 2~10개를 입력해 주세요.</p></div></div>
               <div className="candidates-block">
-              <div className="section-row"><label className="field-label" htmlFor="candidate-1">후보 명단</label><span className="field-count">{entries.filter(entry => entry.name.trim()).length} / {MAX_CANDIDATES}명</span></div>
+              <div className="section-row"><label className="field-label" htmlFor="candidate-1">{game.noun} 명단</label><span className="field-count">{candidates.length} / {MAX_CANDIDATES}</span></div>
               <div className="candidate-list" style={{ gridTemplateRows: `repeat(${Math.ceil(entries.length / 2)}, minmax(0, 1fr))` }}>
                 {entries.map((entry, index) => (
                   <div className="candidate-row" key={entry.id}>
                     <span className="candidate-number">{String(index + 1).padStart(2, '0')}</span>
                     <span className="candidate-swatch" style={{ backgroundColor: CANDIDATE_COLORS[index] }} aria-hidden="true" />
-                    <input id={index === 0 ? 'candidate-1' : undefined} aria-label={`${index + 1}번 후보 이름`} value={entry.name} onChange={event => changeEntry(entry.id, event.target.value)} maxLength={16} placeholder="후보 이름" />
-                    <button className="remove-button" type="button" aria-label={`${index + 1}번 후보 삭제`} title="후보 삭제" onClick={() => { setEntries(previous => previous.filter(item => item.id !== entry.id)); setError(''); }} disabled={entries.length <= 2}>×</button>
+                    <input id={index === 0 ? 'candidate-1' : undefined} aria-label={`${index + 1}번 ${game.noun} 이름`} value={entry.name} onChange={event => changeEntry(entry.id, event.target.value)} maxLength={16} placeholder={`${game.noun} 이름`} />
+                    <button className="remove-button" type="button" aria-label={`${index + 1}번 ${game.noun} 삭제`} title="명단에서 삭제" onClick={() => { setEntries(previous => previous.filter(item => item.id !== entry.id)); setError(''); }} disabled={entries.length <= 2}>×</button>
                   </div>
                 ))}
               </div>
-              <button className="add-button" type="button" onClick={addEntry} disabled={entries.length >= MAX_CANDIDATES}><span aria-hidden="true">＋</span> 후보 추가</button>
+              <button className="add-button" type="button" onClick={addEntry} disabled={entries.length >= MAX_CANDIDATES}><span aria-hidden="true">＋</span> {game.noun} 추가</button>
               </div>
 
               <div className="setup-options">
-              <div className="topic-block">
-                <label className="field-label" htmlFor="topic">오늘의 선거 주제</label>
-                <input id="topic" className="topic-input" value={topic} onChange={event => { setTopic(event.target.value); setError(''); }} maxLength={60} placeholder="무엇을 뽑을까요?" />
-                <div className="template-list" aria-label="주제 예시">
-                  {templates.map((template, index) => <button key={template} type="button" className={topic === template ? 'template active' : 'template'} onClick={() => { setTopic(template); setError(''); }}>{['☕', '🍽', '🎯', '🧹', '🎤'][index]} {['커피 쏘기', '점심값', '벌칙자', '청소 담당', '발표자'][index]}</button>)}
+              {mode === 'election' ? <div className="topic-block">
+                <span className="field-label">추첨 테마</span>
+                <div className="template-list" aria-label="선거 테마 선택">
+                  {templates.map((template, index) => <button key={template} type="button" aria-pressed={topic === template} className={topic === template ? 'template active' : 'template'} onClick={() => { setTopic(template); setError(''); }}>{['☕', '🍽', '🎯', '🧹', '🎤'][index]} {['커피 쏘기', '점심값', '벌칙자', '청소 담당', '발표자'][index]}</button>)}
                 </div>
-              </div>
+              </div> : <div className="game-instruction"><b>{mode === 'racing' ? '한 번의 경주, 모든 순위' : '전원 동시 장외 난투'}</b><p>{game.instruction}</p></div>}
               {error && <p className="error-message" role="alert">{error}</p>}
-              <button className="start-button" type="button" onClick={start}>선거 시작 <span aria-hidden="true">▶</span></button>
-              <p className="privacy-note">명단은 이 탭에 저장돼요 · 모든 후보의 당선 확률은 같아요</p>
+              <button className="start-button" type="button" onClick={start}>{game.action} <span aria-hidden="true">▶</span></button>
+              <p className="privacy-note">명단은 이 탭에 저장돼요 · 모두 같은 1등 확률</p>
               </div>
             </section>
 
-            <section className="preview-card" aria-label="픽셀 선거 무대 미리보기">
+            {mode === 'election' ? <section className="preview-card" aria-label="픽셀 선거 무대 미리보기">
               <div className="preview-top"><span className="live-pill"><span /> PREVIEW</span><span>PIXEL TV · CH 01</span></div>
               <div className="preview-stage"><GameStage phase="declaration" candidates={candidates} winnerId="" topic={topic} preview reducedMotion={reducedMotion} /></div>
-              <div className="preview-bottom"><div><span className="mini-label">TODAY'S ISSUE</span><strong>{topic.trim() || '오늘의 주제를 입력해 주세요'}</strong></div><span className="preview-arrow" aria-hidden="true">✦</span></div>
+              <div className="preview-bottom"><div><span className="mini-label">TODAY'S ISSUE</span><strong>{topic}</strong></div><span className="preview-arrow" aria-hidden="true">✦</span></div>
               <p className="preview-caption">몸싸움부터 간식 뇌물까지, 60가지 사건이 판세를 뒤흔듭니다. 누가 끝까지 살아남을까요?</p>
-            </section>
+            </section> : <section className="preview-card sports-preview" aria-label={`${game.label} 미리보기`}><div className="preview-top"><span className="live-pill"><span /> PREVIEW</span><span>PIXEL SPORTS · CH 02</span></div><div className="sports-preview-body"><RacingShow {...sportsProps} /></div></section>}
           </div>
         ) : (
-          result && snapshot && <BroadcastShow result={result} frame={snapshot} drama={drama} phase={phase} topic={topic.trim()} elapsed={elapsed} finished={status === 'finished'} runId={runId} reducedMotion={reducedMotion} paused={paused} onPause={togglePause} onSkip={finishNow} onReplay={start} onReset={reset} />
+          mode === 'election' ? result && snapshot && <BroadcastShow result={result} frame={snapshot} drama={drama} phase={phase} topic={topic} elapsed={elapsed} finished={status === 'finished'} runId={runId} reducedMotion={reducedMotion} paused={paused} onPause={togglePause} onSkip={finishNow} onReplay={start} onReset={reset} /> : <section className={`sports-shell ${paused ? 'is-paused' : ''}`} aria-label={`${game.label} 경기`}>
+            <div className="sports-toolbar"><span><b>{game.label}</b> {status === 'finished' ? '최종 순위 확정' : paused ? '일시정지' : `결과까지 ${Math.ceil((duration - elapsed) / 1000)}초`}</span>{status !== 'finished' && <button type="button" className="playback-button" onClick={togglePause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div>
+            <div className="sports-body" key={`${mode}-${runId}`}><RacingShow {...sportsProps} /></div>
+            <div className="sports-actions">{status === 'finished' ? <><button type="button" className="start-button" onClick={start}>같은 명단으로 다시 뽑기 <span aria-hidden="true">▶</span></button><button type="button" className="secondary-button" onClick={reset}>명단 수정하기</button></> : <button type="button" className="secondary-button" onClick={finishNow}>연출 건너뛰고 순위 보기</button>}</div>
+          </section>
         )}
       </main>
-      <footer className="site-footer"><span>PIXEL ELECTION © 2026</span><span>공정한 추첨 · 거창한 발표 · 실제 투표 아님</span></footer>
+      <footer className="site-footer"><span>PIXEL SHOW © 2026</span><span>공정한 추첨 · 거창한 발표</span></footer>
     </div>
   );
 }
