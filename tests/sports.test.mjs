@@ -6,6 +6,8 @@ const compiled = await build({ entryPoints: ['src/sports.ts'], bundle: true, for
 const { createSportsOrder } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const arenaCompiled = await build({ entryPoints: ['src/arenaLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { arenaRounds, arenaRanks, arenaThrow, arenaExchange, arenaBeat, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaMove } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
+const fighterCompiled = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { arenaDrawOrder } = await import(`data:text/javascript;base64,${Buffer.from(fighterCompiled.outputFiles[0].text).toString('base64')}`);
 const storyCompiled = await build({ entryPoints: ['src/arenaStoryLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { arenaStoryState } = await import(`data:text/javascript;base64,${Buffer.from(storyCompiled.outputFiles[0].text).toString('base64')}`);
 const timingCompiled = await build({ entryPoints: ['src/playbackTiming.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
@@ -141,6 +143,34 @@ test('arena elimination leaves the ground, lands before ranking, and recovers wi
     assert.equal(arenaThrow(1100, origin, landing, direction, 1, preparation).height, 0);
     assert.equal(arenaThrow(2200, origin, landing, direction, 1, preparation).x, landing.x);
   }
+});
+
+test('lifting and throwing preserve hand occlusion until a fighter actually crosses another ground depth', () => {
+  const origin = { x: 500, y: 425 }, landing = { x: 885, y: 425 };
+  const attacker = Object.freeze({ id: 'attacker', index: 0, y: 425, depthY: 425 });
+  const stages = new Set();
+  let largestHeight = 0;
+  const samples = [...new Set([...Array.from({ length: 139 }, (_, index) => index * 16), 119, 120, 879, 880, 1099, 1100, 1599, 1600, 2099, 2100])];
+  for (const lift of [0, 52]) for (const age of samples) {
+    const frame = arenaThrow(age, origin, landing, 1, 1, { lift, angle: lift ? -.22 : 0 });
+    stages.add(frame.stage); largestHeight = Math.max(largestHeight, frame.height);
+    const victim = Object.freeze({ id: 'victim', index: 1, y: frame.y, depthY: frame.groundY });
+    // This deliberately reverses the input: contact depth determines occlusion, not input or airtime.
+    const input = Object.freeze([victim, attacker]);
+    assert.deepEqual(arenaDrawOrder(input).map(actor => actor.id), ['attacker', 'victim'], `hand/body layers flipped at ${age}ms (${frame.stage}, lift ${lift})`);
+    assert.deepEqual(input, [victim, attacker], 'rendering must leave actor storage untouched');
+  }
+  assert.ok(largestHeight > 130, 'the regression must include an actual high throw');
+  assert.deepEqual([...stages], ['hold', 'flight', 'land', 'roll', 'recover', 'walk']);
+
+  const bystander = { id: 'bystander', index: 0, y: 450 };
+  const movingOrder = age => {
+    const frame = arenaThrow(age, { x: 500, y: 415 }, { x: 885, y: 465 }, 1, 1, { lift: 52, angle: -.22 });
+    return arenaDrawOrder([{ id: 'victim', index: 1, y: frame.y, depthY: frame.groundY }, bystander]).map(actor => actor.id);
+  };
+  assert.deepEqual(movingOrder(100), ['victim', 'bystander'], 'a held fighter stays behind the nearer spectator');
+  assert.deepEqual(movingOrder(700), ['bystander', 'victim'], 'crossing the spectator on the ground must bring the fighter forward even while airborne');
+  assert.deepEqual(movingOrder(2100), ['bystander', 'victim'], 'recovery must retain the landing depth');
 });
 
 test('non-eliminating arena exchanges keep small games active and never reuse eliminated actors', () => {

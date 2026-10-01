@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import type { Candidate } from './election';
 import type { SportsStageProps } from './sports';
 import { arenaBeat, arenaExchange, arenaMove as move, arenaNarration, arenaPodium, arenaRanks, arenaRoamingTarget, arenaRounds, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
-import { createArenaFighterAnimation, drawArenaFighter, drawArenaName, type ArenaActor, type ArenaFighterAnimation, type ArenaPose } from './game/ArenaFighter';
+import { arenaDrawOrder, createArenaFighterAnimation, drawArenaFighter, drawArenaName, type ArenaActor, type ArenaFighterAnimation, type ArenaPose } from './game/ArenaFighter';
 import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
 import './arena.css';
@@ -285,7 +285,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       }
     }
     else { body.x = flight.x; body.y = reduced && flight.stage === 'flight' ? flight.groundY - flight.height * .28 : flight.y; }
-    const actor: ArenaActor = { candidate: props.candidates[index], index, x: body.x, y: body.y, scale: 2.04, facing: body.facing, pose, angle: reduced ? 0 : flight.stage === 'walk' ? 0 : flight.angle, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: body.gait, phase: flight.phase };
+    const actor: ArenaActor = { candidate: props.candidates[index], index, x: body.x, y: body.y, depthY: flight.stage === 'walk' ? body.y : flight.groundY, scale: 2.04, facing: body.facing, pose, angle: reduced ? 0 : flight.stage === 'walk' ? 0 : flight.angle, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: body.gait, phase: flight.phase };
     actors.set(id, actor);
     if (flight.stage === 'flight') { ctx.fillStyle = '#27332e40'; ctx.beginPath(); ctx.ellipse(flight.groundX, flight.groundY + 4, 32, 7, 0, 0, Math.PI * 2); ctx.fill(); }
     if (!reduced) dust(ctx, exit.landing.x, exit.landing.y, age / unit - 880, 1.5);
@@ -318,6 +318,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   }
   for (const [id, actor] of actors) {
     const body = sim.bodies.get(id)!;
+    // Lifted bodies keep their standing depth; throws supply their projected ground depth above.
+    actor.depthY ??= body.y;
     const previous = before.get(id) ?? body;
     const ground = actor.pose !== 'airborne' && actor.pose !== 'land' && actor.pose !== 'recover';
     const distance = Math.hypot(body.x - previous.x, body.y - previous.y);
@@ -334,7 +336,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   }
   // Every name is fixed below its owner and sits behind every fighter.
   for (const actor of actors.values()) drawArenaName(ctx, actor);
-  [...actors.values()].sort((a, b) => a.y - b.y).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
+  arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
   if (exchange && !won) relationship(ctx, exchange, elapsed, actors, true);
 }
 
