@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { randomInt, type Candidate } from './election';
 import type { SportsStageProps } from './sports';
-import { buildLadderTimeline, ladderFrame, type LadderActorFrame, type LadderActiveEvent, type LadderFrame, type LadderTimeline } from './ladderLogic';
+import { buildLadderTimeline, ladderFrame, ladderActionPhase, type LadderActorFrame, type LadderActiveEvent, type LadderFrame, type LadderTimeline } from './ladderLogic';
 import { createLadderGeometry, drawLadderActor, drawLadderConfetti, drawLadderCrossing, drawLadderEvent, drawLadderName, ladderArtActors, type LadderArtEvent, type LadderGeometry } from './game/ladderArt';
 import { drawClaimedLadderTreasure, drawLadderAdventure, drawLadderTreasureReveal } from './game/ladderAdventureArt';
 import './ladder.css';
@@ -43,7 +43,8 @@ function storyAt(event: LadderTimeline['events'][number], elapsed: number): Ladd
   const stage = elapsed < event.action ? 'setup' : elapsed < event.resolve ? 'action' : 'resolve';
   const start = stage === 'setup' ? event.setup : stage === 'action' ? event.action : event.resolve;
   const end = stage === 'setup' ? event.action : stage === 'action' ? event.resolve : event.end;
-  return { ...event, stage, age: elapsed - event.setup, phase: clamp((elapsed - start) / (end - start)) };
+  const phase = clamp((elapsed - start) / (end - start));
+  return { ...event, stage, age: elapsed - event.setup, phase: stage === 'action' ? ladderActionPhase(event.motion.type, phase) : phase };
 }
 function runningStories(timeline: LadderTimeline | null, elapsed: number): LadderActiveEvent[] {
   return (timeline?.events ?? []).filter(item => elapsed >= item.action && elapsed < item.end)

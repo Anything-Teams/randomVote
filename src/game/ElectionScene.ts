@@ -3,7 +3,7 @@ import type { Candidate, ElectionEvent } from '../election';
 import { COUNT_START, WINNER_START, STORY_DURATION, STORY_RESOLVE_AT, countBeat, countProgress, storyBeat, resolvedEvents, tallyVotes, type ShowPhase, type StoryOutcome } from '../show';
 import { PixelCitizen, type Pose } from './PixelCitizen';
 import { COUNT_FINISH_START, COUNT_FINISH_LINE_X, countingFinishAt, countingFinishScale } from './countingFinish';
-import { advanceCountingRunner, countingRunnerTarget, type CountingRunner } from './citizenLocomotion';
+import { advanceCountingRunTrack, advanceCountingRunner, countingRunnerTarget, type CountingRunner, type CountingRunTrack } from './citizenLocomotion';
 
 export const STAGE_WIDTH = 1280;
 export const STAGE_HEIGHT = 720;
@@ -27,7 +27,7 @@ export type StageState = {
   paused?: boolean;
 };
 type Voter = { citizen: PixelCitizen; ballot: Phaser.GameObjects.Rectangle; offset: number; duration: number; lastDrop: number };
-type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; receivedVotes: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; bar: Phaser.GameObjects.Rectangle; cap: Phaser.GameObjects.Rectangle; finishLine: Phaser.GameObjects.Container; displayed: number; previous: number; previousRank: number; reactedAt: number; voteAt: number; width: number; height: number; movingUntil: number; direction: number; runner: CountingRunner; travel: number; finishStartX?: number; finishCrossed?: boolean; eliminationShare?: number; eliminationWidth?: number };
+type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; receivedVotes: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; bar: Phaser.GameObjects.Rectangle; cap: Phaser.GameObjects.Rectangle; finishLine: Phaser.GameObjects.Container; road: Phaser.GameObjects.Graphics; track: CountingRunTrack; roadTravel: number; displayed: number; previous: number; previousRank: number; reactedAt: number; voteAt: number; width: number; height: number; movingUntil: number; direction: number; runner: CountingRunner; travel: number; finishStartX?: number; finishCrossed?: boolean; eliminationShare?: number; eliminationWidth?: number };
 type VoteMote = { rectangle: Phaser.GameObjects.Rectangle; candidateId: string; age: number; startX: number; startY: number; life: number };
 type StoryActor = { candidate: Candidate; citizen: PixelCitizen; name: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle; side: number; scale: number };
 type StoryCut = { event: ElectionEvent; layer: Phaser.GameObjects.Container; dimmer: Phaser.GameObjects.Rectangle; title: Phaser.GameObjects.Text; stageLabel: Phaser.GameObjects.Text; evidence: Phaser.GameObjects.Text; dialogue: Phaser.GameObjects.Container; detail: Phaser.GameObjects.Text; verdict: Phaser.GameObjects.Container; actors: StoryActor[]; props: Phaser.GameObjects.Container[]; stamp: Phaser.GameObjects.Text; lamp: Phaser.GameObjects.Arc; darkness: Phaser.GameObjects.Rectangle; beam: Phaser.GameObjects.Graphics; impactFired: boolean; verdictStarted: boolean };
@@ -445,6 +445,8 @@ export class ElectionScene extends Phaser.Scene {
       const bar = this.rect(panel, 252, middle - barHeight / 2, 1, barHeight, colorOf(candidate));
       bar.setStrokeStyle(1, 0xffffff, 0.15);
       const cap = this.rect(panel, 252, middle - barHeight / 2, 4, barHeight, 0xf6efd6, 0.65);
+      const road = this.add.graphics();
+      panel.add(road);
       const scale = Math.min(1.85, height / 57);
       const citizen = this.citizen(panel, candidate, index, 252, height - 5, scale);
       citizen.pose = 'idle';
@@ -474,7 +476,7 @@ export class ElectionScene extends Phaser.Scene {
       const runner = { x: countingRunnerTarget(state.progress, value, this.countingAverage), velocity: 0 };
       citizen.root.setX(runner.x);
       citizen.locomotionDistance = 0;
-      this.race.push({ candidate, panel, citizen, percentage, receivedVotes, badge, position, glow, frame, bar, cap, finishLine, displayed: value, previous: value, previousRank: index, reactedAt: -10000, voteAt: -10000, width, height, movingUntil: 0, direction: 0, runner, travel: 0 });
+      this.race.push({ candidate, panel, citizen, percentage, receivedVotes, badge, position, glow, frame, bar, cap, finishLine, road, track: { distance: 0, speed: 0 }, roadTravel: 0, displayed: value, previous: value, previousRank: index, reactedAt: -10000, voteAt: -10000, width, height, movingUntil: 0, direction: 0, runner, travel: 0 });
     });
     this.root.sort('depth');
   }
@@ -975,22 +977,32 @@ export class ElectionScene extends Phaser.Scene {
       }
       slot.citizen.root.setX(citizenX).setAlpha(eliminated ? 0.23 : 1);
       const velocity = (citizenX - previousX) / Math.max(1, delta) * 1000;
-      slot.travel += Math.max(0, citizenX - previousX) / Math.abs(slot.citizen.root.scaleX);
+      const actorScale = Math.abs(slot.citizen.root.scaleX);
+      const running = !eliminated && !(finishRun && finishAge >= 0);
+      const trackStep = advanceCountingRunTrack(slot.track, state.reducedMotion ? 0 : delta / 1000, running);
+      slot.roadTravel += trackStep * actorScale;
+      slot.travel += Math.max(0, citizenX - previousX) / actorScale + trackStep;
       slot.citizen.locomotionDistance = slot.travel;
-      slot.citizen.locomotionVelocity = Math.max(0, velocity) / Math.abs(slot.citizen.root.scaleX);
+      slot.citizen.locomotionVelocity = Math.max(0, velocity) / actorScale + slot.track.speed;
       slot.citizen.movementDirection = 1;
       slot.citizen.locomotionSpeed = 0.82 + Math.min(0.68, Math.abs(velocity) / 160) + index % 3 * 0.04;
+      // Moving floor marks make the sustained running cadence visible while
+      // candidate positions continue to report the real counted vote progress.
+      const roadLeft = 252, roadRight = COUNT_FINISH_LINE_X + 30, period = 32;
+      slot.road.clear().fillStyle(0xabc9ce, eliminated ? .08 : .26);
+      for (let mark = Math.floor(slot.roadTravel / period); mark * period - slot.roadTravel < roadRight - roadLeft; mark++) {
+        const x = roadLeft + mark * period - slot.roadTravel;
+        const left = Math.max(roadLeft, x), right = Math.min(roadRight, x + 11);
+        if (right > left) slot.road.fillRect(left, slot.height - 3, right - left, 1);
+      }
       slot.position.setText(eliminated ? '×' : String(rank + 1)).setColor(rank === 0 ? '#fbd975' : '#a6c5cc');
       slot.badge.setText(eliminated ? '후보 탈락' : slot.height > 62 ? finishRun ? finishAge >= 0 ? '결승선 통과' : '마지막 질주' : rank === 0 ? '선두' : slot.direction > 0 && time < slot.movingUntil ? '표가 몰립니다' : '추격 중' : '').setColor(eliminated ? '#e88073' : '#9cbdc8');
       slot.frame.setStrokeStyle(rank === 0 ? 2 : 1, rank === 0 ? colorOf(slot.candidate) : 0x30495e);
       slot.glow.setAlpha(eliminated ? 0.012 : rank === 0 ? 0.08 + (state.reducedMotion ? 0 : Math.sin(time / 380) * 0.015) : 0.028);
-      const reaction = this.countingReactions.get(slot.candidate.id);
       slot.citizen.gestureProgress = Phaser.Math.Clamp(finishAge / 500, 0, 1);
       slot.citizen.pose = eliminated ? 'bow'
         : finishRun && finishAge >= 0 ? finishAge < 500 ? 'brake' : 'finish'
-        : velocity > .3 ? 'run'
-        : reaction && reaction.until > time ? reaction.pose
-        : index % 4 === 1 ? 'nervous' : 'idle';
+        : 'run';
       if (gaining && !eliminated && !state.reducedMotion && time - slot.voteAt > 460 + index * 29) {
         slot.voteAt = time;
         const startX = slot.panel.x + 252 + width - 61;

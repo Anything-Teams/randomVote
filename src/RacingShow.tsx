@@ -5,7 +5,7 @@ import { activeRacingIncident, activeRacingTrick, racingTrickStatus, buildRacing
 import { drawRaceDust, drawRaceHorse, raceHorseAttachments, drawRaceStadium, raceBox, raceLabel, type RaceHorseMotion } from './racingArt';
 import { drawRacingCourse, drawRacingStartingGate, drawRacingTopView } from './racingCourse';
 import { createRacingCamera, placeRacingField, racingFocusIds, type RacingCamera } from './racingCamera';
-import { drawRacingIncidentEffects, drawRacingTrickEffects, placeRacingDuel, placeRacingTrick, racingIncidentMotion, racingTrickMotion } from './racingEffects';
+import { combineRacingHorseMotion, drawRacingIncidentEffects, drawRacingTrickEffects, placeRacingDuel, placeRacingTrick, racingIncidentMotion, racingTrickMotion } from './racingEffects';
 import { drawRacingObstacles, placeRacingObstacles, placeRacingFalls, racingObstacleJump, racingObstacleMotion, racingObstacleStatus } from './racingObstacles';
 import './racing.css';
 
@@ -121,7 +121,7 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
     const own = obstacles.filter(obstacle => obstacle.actorId === item.id);
     const jump = reduced ? 0 : Math.max(0, ...own.map(obstacle => racingObstacleJump(obstacle, item)));
     const obstacleMotion = own.reduce<RaceHorseMotion>((motion, obstacle) => ({ ...motion, ...racingObstacleMotion(obstacle, elapsed, reduced) }), {});
-    return [item.id, { ...racingIncidentMotion(incident, item.id, elapsed, reduced), ...racingTrickMotion(trick, item.id, elapsed, locations, reduced), ...obstacleMotion, jump: jump * (1 - (obstacleMotion.fall ?? 0)) }];
+    return [item.id, combineRacingHorseMotion(racingIncidentMotion(incident, item.id, elapsed, reduced), racingTrickMotion(trick, item.id, elapsed, locations, reduced), obstacleMotion, { jump: jump * (1 - (obstacleMotion.fall ?? 0)) })];
   }));
   const physicalLocations = locations.map(item => {
     const before = readRacingTravel(timeline, item.id, elapsed - 100), effort = clamp((item.distance - before) * 335, .45, 1.35);
@@ -131,7 +131,10 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
   });
   if (trick?.kind === 'rear-kick') {
     const actor = motions.get(trick.actorId);
-    if (actor) Object.assign(actor, racingTrickMotion(trick, trick.actorId, elapsed, physicalLocations, reduced));
+    if (actor) {
+      const contact = racingTrickMotion(trick, trick.actorId, elapsed, physicalLocations, reduced);
+      actor.kickReach = contact.kickReach; actor.kickX = contact.kickX; actor.kickY = contact.kickY;
+    }
   }
   if (phase === 'straight' || phase === 'photo') {
     const finishX = w * .5 + (1 - scene.camera.center) / scene.camera.span * w * .65;
@@ -151,7 +154,7 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
     }
     const candidate = props.candidates[item.index], before = readRacingTravel(timeline, item.id, elapsed - 100), effort = clamp((item.distance - before) * 335, .45, 1.35);
     const motion = motions.get(item.id)!;
-    drawRaceDust(ctx, item.index, item.x, item.y, item.scale, clock, reduced, (motion.jump ?? 0) > .08 ? 0 : effort * (1 - (motion.fall ?? 0) * .85));
+    drawRaceDust(ctx, item.index, item.x, item.y, item.scale, item.distance * 62 * (560 + item.index % 4 * 22), reduced, effort * (1 - smooth((motion.jump ?? 0) / .35)) * (1 - (motion.fall ?? 0) * .85));
     const standing = standings.find(standing => standing.id === item.id);
     const velocityRatio = standing?.finished ? Math.exp(-(elapsed - standing.finishTime) / 1100) : 1;
     // Invert the renderer's easing so stride shrinks with the continuous run-out velocity.
@@ -214,9 +217,21 @@ export default function RacingShow(props: SportsStageProps & { storySeed?: numbe
   useEffect(() => { const query = window.matchMedia('(prefers-reduced-motion: reduce)'); const update = () => setReducedMotion(query.matches); query.addEventListener('change', update); return () => query.removeEventListener('change', update); }, []);
   useEffect(() => {
     const element = canvas.current, ctx = element?.getContext('2d'); if (!element || !ctx) return;
-    let w = 1, h = 1, ratio = 1, frame = 0, previous = performance.now(), clock = 0, boardAt = -1000, viewKey = '';
+    let w = 1, h = 1, ratio = 1, hasCanvasSize = false, frame = 0, previous = performance.now(), clock = 0, boardAt = -1000, viewKey = '';
     const scene: RaceScene = { camera: createRacingCamera(), elapsed: null };
-    const resize = () => { const rect = element.getBoundingClientRect(); w = Math.max(1, rect.width); h = Math.max(1, rect.height); ratio = Math.min(2, window.devicePixelRatio || 1); element.width = Math.round(w * ratio); element.height = Math.round(h * ratio); scene.elapsed = null; };
+    const resize = () => {
+      const rect = element.getBoundingClientRect(), nextW = Math.max(1, rect.width), nextH = Math.max(1, rect.height), nextRatio = Math.min(2, window.devicePixelRatio || 1);
+      const pixelW = Math.round(nextW * nextRatio), pixelH = Math.round(nextH * nextRatio);
+      if (hasCanvasSize && element.width === pixelW && element.height === pixelH && ratio === nextRatio) { w = nextW; h = nextH; return; }
+      hasCanvasSize = true; w = nextW; h = nextH; ratio = nextRatio;
+      if (element.width !== pixelW) element.width = pixelW;
+      if (element.height !== pixelH) element.height = pixelH;
+      scene.elapsed = null;
+      // A real resize repaints immediately instead of leaving an emptied canvas until the next frame.
+      const current = latest.current, plan = latestTimeline.current, now = performance.now();
+      const elapsed = current.preview || current.paused ? current.elapsed : Math.min(current.duration, current.elapsed + Math.max(0, now - synchronizedAt.current));
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0); render(ctx, w, h, current, plan, elapsed, clock, reducedMotion, scene, 0);
+    };
     const observer = new ResizeObserver(resize); observer.observe(element); resize();
     const animate = (now: number) => {
       const current = latest.current, plan = latestTimeline.current, delta = Math.min(50, Math.max(0, now - previous)); previous = now;

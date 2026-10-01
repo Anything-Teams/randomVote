@@ -211,6 +211,64 @@ test('a thrown climber leaves the grip with momentum and follows gravity rather 
   assert.ok(vertical.every((step, index) => index === 0 || step < vertical[index - 1]), 'gravity continuously turns the upward launch into a fall');
 });
 
+test('a climber compresses a planted leg, reaches the opponent promptly and keeps a real lifting grip', () => {
+  for (const count of [2, 5, 10]) for (const seed of [1, 4, 12]) {
+    const candidates = participants.slice(0, count), timeline = buildLadderTimeline(candidates, candidates.map(person => person.id).reverse(), 44_000, seed);
+    const event = timeline.events.find(item => item.motion.type === 'pounce'), geometry = createLadderGeometry(800, 600, count);
+    const read = time => ladderFrame(timeline, time, 0), actionDuration = event.resolve - event.action;
+    const at = time => {
+      const actors = ladderArtActors(timeline, read(time), candidates, time, geometry, false, read);
+      const actor = actors.find(item => item.id === event.actorId);
+      return { actor, rig: sampleLadderRig(actor, geometry, time), actors };
+    };
+    const early = at(event.setup + (event.action - event.setup) * .4), crouch = at(event.action - 1);
+    assert.ok(crouch.rig.hip.y > early.rig.hip.y + geometry.scale, 'the pelvis lowers over a supporting leg before the jump');
+    const planted = early.rig.footContact.findIndex(Boolean);
+    assert.ok(planted >= 0 && crouch.rig.footContact[planted], 'the compressed stance keeps a boot on the real rung');
+    assert.ok(Math.hypot(early.rig.feet[planted].x - crouch.rig.feet[planted].x, early.rig.feet[planted].y - crouch.rig.feet[planted].y) < .01, 'the push-off boot cannot slide as the body loads it');
+    const reached = at(event.action + actionDuration * .24);
+    assert.equal(reached.actor.lane, event.toLane);
+    assert.ok(actionDuration * .24 <= 550, 'the nearby opponent is reached in about half a second instead of floating across');
+    const cruise = [.2, .3, .4, .5, .6].map(fraction => at(event.action + actionDuration * .24 * fraction).actor.transferProgress);
+    const increments = cruise.slice(1).map((value, index) => value - cruise[index]);
+    assert.ok(increments.every(value => Math.abs(value - increments[0]) < 1e-8), 'the push carries momentum through the middle of the leap');
+    const heldAt = event.action + actionDuration * .36, releasingAt = event.action + actionDuration * .6;
+    assert.ok(releasingAt - heldAt >= 400, 'the action retains readable contact time instead of fast-forwarding the whole interaction');
+    for (let time = heldAt; time < releasingAt; time += 16) {
+      const { actor, rig, actors } = at(time), other = actors.find(item => item.id === event.partnerId), target = sampleLadderRig(other, geometry, time);
+      const direction = Math.sign(event.toLane - event.fromLane), belt = { x: target.hip.x + direction * 5.8 * geometry.scale, y: target.hip.y - geometry.scale };
+      assert.ok(Math.hypot(rig.hands[0].x - target.hands[1].x, rig.hands[0].y - target.hands[1].y) < .01, 'the wrist stays held throughout the lift');
+      assert.ok(Math.hypot(rig.hands[1].x - belt.x, rig.hands[1].y - belt.y) < .01, 'the other hand stays on the moving belt');
+      assert.equal(actor.transferProgress, 1, 'the thrower stands at the opponent rather than slowly travelling through the grip');
+    }
+    for (const fraction of [.24, .44, .6, .9]) {
+      const time = event.action + actionDuration * fraction, before = at(time - .001).rig, after = at(time + .001).rig;
+      for (const part of ['hands', 'feet', 'elbows', 'knees']) for (const side of [0, 1]) assert.ok(Math.hypot(before[part][side].x - after[part][side].x, before[part][side].y - after[part][side].y) < .01, 'speed and contact changes do not snap any joint');
+    }
+  }
+});
+
+test('quick airborne travel leaves a stationary receiving grip before the separate recovery', () => {
+  for (const count of [2, 5, 10]) for (const seed of [1, 4, 12]) {
+    const candidates = participants.slice(0, count), timeline = buildLadderTimeline(candidates, candidates.map(person => person.id).reverse(), 44_000, seed);
+    const geometry = createLadderGeometry(800, 600, count), read = time => ladderFrame(timeline, time, 0);
+    for (const event of timeline.events.filter(item => ['launch', 'swing', 'drop'].includes(item.motion.type))) {
+      const duration = event.resolve - event.action, fraction = event.motion.type === 'drop' ? .55 : .60;
+      const at = time => {
+        const actor = ladderArtActors(timeline, read(time), candidates, time, geometry, false, read).find(item => item.id === event.actorId);
+        return { actor, rig: sampleLadderRig(actor, geometry, time) };
+      };
+      const caught = at(event.action + duration * fraction + 1), held = at(event.resolve - 1);
+      assert.equal(caught.actor.transferStage, 'catch');
+      assert.equal(caught.actor.transferProgress, 1);
+      assert.ok(caught.rig.handContact[1] && held.rig.handContact[1]);
+      assert.ok(Math.hypot(caught.rig.hands[1].x - held.rig.hands[1].x, caught.rig.hands[1].y - held.rig.hands[1].y) < .01, 'a receiving hand stops in world space while the body absorbs momentum');
+      assert.ok(duration * (1 - fraction) >= 350, 'quick travel leaves time to visibly brace at the catch');
+      assert.equal(at(event.resolve + 1).actor.pose, 'clamber', 'recovery begins after the supported catch');
+    }
+  }
+});
+
 test('a throw spotlight shows actual contact without a destination arrow or target ring', () => {
   const candidates = participants.slice(0, 5), timeline = buildLadderTimeline(candidates, candidates.map(person => person.id).reverse(), 44_000, 1);
   const event = timeline.events.find(item => item.motion.type === 'pounce'), geometry = createLadderGeometry(800, 600, 5);
@@ -337,8 +395,8 @@ test('movement stays continuous at crossings, falls, catches, recoveries and doo
       for (let index = 0; index < count; index++) {
         const actor = current.actors[index], before = previous.actors[index];
         assert.equal(actor.id, before.id);
-        assert.ok(Math.abs(actor.lane - before.lane) < .12, `horizontal jump ${count}/${seed}/${elapsed}`);
-        assert.ok(Math.abs(actor.rungProgress - before.rungProgress) < .36, `vertical jump ${count}/${seed}/${elapsed}`);
+        assert.ok(Math.abs(actor.lane - before.lane) < .18, `horizontal jump ${count}/${seed}/${elapsed}`);
+        assert.ok(Math.abs(actor.rungProgress - before.rungProgress) < .45, `vertical jump ${count}/${seed}/${elapsed}`);
         assert.ok(actor.lane >= 0 && actor.lane <= count - 1 && actor.height >= 0 && actor.height < 1.04);
         assert.equal(actor.height, actor.rungProgress / 24);
       }
@@ -404,11 +462,11 @@ test('nineteen readable event kinds vary independently of the destination draw',
     for (let index = 0; index < timeline.events.length; index++) {
       const event = timeline.events[index]; seen.add(event.kind);
       assert.ok(order.includes(event.actorId) && event.actors.includes(event.actorId));
-      assert.ok(event.action - event.setup >= 400 && event.action - event.setup <= 500, 'a short readable anticipation precedes the danger');
+      assert.ok(event.action - event.setup >= 250 && event.action - event.setup <= 400, 'a brief weight shift precedes the danger without freezing the climber');
       const actionDuration = event.resolve - event.action;
-      if (event.motion.type === 'pounce') assert.ok(actionDuration >= 2200 && actionDuration <= 2400, 'the paired grab and throw remain readable');
-      else assert.ok(actionDuration >= 1750 && actionDuration <= (Math.abs(event.toLane - event.fromLane) > 1 ? 2700 : 1900), 'the flight and catch remain readable over their real distance');
-      assert.ok(event.end - event.resolve >= 1000 && event.end - event.resolve <= 1200, 'the climber has time to pull their body onto the rung');
+      if (event.motion.type === 'pounce') assert.ok(actionDuration >= 1700 && actionDuration <= 2000, 'approach, contact and release are readable within a natural paired action');
+      else assert.ok(actionDuration >= 1100 && actionDuration <= (Math.abs(event.toLane - event.fromLane) > 1 ? 2450 : 1550), 'quick travel leaves visible time for the receiving grip');
+      assert.ok(event.end - event.resolve >= 600 && event.end - event.resolve <= 850, 'the climber recovers onto the rung without an extended slow-motion pull');
       assert.ok(event.title && event.setupText && event.actionText && event.recoveryText && event.prop);
       for (const other of timeline.events.slice(0, index).filter(other => other.actors.some(id => event.actors.includes(id)))) {
         assert.ok(event.setup >= other.end || other.setup >= event.end, 'one person never enters two events at once');
@@ -508,7 +566,9 @@ test('the drawn body stays continuous from a lateral mechanism into the destinat
       let previous = rigAt(event.actorId, event.action);
       for (let time = event.action + 16; time < event.end; time += 16) {
         const current = rigAt(event.actorId, time);
-        const motionStep = event.motion.type === 'pounce' ? Math.max(4, geometry.rungGap, geometry.laneGap * .05) : Math.max(4, geometry.rungGap);
+        const flightFraction = event.motion.type === 'pounce' ? .24 : .55;
+        const travelStep = Math.abs(event.toLane - event.fromLane) * geometry.laneGap / ((event.resolve - event.action) * flightFraction) * 16;
+        const motionStep = Math.max(4, geometry.rungGap, travelStep * 1.6);
         assert.ok(pointDistance(previous.rig.hip, current.rig.hip) < motionStep, `${event.kind} body jumps within the mechanism`);
         for (const part of ['hands', 'feet']) for (const side of [0, 1]) {
           const contact = (part === 'hands' ? current.rig.handContact : current.rig.footContact)[side];
@@ -665,7 +725,7 @@ test('the danger has distinct acceleration while climbers keep their own hand-ov
   const candidates = participants, order = candidates.map(candidate => candidate.id);
   const timeline = buildLadderTimeline(candidates, order, 44_000, 1);
   const progressAt = (event, fraction) => {
-    const flightEnd = event.motion.type === 'drop' ? .64 : .86;
+    const flightEnd = event.motion.type === 'drop' ? .55 : .60;
     const time = event.action + (event.resolve - event.action) * flightEnd * fraction;
     return ladderFrame(timeline, time, 0).actors.find(actor => actor.id === event.actorId).transferProgress;
   };
@@ -833,12 +893,13 @@ test('both sides of every transfer use physical arcs, keep body separation and c
       largestArc = Math.max(largestArc, Math.abs(partner.actor.rungProgress - partner.actor.fromRow));
     }
     assert.ok(closeCrossing, 'the actors really pass each other');
-    assert.ok(largestArc > (bridge.partnerMotionType === 'swing' ? .4 : 3.8), 'the partner follows the height of its actual leap, cable or thrown fall');
+    const expectedArc = bridge.partnerMotionType === 'swing' ? .4 : bridge.partnerMotionType === 'drop' ? 3.8 : .9;
+    assert.ok(largestArc > expectedArc, 'the partner follows a real arc, with shorter leaps where the terrace limits headroom');
     assert.ok(partnerPoses.has('swing') || partnerPoses.has('launch') || ((bridge.motionType === 'pounce' || event?.kind === 'wind') && partnerPoses.has('drop')));
     for (const id of bridge.actorIds) {
       const segment = timeline.paths[id].segments.find(part => part.bridgeId === bridge.id);
       const type = segment.transferRole === 'primary' ? bridge.motionType : bridge.partnerMotionType;
-      const catchAt = action + (resolve - action) * (bridge.motionType === 'pounce' ? .9 : type === 'drop' ? .64 : .86);
+      const catchAt = action + (resolve - action) * (bridge.motionType === 'pounce' ? .9 : type === 'drop' || type === 'slide' ? .55 : type === 'launch' || type === 'swing' ? .60 : .86);
       const before = rigAt(id, catchAt - .001).rig, after = rigAt(id, catchAt + .001).rig;
       assert.ok(Math.hypot(before.hip.x - after.hip.x, before.hip.y - after.hip.y) < .01, type + ' body jumps when grabbing the destination ladder');
       assert.ok(Math.hypot(before.head.x - after.head.x, before.head.y - after.head.y) < .01, type + ' head jumps when grabbing the destination ladder');

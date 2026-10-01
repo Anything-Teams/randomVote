@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { citizenLegAngles, citizenStride } from './citizenLocomotion';
+import { citizenLegAngles, citizenStride, citizenSupportHeight } from './citizenLocomotion';
 
 export type Pose = 'idle' | 'walk' | 'run' | 'brake' | 'finish' | 'wave' | 'vote' | 'cheer' | 'clap' | 'encourage' | 'disappointed' | 'nervous' | 'surprised' | 'bow';
 const skinColors = [0xf2c09b, 0xd9a078, 0xf6d2b1, 0xb98062];
@@ -136,7 +136,7 @@ export class PixelCitizen {
     const breath = Math.sin(clock / 540);
     const p = this.personality;
     const target: Motion = { y: breath * 0.4, angle: Math.sin(clock / 1100) * 0.6, head: Math.sin(clock / 730) * 1.5, sx: 1, sy: 1, la: 4 + breath * 2, ra: -4 - breath * 2, le: 3, re: -3, ll: 0, rl: 0, lk: 0, rk: 0, mouth: 1, brows: 0 };
-    const gaitActivity = this.pose === 'run' ? Math.max(.6, smooth(((this.locomotionVelocity ?? 35) - 18) / 38)) : smooth(((this.locomotionVelocity ?? 35) - 18) / 38);
+    const gaitActivity = this.pose === 'run' ? 1 : smooth(((this.locomotionVelocity ?? 35) - 18) / 38);
     const groundedStride = this.locomotionDistance === undefined || reduced || !['walk', 'run'].includes(this.pose) ? undefined : citizenStride(this.locomotionDistance, p, gaitActivity);
     if (this.pose === 'walk' || this.pose === 'run') {
       const running = this.pose === 'run';
@@ -157,10 +157,10 @@ export class PixelCitizen {
       if (groundedStride) {
         const swing = Math.sin(groundedStride.phase * Math.PI * 2);
         target.y = groundedStride.bounce;
-        target.angle = running ? 5.5 : 2;
+        target.angle = running ? 7.5 : 2;
         target.head = -target.angle * .55;
-        target.la = swing * (running ? 27 : 17); target.ra = -target.la;
-        target.le = target.re = running ? -46 : -18;
+        target.la = swing * (running ? 38 : 17); target.ra = -target.la;
+        target.le = target.re = running ? -62 : -18;
         target.sx = target.sy = 1;
       }
     } else if (this.pose === 'brake') {
@@ -265,6 +265,7 @@ export class PixelCitizen {
     (Object.keys(target) as (keyof Motion)[]).forEach(key => { this.motion[key] += (target[key] - this.motion[key]) * blend; });
     const m = this.motion;
     if (groundedStride) {
+      m.y = citizenSupportHeight(groundedStride.feet, m.angle, m.y);
       const legs = groundedStride.feet.map((foot, leg) => {
         const hipX = leg ? 4 : -5;
         return citizenLegAngles({ x: hipX + foot.x, y: foot.y }, { x: hipX, y: -14 }, m.angle, m.y);

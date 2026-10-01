@@ -282,7 +282,7 @@ function topHorse(ctx: CanvasRenderingContext2D, candidate: Candidate, index: nu
 }
 
 /** Draw every horse at its actual race distance; labels fan out only when they collide. */
-export function drawRacingTopView(ctx: CanvasRenderingContext2D, w: number, h: number, candidates: Candidate[], standings: RacingCourseStanding[], clock: number, reduced: boolean, focusIds: string[] = []) {
+export function drawRacingTopView(ctx: CanvasRenderingContext2D, w: number, h: number, candidates: Candidate[], standings: RacingCourseStanding[], clock: number, reduced: boolean, _focusIds: string[] = []) {
   if (w <= 0 || h <= 0 || !candidates.length) return;
   ctx.save();
   const size = clamp(Math.min(w / 640, h / 260), .25, 1.15), course = geometry(w, h);
@@ -308,7 +308,7 @@ export function drawRacingTopView(ctx: CanvasRenderingContext2D, w: number, h: n
     if (!reduced && running) {
       ctx.save(); ctx.translate(bodyX, bodyY); ctx.rotate(position.angle - Math.PI / 2);
       const alpha = ctx.globalAlpha;
-      for (let dust = 0; dust < 6; dust++) { const age = ((clock + index * 139 + dust * 103) % 410) / 410, side = dust % 2 ? 1 : -1; ctx.globalAlpha = alpha * (1 - age) * .65; ellipse(ctx, (side * 4 + Math.sin(index + dust * 2) * age * 3) * size, (-7 - age * 20) * size, (.8 + age * 2) * size, (.45 + age) * size, '#dec499'); }
+      for (let dust = 0; dust < 6; dust++) { const age = ((clock + index * 139 + dust * 103) % 410) / 410, side = dust % 2 ? 1 : -1; ctx.globalAlpha = alpha * (1 - age) * smooth(age / .15) * .35; ellipse(ctx, (side * 4 + Math.sin(index + dust * 2) * age * 3) * size, (-7 - age * 20) * size, (.8 + age * 2) * size, (.45 + age) * size, '#dec499'); }
       ctx.globalAlpha = alpha; ctx.strokeStyle = '#b1c4bf38'; ctx.lineWidth = Math.max(.4, size * .5);
       for (const side of [-1, 1]) { ctx.beginPath(); ctx.moveTo(side * 7 * size, -8 * size); ctx.lineTo(side * 7 * size, -18 * size); ctx.stroke(); }
       ctx.restore();
@@ -316,7 +316,8 @@ export function drawRacingTopView(ctx: CanvasRenderingContext2D, w: number, h: n
     topHorse(ctx, candidate, index, bodyX, bodyY, position.angle, size, clock, reduced, running);
   }
   const font = clamp(Math.min(w / 46, h / 13), 6.4, 10), tagW = font * 1.9, tagH = font * 1.48, occupied: { x: number; y: number }[] = [];
-  const byPriority = [...positions].sort((a, b) => Number(focusIds.includes(b.candidate.id)) - Number(focusIds.includes(a.candidate.id)) || a.index - b.index);
+  // Stable number placement and coat borders avoid a bright highlight whenever the story changes.
+  const byPriority = [...positions].sort((a, b) => a.index - b.index);
   for (const { candidate, index, position } of byPriority) {
     const normal = position.angle - Math.PI / 2, px = position.x + Math.cos(normal) * 10 * size, py = position.y + Math.sin(normal) * 10 * size;
     let tx = clamp(px, tagW / 2 + 2, w - tagW / 2 - 2), ty = clamp(py, tagH / 2 + 2, h - tagH / 2 - 2);
@@ -327,7 +328,7 @@ export function drawRacingTopView(ctx: CanvasRenderingContext2D, w: number, h: n
     }
     occupied.push({ x: tx, y: ty });
     if (Math.hypot(tx - position.x, ty - position.y) > 5) { ctx.strokeStyle = '#e4dccb80'; ctx.lineWidth = .6; ctx.beginPath(); ctx.moveTo(position.x, position.y); ctx.lineTo(tx, ty); ctx.stroke(); }
-    const focused = focusIds.includes(candidate.id); box(ctx, tx - tagW / 2, ty - tagH / 2, tagW, tagH, focused ? '#e5cd8d' : '#0c2033ef', focused ? '#fff0c1' : candidate.color); label(ctx, String(index + 1).padStart(2, '0'), tx, ty, font, focused ? '#182b34' : '#f6ebcf');
+    box(ctx, tx - tagW / 2, ty - tagH / 2, tagW, tagH, '#0c2033ef', candidate.color); label(ctx, String(index + 1).padStart(2, '0'), tx, ty, font, '#f6ebcf');
   }
   ctx.restore();
 }

@@ -8,6 +8,21 @@ const smooth = (value: number) => { const p = clamp(value); return p * p * (3 - 
 const pulse = (phase: number, start: number, end: number) => phase <= start || phase >= end ? 0 : Math.sin(Math.PI * smooth((phase - start) / (end - start)));
 const phaseAt = (incident: RacingIncident, elapsed: number) => (elapsed - incident.start) / Math.max(1, incident.end - incident.start);
 
+/** Independent actions meet at zero; an inactive channel never replaces a moving pose. */
+export function combineRacingHorseMotion(...motions: RaceHorseMotion[]): RaceHorseMotion {
+  const combined: RaceHorseMotion = {};
+  for (const key of ['jump', 'crouch', 'check', 'slip', 'trip', 'fall', 'spill', 'kick', 'toss', 'stun'] as const) {
+    if (motions.some(motion => motion[key] !== undefined)) combined[key] = Math.max(0, ...motions.map(motion => motion[key] ?? 0));
+  }
+  if (motions.some(motion => motion.stumble !== undefined)) combined.stumble = Math.max(-1, Math.min(1, motions.reduce((sum, motion) => sum + (motion.stumble ?? 0), 0)));
+  if (combined.crouch) combined.crouch *= 1 - (combined.fall ?? 0);
+  for (const motion of motions) {
+    if ((motion.kick ?? 0) > 0) { combined.kickReach = motion.kickReach; combined.kickX = motion.kickX; combined.kickY = motion.kickY; }
+    if ((motion.toss ?? 0) > 0) combined.tossRelease = motion.tossRelease;
+  }
+  return combined;
+}
+
 /** Incident time controls body actions independently of the supplied finish order. */
 export function racingIncidentMotion(incident: RacingIncident | undefined, id: string, elapsed: number, reduced = false): RaceHorseMotion {
   if (!incident || reduced || elapsed < incident.start || elapsed > incident.end || id !== incident.actorId && id !== incident.rivalId) return {};
@@ -112,7 +127,7 @@ export function racingTrickMotion(trick: RacingTrick | undefined, id: string, el
   }
   if (actor) {
     const toss = smooth((elapsed - trick.start) / (400 * scale)) * (1 - smooth((elapsed - trick.release - 160 * scale) / (450 * scale)));
-    return { toss, tossRelease: smooth((elapsed - trick.release + 140 * scale) / (280 * scale)) };
+    return { toss, tossRelease: smooth((elapsed - trick.release + 200 * scale) / (400 * scale)) };
   }
   const stun = smooth((elapsed - trick.impact) / (300 * scale)) * (1 - smooth((elapsed - trick.lowest + 150 * scale) / (650 * scale)));
   const chase = smooth((elapsed - trick.lowest) / (350 * scale)) * (1 - smooth((elapsed - trick.recovered + 400 * scale) / (400 * scale)));
@@ -137,13 +152,5 @@ export function drawRacingTrickEffects(ctx: CanvasRenderingContext2D, trick: Rac
     ctx.save(); ctx.translate(ball.x, ball.y); ctx.scale(ball.scale, ball.scale); ctx.rotate(ball.phase * Math.PI * 3);
     ctx.fillStyle = '#edb349'; ctx.strokeStyle = '#493520'; ctx.lineWidth = .8; ctx.beginPath(); ctx.roundRect(-4, -3.5, 8, 7, 1.6); ctx.fill(); ctx.stroke();
     ctx.fillStyle = '#fff0a9'; ctx.fillRect(-2.5, -2, 3, 1.4); ctx.strokeStyle = '#7c5428'; ctx.beginPath(); ctx.moveTo(1, -2.5); ctx.lineTo(1, 2.5); ctx.stroke(); ctx.restore();
-  }
-  const target = placements.find(item => item.id === trick.targetId), age = (elapsed - trick.impact) / (trick.lowest - trick.impact);
-  if (target && age >= 0 && age < .42) {
-    const contact = trick.kind === 'beanbag' ? target.helmet : target.boot;
-    ctx.save(); ctx.globalAlpha *= 1 - age / .42; ctx.translate(contact?.x ?? target.x + (trick.kind === 'beanbag' ? 14 : 5) * target.scale, contact?.y ?? target.y - (trick.kind === 'beanbag' ? 76 : 31) * target.scale); ctx.scale(target.scale, target.scale);
-    ctx.strokeStyle = '#ffebaa'; ctx.lineWidth = 1.8;
-    for (let ray = 0; ray < 6; ray++) { const a = ray * Math.PI / 3; ctx.beginPath(); ctx.moveTo(Math.cos(a) * (3 + age * 6), Math.sin(a) * (3 + age * 6)); ctx.lineTo(Math.cos(a) * (8 + age * 8), Math.sin(a) * (8 + age * 8)); ctx.stroke(); }
-    ctx.restore();
   }
 }

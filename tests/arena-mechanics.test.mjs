@@ -6,7 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { arenaAction, arenaApproachSpeed, arenaCatchTargets, arenaEdgeFall, arenaExchange, arenaLocalContact, arenaMove, arenaRanks, arenaRimContact, arenaRounds, arenaShoveTargets, arenaThrow } = await source('src/arenaLogic.ts');
+const { arenaAction, arenaApproachSpeed, arenaCatchTargets, arenaContactRound, arenaEdgeFall, arenaExchange, arenaLocalContact, arenaMove, arenaRanks, arenaRimDistance, arenaRounds, arenaShoveTargets, arenaThrow } = await source('src/arenaLogic.ts');
 const { arenaStoryState } = await source('src/arenaStoryLogic.ts');
 const { createArenaFighterAnimation, drawArenaFighter } = await source('src/game/ArenaFighter.ts');
 const ctx = Object.fromEntries(['save', 'restore', 'translate', 'rotate', 'scale', 'fillRect', 'beginPath', 'ellipse', 'fill', 'moveTo', 'lineTo', 'closePath'].map(key => [key, () => {}]));
@@ -73,7 +73,7 @@ test('a charge is caught at body contact before the receiver pivots, lifts and t
 });
 
 test('an outside shove reaches a fighting pair, frees one fighter and pushes only the drawn loser out', () => {
-  const round = { ...base, tactic: 'shove', helper: 'wrestler' }, center = arenaRimContact({ x: 600, y: 435 });
+  const round = { ...base, tactic: 'shove', helper: 'wrestler' }, center = { x: 695, y: 435 };
   const span = round.impact - round.start;
   const initial = arenaAction(round, round.start + span * .1);
   assert.equal(initial.actors.find(part => part.id === round.aggressor).gripId, undefined);
@@ -92,6 +92,34 @@ test('an outside shove reaches a fighting pair, frees one fighter and pushes onl
   const fall = arenaEdgeFall(240, end.victim, { x: 885, y: 475 }, end.side);
   assert.ok(radius(fall) > 1);
   assert.equal(fall.height, 0);
+});
+
+test('central opponents fight at their existing encounter instead of preparing at a distant rim', () => {
+  for (const center of [{ x: 500, y: 416 }, { x: 435, y: 405 }, { x: 585, y: 435 }]) {
+    for (const [planned, actual] of [['bait', 'catch'], ['edge', 'brace'], ['shove', 'catch']]) {
+      const round = { ...base, tactic: planned, helper: planned === 'shove' ? 'wrestler' : undefined };
+      const local = arenaLocalContact(center, []), resolved = arenaContactRound(round, local);
+      assert.deepEqual(local, center, 'the meeting point remains between the two actual bodies');
+      assert.equal(resolved.tactic, actual);
+      assert.equal(resolved.helper, undefined, 'a central duel cannot pull a third spectator to a scripted rim');
+      for (const key of ['id', 'aggressor', 'victim', 'start', 'impact', 'resolve', 'end']) assert.equal(resolved[key], round[key]);
+      const action = arenaAction(resolved, resolved.start);
+      for (const part of action.actors) assert.ok(Math.abs(part.offset.x) <= 92, 'preparation is a local grip or charge setup');
+      assert.equal(round.tactic, planned, 'selecting the visible maneuver does not mutate the draw or its schedule');
+    }
+  }
+});
+
+test('edge finishes remain available only when the actual contact is already close to a rim', () => {
+  for (const center of [{ x: 305, y: 435 }, { x: 695, y: 435 }, { x: 330, y: 350 }, { x: 670, y: 350 }]) {
+    assert.ok(arenaRimDistance(center) <= 112);
+    for (const tactic of ['bait', 'edge', 'shove']) {
+      const round = { ...base, tactic, helper: tactic === 'shove' ? 'wrestler' : undefined };
+      assert.equal(arenaContactRound(round, center), round, 'a nearby rim keeps the original physical maneuver');
+    }
+  }
+  const practice = { ...base, tactic: 'bait', exchange: true };
+  assert.equal(arenaContactRound(practice, { x: 500, y: 416 }), practice, 'non-eliminating charges still dodge and brake on the sand');
 });
 
 test('catching and outside shoves occur in elimination stories with only living participants and fixed ranks', () => {

@@ -53,8 +53,11 @@ const mechanismNames: Record<LadderMotionType, string> = { slide: '미끄럼 통
 const actionPoses: Record<LadderMotionType, LadderPose> = { slide: 'slide', drop: 'drop', swing: 'swing', launch: 'launch', rotate: 'rotate', conveyor: 'ride', portal: 'transfer', pounce: 'launch' };
 function bridgeMotion(type: LadderMotionType): LadderMotion { return type === 'swing' ? motion(type, 4.6, 0, .2) : type === 'launch' ? motion(type, 0, 0, .15, 4.6) : type === 'drop' ? motion(type, 3, 0, .22) : type === 'rotate' ? motion(type, 0, 0, .23) : motion(type); }
 const partnerMotion = (type: LadderMotionType): LadderMotionType => type === 'pounce' ? 'drop' : type === 'launch' ? 'swing' : 'launch';
-const spotlightTiming = { setup: 450, action: 1850, pull: 1150 };
-const spotlightActionDuration = (type: LadderMotionType, distance = 1) => type === 'pounce' ? 2300 : Math.max(spotlightTiming.action, 1550 + distance * 120);
+const spotlightTiming = { setup: 320, pull: 720 };
+const spotlightActionDuration = (type: LadderMotionType, distance = 1) => {
+  const base: Record<LadderMotionType, number> = { slide: 1300, drop: 1200, launch: 1400, swing: 1500, rotate: 1450, conveyor: 1350, portal: 1400, pounce: 1800 };
+  return base[type] + Math.max(0, distance - 1) * 110;
+};
 const spotlightDuration = (type: LadderMotionType, distance = 1) => spotlightTiming.setup + spotlightActionDuration(type, distance) + spotlightTiming.pull;
 const normalTransferDuration = (type: LadderMotionType, laneCount: number, distance = 1) => {
   const base: Record<LadderMotionType, number> = { slide: 1250, drop: 1250, launch: 1350, swing: 1450, rotate: 1400, conveyor: 1350, portal: 1350, pounce: 1450 };
@@ -65,9 +68,32 @@ function flightProgress(type: LadderMotionType, value: number) {
   // A falling body accelerates away from its loose foothold. A leap pushes off
   // promptly, then slows into the catching hand; ropes speed up through the arc.
   if (type === 'drop' || type === 'slide') return t < 1 / 3 ? 1.8 * t * t : 1.2 * t - .2;
-  if (type === 'launch') return 1 - (1 - t) * (1 - t) * (1 + 1.25 * t);
+  if (type === 'launch') {
+    // Push off briefly, carry horizontal momentum, then absorb it in the grip.
+    // A long eased tail makes a leap look like slow motion beside the other climber.
+    const acceleration = .08, braking = .18, speed = 1 / (1 - (acceleration + braking) / 2);
+    if (t < acceleration) return speed * t * t / (2 * acceleration);
+    if (t > 1 - braking) return 1 - speed * (1 - t) ** 2 / (2 * braking);
+    return speed * (t - acceleration / 2);
+  }
   return smooth(t);
 }
+
+/** Movement finishes promptly; the remaining action time belongs to a real grip. */
+export function ladderActionPhase(type: LadderMotionType, value: number) {
+  const t = clamp(value, 0, 1);
+  if (type === 'pounce') {
+    if (t < .24) return t / .24 * .32;
+    if (t < .44) return .32 + (t - .24) / .20 * .16;
+    if (t < .6) return .48 + (t - .44) / .16 * .12;
+    return t;
+  }
+  if (type === 'launch' || type === 'swing') return t < .60 ? t / .60 * .86 : .86 + (t - .60) / .40 * .14;
+  if (type === 'drop' || type === 'slide') return t < .55 ? t / .55 * .64 : .64 + (t - .55) / .45 * .36;
+  return t;
+}
+
+export const ladderLeapHeight = (fromRow: number) => Math.min(3.2, Math.max(.9, LADDER_RUNGS - 2.15 - fromRow));
 
 /** Destinations are already uniformly drawn. Every route change below conserves that draw. */
 export function buildLadderTimeline(candidates: readonly Candidate[], order: readonly string[], duration = LADDER_DURATION, storySeed = 1, finishTarget?: number): LadderTimeline {
@@ -321,7 +347,8 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
 function activeEvent(event: LadderEvent, elapsed: number): LadderActiveEvent {
   const stage: LadderEventStage = elapsed < event.action ? 'setup' : elapsed < event.resolve ? 'action' : 'resolve';
   const start = stage === 'setup' ? event.setup : stage === 'action' ? event.action : event.resolve, end = stage === 'setup' ? event.action : stage === 'action' ? event.resolve : event.end;
-  return { ...event, stage, phase: clamp((elapsed - start) / (end - start), 0, 1), age: elapsed - event.setup };
+  const phase = clamp((elapsed - start) / (end - start), 0, 1);
+  return { ...event, stage, phase: stage === 'action' ? ladderActionPhase(event.motion.type, phase) : phase, age: elapsed - event.setup };
 }
 
 function transferFrame(timeline: LadderTimeline, segment: LadderPathSegment, elapsed: number) {
@@ -329,8 +356,9 @@ function transferFrame(timeline: LadderTimeline, segment: LadderPathSegment, ela
   const duration = segment.end - segment.start, setup = event?.action ?? segment.start + duration * .14, resolve = event?.resolve ?? segment.end - duration * .16;
   const stage: LadderEventStage = elapsed < setup ? 'setup' : elapsed < resolve ? 'action' : 'resolve';
   const stageStart = stage === 'setup' ? segment.start : stage === 'action' ? setup : resolve, stageEnd = stage === 'setup' ? setup : stage === 'action' ? resolve : segment.end;
-  const phase = clamp((elapsed - stageStart) / (stageEnd - stageStart), 0, 1), role = segment.transferRole ?? 'primary';
+  const stagePhase = clamp((elapsed - stageStart) / (stageEnd - stageStart), 0, 1), role = segment.transferRole ?? 'primary';
   const type = role === 'partner' ? bridge.partnerMotionType : bridge.motionType, landingRow = segment.toRow;
+  const phase = stage === 'action' ? ladderActionPhase(bridge.motionType === 'pounce' ? 'pounce' : type, stagePhase) : stagePhase;
   const catchRow = Math.min(LADDER_RUNGS, landingRow + 2);
   const airborne = ['drop', 'slide', 'swing', 'launch', 'pounce'].includes(type);
   const catchRoot = landingRow - (type === 'drop' || type === 'slide' ? 1.2 : airborne ? .8 : 0);
@@ -343,7 +371,7 @@ function transferFrame(timeline: LadderTimeline, segment: LadderPathSegment, ela
     if (stage === 'action') {
       if (thrower) {
         progress = flightProgress('launch', phase / .32);
-        row += 3 * Math.sin(progress * Math.PI);
+        row += 1.8 * Math.sin(progress * Math.PI);
         pose = phase < .32 ? 'launch' : phase < .6 ? 'balance' : 'clamber';
         transferStage = phase < .9 ? 'flight' : 'catch';
       } else {
@@ -382,8 +410,8 @@ function transferFrame(timeline: LadderTimeline, segment: LadderPathSegment, ela
       // The body lands on no deck: it falls sideways, catches a fixed hand rung,
       // hangs below it, and only reaches the foot rung during the pull.
       if (phase >= flightEnd) pose = 'hang';
-    } else if (type === 'swing') row -= 4.6 * Math.sin(progress * Math.PI);
-    else if (type === 'launch') row += 4.6 * Math.sin(progress * Math.PI);
+    } else if (type === 'swing') row -= 3.2 * Math.sin(progress * Math.PI);
+    else if (type === 'launch') row += ladderLeapHeight(segment.fromRow) * Math.sin(progress * Math.PI);
     if (phase >= flightEnd && type !== 'drop' && type !== 'slide') pose = airborne ? 'hang' : 'balance';
   } else if (stage === 'resolve') {
     row = catchRoot + (landingRow - catchRoot) * smooth(phase);

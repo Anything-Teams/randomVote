@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
 const compiled = await build({ entryPoints: ['src/game/citizenLocomotion.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { advanceCountingRunner, countingRunnerTarget, citizenStride, citizenLegAngles } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
+const { advanceCountingRunTrack, advanceCountingRunner, countingRunnerTarget, citizenStride, citizenLegAngles, citizenSupportHeight } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
 test('counting runners never retreat as shares change or the remaining-candidate average changes', () => {
   for (let count = 2; count <= 10; count++) {
@@ -46,7 +46,7 @@ test('planted feet hold the floor while the counting runner advances, including 
   for (const running of [false, true]) for (let index = 0; index < 4; index++) {
     let previous;
     for (let distance = 24; distance < 144; distance += .04) {
-      const stride = citizenStride(distance, index, running), lean = running ? 5.5 : 2;
+      const stride = citizenStride(distance, index, running), lean = running ? 7.5 : 2;
       const feet = stride.feet.map((foot, leg) => {
         const hip = { x: leg ? 4 : -5, y: -14 }, target = { x: hip.x + foot.x, y: foot.y };
         const endpoint = legEndpoint(citizenLegAngles(target, hip, lean, stride.bounce), hip, lean, stride.bounce);
@@ -68,6 +68,44 @@ test('the walk-to-run transition keeps both feet continuous as speed rises', () 
       const stride = citizenStride(24 + frame * .05, index, Math.min(1, frame / 200));
       if (previous) stride.feet.forEach((foot, leg) => assert.ok(Math.hypot(foot.x - previous.feet[leg].x, foot.y - previous.feet[leg].y) < .25));
       previous = stride;
+    }
+  }
+});
+
+test('counting keeps a running cadence and real flight phases even when vote progress waits', () => {
+  const track = { distance: 0, speed: 0 };
+  let flightFrames = 0, maximumLift = 0;
+  for (let frame = 0; frame < 240; frame++) {
+    advanceCountingRunTrack(track, .016, true);
+    const stride = citizenStride(track.distance, 0, true);
+    if (stride.feet.every(foot => !foot.planted)) flightFrames++;
+    maximumLift = Math.max(maximumLift, ...stride.feet.map(foot => -foot.y));
+  }
+  assert.ok(track.distance / 24 > 7, 'a stalled vote graph must not slow the runner into a walking cadence');
+  assert.ok(flightFrames > 50, 'running visibly has both feet airborne between alternate planted steps');
+  assert.ok(maximumLift > 6.5, 'the free knee lifts and folds instead of dragging beside the ground');
+  const before = { ...track };
+  assert.equal(advanceCountingRunTrack(track, 0, true), 0);
+  assert.deepEqual(track, before, 'pausing does not advance the ground or feet');
+  const speed = track.speed;
+  advanceCountingRunTrack(track, .016, false);
+  assert.ok(track.speed > 0 && track.speed < speed, 'finish recovery brakes continuously');
+});
+
+test('running feet reach the ground through the rendered body smoothing at broadcast cadence', () => {
+  for (let index = 0; index < 4; index++) {
+    const track = { distance: 0, speed: 0 };
+    let bob = 0, lean = 0;
+    for (let frame = 0; frame < 240; frame++) {
+      advanceCountingRunTrack(track, .016, true);
+      const stride = citizenStride(track.distance, index, true), blend = 1 - Math.exp(-16 / 38);
+      bob += (stride.bounce - bob) * blend; lean += (7.5 - lean) * blend;
+      bob = citizenSupportHeight(stride.feet, lean, bob);
+      for (const [leg, foot] of stride.feet.entries()) {
+        const hip = { x: leg ? 4 : -5, y: -14 }, target = { x: hip.x + foot.x, y: foot.y };
+        const endpoint = legEndpoint(citizenLegAngles(target, hip, lean, bob), hip, lean, bob);
+        assert.ok(Math.hypot(endpoint.x - target.x, endpoint.y - target.y) < .05, 'a landing cannot stretch the shin or leave the foot above its actual ground');
+      }
     }
   }
 });

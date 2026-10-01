@@ -239,11 +239,16 @@ export function arenaApproachSpeed(distance: number): number {
   return 86 + Math.min(36, Math.max(0, distance - 65) * .18);
 }
 
-/** Edge maneuvers approach the nearest rim early, rather than sprinting there at release. */
-export function arenaRimContact(origin: ArenaPoint): ArenaPoint {
-  const side = origin.x >= 500 ? 1 : -1, y = Math.max(370, Math.min(465, origin.y));
-  const rim = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((y - 416) / 112) ** 2));
-  return { x: rim - side * 108, y };
+export function arenaRimDistance(origin: ArenaPoint): number {
+  const radius = 303 * Math.sqrt(Math.max(0, 1 - ((origin.y - 416) / 112) ** 2));
+  return Math.max(0, radius - Math.abs(origin.x - 500));
+}
+
+/** The actual encounter chooses its finish; a central pair never walks to a prescribed rim. */
+export function arenaContactRound(round: ArenaRound, center: ArenaPoint): ArenaRound {
+  if (round.exchange || arenaRimDistance(center) <= 112) return round;
+  const tactic = round.tactic === 'bait' || round.tactic === 'shove' ? 'catch' : round.tactic === 'edge' ? 'brace' : round.tactic;
+  return tactic === round.tactic ? round : { ...round, tactic, helper: undefined };
 }
 
 export function arenaReleaseTarget(origin: ArenaPoint, center: ArenaPoint, role: ArenaActionActor['role'], progress: number): ArenaPoint {

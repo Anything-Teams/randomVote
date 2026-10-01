@@ -8,8 +8,10 @@ async function source(path) {
 }
 const { buildRacingTimeline, createRacingIncidents, readRacingDistance, racingStandings, racingTrickLoss, RACING_STORIES } = await source('src/racingNarrative.ts');
 const { createRacingCamera, placeRacingField } = await source('src/racingCamera.ts');
-const { racingIncidentMotion, placeRacingDuel, placeRacingTrick, racingTrickMotion, racingTrickProjectile } = await source('src/racingEffects.ts');
-const { raceHorseAttachments, drawRaceHorse } = await source('src/racingArt.ts');
+const { combineRacingHorseMotion, drawRacingTrickEffects, racingIncidentMotion, placeRacingDuel, placeRacingTrick, racingTrickMotion, racingTrickProjectile } = await source('src/racingEffects.ts');
+const { raceHorseAttachments, drawRaceHorse, drawRaceDust } = await source('src/racingArt.ts');
+const { racingObstacleMotion } = await source('src/racingObstacles.ts');
+const { drawRacingTopView } = await source('src/racingCourse.ts');
 const players = Array.from({ length: 10 }, (_, index) => ({ id: String(index), name: `선수 ${index}`, color: '#abcdef' }));
 
 test('a reversed ten-horse field overtakes gradually without a late speed surge', () => {
@@ -94,7 +96,7 @@ test('opponents close the lane, respond to a pass, and separate without changing
 
 
 function recordingContext() {
-  let matrix = [1, 0, 0, 1, 0, 0], stack = [], lines = [], arcs = [], points = [];
+  let matrix = [1, 0, 0, 1, 0, 0], stack = [], lines = [], arcs = [], fills = [], labels = [], points = [];
   const transform = (x, y) => ({ x: matrix[0] * x + matrix[2] * y + matrix[4], y: matrix[1] * x + matrix[3] * y + matrix[5] });
   const ctx = { globalAlpha: 1, strokeStyle: '', lineWidth: 1,
     save() { stack.push({ matrix: [...matrix], strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, globalAlpha: this.globalAlpha }); },
@@ -106,9 +108,11 @@ function recordingContext() {
     stroke() { if (points.length === 2) lines.push({ points: [...points], color: this.strokeStyle, width: this.lineWidth }); },
     arc(x, y, radius) { arcs.push({ ...transform(x, y), radius }); },
     createLinearGradient() { return { addColorStop() {} }; },
-    fill() {}, fillRect() {}, closePath() {}, roundRect() {}, bezierCurveTo() {}, quadraticCurveTo() {}, ellipse() {}, fillText() {},
+    transform(a, b, c, d, e, f) { const m = [...matrix]; matrix = [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d, m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]]; },
+    fill() { fills.push({ color: this.fillStyle, alpha: this.globalAlpha }); }, fillRect() { fills.push({ color: this.fillStyle, alpha: this.globalAlpha }); },
+    closePath() {}, roundRect() {}, strokeRect() {}, clip() {}, bezierCurveTo() {}, quadraticCurveTo() {}, ellipse() {}, fillText(text, x, y) { labels.push({ text, x, y, color: this.fillStyle }); },
   };
-  return { ctx, lines, arcs };
+  return { ctx, lines, arcs, fills, labels };
 }
 
 function physicalField(timeline, list, elapsed, width = 960, height = 540) {
@@ -224,4 +228,47 @@ test('trick windup, contact, stunned posture and recovery remain continuous thro
       }
     }
   }
+});
+
+
+test('live incident, obstacle and trick boundaries blend without resetting the rider or horse posture', () => {
+  for (const count of [2, 10]) for (let seed = 0; seed < 12; seed++) {
+    const list = players.slice(0, count), order = list.map(player => player.id).reverse();
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
+    const boundaries = [...timeline.incidents.flatMap(item => [item.start, item.end]), ...timeline.tricks.flatMap(item => [item.start, item.release, item.impact, item.lowest, item.recovered]), ...timeline.obstacles.flatMap(item => [item.impact, item.lowest, item.recovered])];
+    const field = list.map((player, index) => ({ id: player.id, x: 250 + index * 12, y: 240 + index * 16, scale: 1 }));
+    const poseAt = (id, index, elapsed) => {
+      const incident = timeline.incidents.find(item => elapsed >= item.start && elapsed < item.end + 1600), trick = timeline.tricks.find(item => elapsed >= item.start && elapsed < item.recovered);
+      const motion = combineRacingHorseMotion(racingIncidentMotion(incident, id, elapsed), racingTrickMotion(trick, id, elapsed, field), ...timeline.obstacles.filter(item => item.actorId === id).map(item => racingObstacleMotion(item, elapsed)));
+      return raceHorseAttachments(index, elapsed, .9, false, { phase: readRacingDistance(timeline, id, elapsed) * 62 + index * .193, ...motion });
+    };
+    for (const at of boundaries) for (const [index, player] of list.entries()) {
+      const left = poseAt(player.id, index, at - 1), right = poseAt(player.id, index, at + 1);
+      for (const point of ['hand', 'helmet', 'boot']) assert.ok(Math.hypot(right[point].x - left[point].x, right[point].y - left[point].y) < .65, `pose reset: ${count}/${seed}/${player.id}/${at}/${point}`);
+      assert.ok(Math.abs(right.bounce - left.bounce) < .12 && Math.abs(right.pitch - left.pitch) < .012, 'body position and angle also remain continuous');
+    }
+  }
+});
+
+test('impact and story-focus changes keep the same map brightness and number positions', () => {
+  const list = players.slice(0, 10), order = list.map(player => player.id).reverse();
+  const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, 2));
+  const standings = racingStandings(timeline, 18_000), quiet = recordingContext(), featured = recordingContext();
+  drawRacingTopView(quiet.ctx, 180, 104, list, standings, 18_000, false, []);
+  drawRacingTopView(featured.ctx, 180, 104, list, standings, 18_000, false, ['0', '7', '9']);
+  assert.deepEqual(featured.fills, quiet.fills, 'an event never switches the map tags to a bright gold fill');
+  assert.deepEqual(featured.labels, quiet.labels, 'event focus does not reshuffle or blink the horse numbers');
+  for (const trick of timeline.tricks) {
+    const recording = recordingContext(), field = physicalField(timeline, list, trick.impact);
+    drawRacingTrickEffects(recording.ctx, trick, field, trick.impact, false);
+    assert.ok(recording.lines.every(line => line.color !== '#ffebaa'), 'contact is carried by the actual body response without a bright radial flash');
+  }
+});
+
+test('hoof-contact dust fades in continuously instead of adding a bright particle at each stride boundary', () => {
+  const opacity = clock => {
+    const recording = recordingContext(); drawRaceDust(recording.ctx, 0, 0, 0, 1, clock, false, 1);
+    return recording.fills.reduce((sum, fill) => sum + Number(String(fill.color).match(/rgba\([^,]+,[^,]+,[^,]+,([^)]*)\)/)?.[1] ?? 0) * fill.alpha, 0);
+  };
+  for (const at of [.05, .18, .40, .54].map(phase => phase * 560)) assert.ok(Math.abs(opacity(at + .01) - opacity(at - .01)) < .001, 'new dust leaves zero opacity while the previous cloud keeps fading');
 });

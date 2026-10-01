@@ -1,6 +1,18 @@
 const clamp = (value: number, low = 0, high = 1) => Math.max(low, Math.min(high, value));
 const smooth = (value: number) => { const t = clamp(value); return t * t * (3 - 2 * t); };
 export type CountingRunner = { x: number; velocity: number; goal?: number };
+export type CountingRunTrack = { distance: number; speed: number };
+
+/** The broadcast track keeps moving while votes arrive slowly or wait for a verdict. */
+export function advanceCountingRunTrack(track: CountingRunTrack, seconds: number, active: boolean) {
+  if (seconds <= 0) return 0;
+  const wanted = active ? 48 : 0, response = .16;
+  const decay = Math.exp(-seconds / response);
+  const travel = wanted * seconds + (track.speed - wanted) * response * (1 - decay);
+  track.speed = wanted + (track.speed - wanted) * decay;
+  track.distance += travel;
+  return travel;
+}
 
 /** The runner follows counted progress. Changing vote share cannot send it backwards. */
 export function countingRunnerTarget(progress: number, share: number, average: number) {
@@ -43,16 +55,30 @@ export function advanceCountingRunner(runner: CountingRunner, target: number, se
 /** A planted foot moves back exactly as far as the body moves forward. */
 export function citizenStride(distance: number, index: number, running: boolean | number) {
   const activity = typeof running === 'number' ? clamp(running) : Number(running);
-  const cycleLength = 24, stance = .64 - activity * .22;
+  const cycleLength = 24, stance = .64 - activity * .32;
   const launch = smooth(distance / 10);
   const phase = ((distance / cycleLength + index * .17) % 1 + 1) % 1;
   const feet = [0, 1].map(leg => {
     const cycle = (phase + leg * .5) % 1, planted = cycle < stance;
     const swing = clamp((cycle - stance) / (1 - stance));
     const reach = cycleLength * stance / 2;
-    return { x: (planted ? reach - cycle * cycleLength : -reach + 2 * reach * smooth(swing)) * launch, y: planted ? 0 : -(Math.sin(Math.PI * swing) ** 2) * (2.5 + activity * 1.5) * launch, planted };
+    return { x: (planted ? reach - cycle * cycleLength : -reach + 2 * reach * smooth(swing)) * launch, y: planted ? 0 : -(Math.sin(Math.PI * swing) ** (2 - activity)) * (2.5 + activity * 4.5) * launch, planted };
   });
-  return { phase, feet, bounce: 3.8 - activity * .7 - Math.sin(phase * Math.PI * 2) ** 2 * (.45 + activity * .45) };
+  const halfCycle = phase % .5;
+  const flight = stance < .5 && halfCycle > stance ? Math.sin(Math.PI * (halfCycle - stance) / (.5 - stance)) ** 2 : 0;
+  return { phase, feet, bounce: 3.8 - activity * .4 - Math.sin(phase * Math.PI * 2) ** 2 * .45 - flight * activity * 3.4 };
+}
+
+/** A landing bends the pelvis enough for the fixed-length legs to reach their soles. */
+export function citizenSupportHeight(feet: { x: number; y: number }[], lean: number, bob: number) {
+  const angle = lean * Math.PI / 180, reach = 13.45;
+  return feet.reduce((height, foot, leg) => {
+    const hipX = leg ? 4 : -5, hipY = -14;
+    const worldX = hipX * Math.cos(angle) - hipY * Math.sin(angle);
+    const worldY = hipX * Math.sin(angle) + hipY * Math.cos(angle);
+    const dx = hipX + foot.x - worldX;
+    return Math.max(height, foot.y - worldY - Math.sqrt(Math.max(.01, reach ** 2 - dx ** 2)));
+  }, bob);
 }
 
 /** Solve the same 7px thigh and 6.5px shin used by the pixel figure. */

@@ -1,14 +1,14 @@
-import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Candidate } from './election';
 import type { SportsStageProps } from './sports';
-import { arenaAction, arenaApproachSpeed, arenaCatchTargets, arenaChargeFall, arenaChargeTargets, arenaLocalContact, arenaEdgeFall, arenaEdgeTargets, arenaExitDirection, arenaFocusRound, arenaGuardTarget, arenaMiniExchanges, arenaMove as move, arenaNarration, arenaNearbyResponse, arenaPodium, arenaRanks, arenaReleaseTarget, arenaRoamingTarget, arenaRimContact, arenaRounds, arenaShoveTargets, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
+import { arenaAction, arenaApproachSpeed, arenaCatchTargets, arenaChargeFall, arenaChargeTargets, arenaContactRound, arenaLocalContact, arenaEdgeFall, arenaEdgeTargets, arenaExitDirection, arenaFocusRound, arenaGuardTarget, arenaMiniExchanges, arenaMove as move, arenaNarration, arenaNearbyResponse, arenaPodium, arenaRanks, arenaReleaseTarget, arenaRoamingTarget, arenaRounds, arenaShoveTargets, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
 import { arenaDrawOrder, createArenaFighterAnimation, drawArenaFighter, drawArenaName, type ArenaActor, type ArenaFighterAnimation, type ArenaPose } from './game/ArenaFighter';
 import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
 import './arena.css';
 
 type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number; motorX?: number; motorY?: number; restUntil?: number; animation?: ArenaFighterAnimation; roam?: { key: string; origin: ArenaPoint; target: ArenaPoint; neighborId?: string } };
-type Contact = { center: ArenaPoint; side: number; releases?: Map<string, ArenaPoint> };
+type Contact = { center: ArenaPoint; side: number; round: ArenaRound; releases?: Map<string, ArenaPoint> };
 type Exit = { round: ArenaRound; origin: ArenaPoint; landing: ArenaPoint; side: number; bench: ArenaPoint; lift: number; angle: number; velocity: number };
 type Simulation = { key: string; elapsed: number; epoch: number; bodies: Map<string, Body>; contacts: Map<string, Contact>; exits: Map<string, Exit>; minis: Map<string, ArenaRound> };
 type ChoreographedActor = ArenaActor;
@@ -102,8 +102,10 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   const ranks = props.preview ? {} : arenaRanks(order, elapsed, props.duration);
   const won = !props.preview && !!rounds.length && elapsed >= rounds.at(-1)!.resolve;
   const podiumPlaces = arenaPodium(order, props.duration), podiumById = new Map(podiumPlaces.map(place => [place.id, place]));
-  const upcoming = props.preview || won ? undefined : rounds.find(round => round.start > elapsed && round.start - elapsed < 2400 * unit);
-  const exchange = props.preview || won ? undefined : arenaFocusRound(order, elapsed, props.duration);
+  const upcomingPlan = props.preview || won ? undefined : rounds.find(round => round.start > elapsed && round.start - elapsed < 2400 * unit);
+  const focusPlan = props.preview || won ? undefined : arenaFocusRound(order, elapsed, props.duration);
+  const upcoming = upcomingPlan ? sim.contacts.get(upcomingPlan.id)?.round ?? upcomingPlan : undefined;
+  const exchange = focusPlan ? sim.contacts.get(focusPlan.id)?.round ?? focusPlan : undefined;
   const engaged = new Set(exchange ? [exchange.aggressor, exchange.victim, exchange.helper] : []);
   const preparing = new Set(upcoming ? [upcoming.aggressor, upcoming.victim, upcoming.helper].filter(id => !!id && !engaged.has(id)) : []);
   const living = order.filter(id => !ranks[id]);
@@ -123,8 +125,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   // A direct skip or paused fixture seek creates every eliminated actor as well.
   if (!props.preview) rounds.filter(round => elapsed >= round.resolve).forEach(round => {
     if (sim.exits.has(round.victim)) return;
-    const center = arenaRimContact({ x: 675, y: 450 });
-    const exit = makeExit(round, round.tactic === 'bait' ? arenaChargeTargets(round, round.impact, center).charger : round.tactic === 'edge' ? arenaEdgeTargets(round, round.impact, center).victim : round.tactic === 'shove' ? arenaShoveTargets(round, round.impact, center).victim : { x: 500, y: 425 });
+    const center = arenaLocalContact({ x: 500, y: 425 }, []), actual = arenaContactRound(round, center);
+    const exit = makeExit(actual, actual.tactic === 'bait' ? arenaChargeTargets(actual, actual.impact, center).charger : actual.tactic === 'edge' ? arenaEdgeTargets(actual, actual.impact, center).victim : actual.tactic === 'shove' ? arenaShoveTargets(actual, actual.impact, center).victim : { x: 500, y: 425 });
     sim.exits.set(round.victim, exit);
     const settled = elapsed - round.impact >= 2100 * unit;
     const position = settled ? exit.bench : exit.landing;
@@ -178,37 +180,44 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     if (!reduced && !props.preview && touching && cycle > 2700 && cycle < 3150) dust(ctx, body.x + body.facing * 24, body.y, cycle - 2700, .3);
   });
   const liveContactIds = new Set([...sim.minis.keys(), ...(exchange ? [exchange.id] : []), ...(upcoming ? [upcoming.id] : [])]);
-  const contactPoint = (round: ArenaRound, origin: ArenaPoint) => !round.exchange && ['bait', 'edge', 'shove'].includes(round.tactic) ? arenaRimContact(origin) : arenaLocalContact(origin, [...sim.contacts].filter(([otherId]) => otherId !== round.id && liveContactIds.has(otherId)).map(([, contact]) => contact.center));
+  const contactPoint = (round: ArenaRound, origin: ArenaPoint): Contact => {
+    const center = arenaLocalContact(origin, [...sim.contacts].filter(([otherId]) => otherId !== round.id && liveContactIds.has(otherId)).map(([, contact]) => contact.center));
+    return { center, side: round.index % 2 ? 1 : -1, round: arenaContactRound(round, center) };
+  };
   // Future participants approach while the preceding throw is still resolving.
   if (upcoming) {
     const a = sim.bodies.get(upcoming.aggressor), v = sim.bodies.get(upcoming.victim);
-    if (a && v && !sim.contacts.has(upcoming.id)) sim.contacts.set(upcoming.id, { center: contactPoint(upcoming, { x: (a.x + v.x) / 2, y: (a.y + v.y) / 2 }), side: upcoming.index % 2 ? 1 : -1 });
+    if (a && v && !sim.contacts.has(upcoming.id)) sim.contacts.set(upcoming.id, contactPoint(upcoming, { x: (a.x + v.x) / 2, y: (a.y + v.y) / 2 }));
     const contact = sim.contacts.get(upcoming.id);
-    if (contact) [upcoming.aggressor, upcoming.victim, upcoming.helper].forEach((id, role) => {
-      if (!id || !preparing.has(id)) return;
-      const body = sim.bodies.get(id), actor = actors.get(id);
-      if (!body || !actor) return;
-      const plan = arenaAction(upcoming, upcoming.start).actors[role];
-      const charge = upcoming.tactic === 'bait' ? arenaChargeTargets(upcoming, upcoming.start, contact.center) : undefined;
-      const edge = upcoming.tactic === 'edge' ? arenaEdgeTargets(upcoming, upcoming.start, contact.center) : undefined;
-      const caught = upcoming.tactic === 'catch' ? arenaCatchTargets(upcoming, upcoming.start, contact.center) : undefined;
-      const shove = upcoming.tactic === 'shove' ? arenaShoveTargets(upcoming, upcoming.start, contact.center) : undefined;
-      const target = arenaGuardTarget(charge ? id === upcoming.victim ? charge.charger : charge.target : caught ? id === upcoming.victim ? caught.charger : caught.receiver : shove ? id === upcoming.victim ? shove.victim : id === upcoming.helper ? shove.helper : shove.aggressor : edge ? id === upcoming.victim ? edge.victim : edge.aggressor : { x: contact.center.x + (plan?.offset.x ?? 0), y: contact.center.y + (plan?.offset.y ?? 0) }, actor.index, elapsed);
-      const approachDistance = Math.hypot(target.x - body.x, target.y - body.y);
-      if (Math.abs(target.x - body.x) > 8 && Math.hypot(body.motorX ?? 0, body.motorY ?? 0) < 18) body.facing = target.x < body.x ? -1 : 1;
-      move(body, target, seconds, arenaApproachSpeed(approachDistance));
-      actor.x = body.x; actor.y = body.y; actor.facing = body.facing;
-      actor.pose = Math.hypot(target.x - body.x, target.y - body.y) > 8 ? 'walk' : 'guard';
-      actor.gripTarget = undefined;
-    });
+    if (contact) {
+      const upcoming = contact.round;
+      [upcoming.aggressor, upcoming.victim, upcoming.helper].forEach((id, role) => {
+        if (!id || !preparing.has(id)) return;
+        const body = sim.bodies.get(id), actor = actors.get(id);
+        if (!body || !actor) return;
+        const plan = arenaAction(upcoming, upcoming.start).actors[role];
+        const charge = upcoming.tactic === 'bait' ? arenaChargeTargets(upcoming, upcoming.start, contact.center) : undefined;
+        const edge = upcoming.tactic === 'edge' ? arenaEdgeTargets(upcoming, upcoming.start, contact.center) : undefined;
+        const caught = upcoming.tactic === 'catch' ? arenaCatchTargets(upcoming, upcoming.start, contact.center) : undefined;
+        const shove = upcoming.tactic === 'shove' ? arenaShoveTargets(upcoming, upcoming.start, contact.center) : undefined;
+        const target = arenaGuardTarget(charge ? id === upcoming.victim ? charge.charger : charge.target : caught ? id === upcoming.victim ? caught.charger : caught.receiver : shove ? id === upcoming.victim ? shove.victim : id === upcoming.helper ? shove.helper : shove.aggressor : edge ? id === upcoming.victim ? edge.victim : edge.aggressor : { x: contact.center.x + (plan?.offset.x ?? 0), y: contact.center.y + (plan?.offset.y ?? 0) }, actor.index, elapsed);
+        const approachDistance = Math.hypot(target.x - body.x, target.y - body.y);
+        if (Math.abs(target.x - body.x) > 8 && Math.hypot(body.motorX ?? 0, body.motorY ?? 0) < 18) body.facing = target.x < body.x ? -1 : 1;
+        move(body, target, seconds, arenaApproachSpeed(approachDistance));
+        actor.x = body.x; actor.y = body.y; actor.facing = body.facing;
+        actor.pose = Math.hypot(target.x - body.x, target.y - body.y) > 8 ? 'walk' : 'guard';
+        actor.gripTarget = undefined;
+      });
+    }
   }
   const encounters = [...(exchange ? [exchange] : []), ...sim.minis.values()];
-  for (const exchange of encounters) {
+  for (let exchange of encounters) {
     const a = sim.bodies.get(exchange.aggressor), v = sim.bodies.get(exchange.victim);
     const mini = exchange.id.startsWith('mini-');
-    if (a && v && !sim.contacts.has(exchange.id)) sim.contacts.set(exchange.id, { center: contactPoint(exchange, { x: (a.x + v.x) / 2, y: (a.y + v.y) / 2 }), side: exchange.index % 2 ? 1 : -1 });
+    if (a && v && !sim.contacts.has(exchange.id)) sim.contacts.set(exchange.id, contactPoint(exchange, { x: (a.x + v.x) / 2, y: (a.y + v.y) / 2 }));
     const contact = sim.contacts.get(exchange.id);
     if (contact) {
+      exchange = contact.round;
       const center = contact.center, action = arenaAction(exchange, elapsed);
       const charge = exchange.tactic === 'bait' ? arenaChargeTargets(exchange, elapsed, center) : undefined;
       const edge = exchange.tactic === 'edge' ? arenaEdgeTargets(exchange, elapsed, center) : undefined;
@@ -352,19 +361,22 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   // Every name is fixed below its owner and sits behind every fighter.
   for (const actor of actors.values()) drawArenaName(ctx, actor);
   arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
-  if (exchange && !won) relationship(ctx, exchange, elapsed, actors, true);
+  const visibleRound = won ? sim.contacts.get(rounds.at(-1)!.id)?.round ?? rounds.at(-1) : exchange ? sim.contacts.get(exchange.id)?.round ?? exchange : undefined;
+  if (visibleRound && !won) relationship(ctx, visibleRound, elapsed, actors, true);
+  return visibleRound;
 }
 
 export default function ArenaShow(props: SportsStageProps) {
   const canvas = useRef<HTMLCanvasElement>(null), latest = useRef(props), sampledAt = useRef(0);
   latest.current = props;
+  const [visibleRound, setVisibleRound] = useState<ArenaRound>();
   useEffect(() => { sampledAt.current = performance.now(); }, [props.elapsed, props.paused, props.preview]);
   useEffect(() => {
     const element = canvas.current, ctx = element?.getContext('2d');
     if (!element || !ctx) return;
     const sim: Simulation = { key: '', elapsed: 0, epoch: 0, bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() };
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let request = 0, previous = 0, clock = 0;
+    let request = 0, previous = 0, clock = 0, narrationKey = '';
     const draw = (now: number) => {
       const state = latest.current, delta = previous ? Math.min(50, Math.max(0, now - previous)) : 16;
       previous = now; if (!state.paused && !media.matches) clock += delta;
@@ -375,7 +387,9 @@ export default function ArenaShow(props: SportsStageProps) {
       const scale = Math.min(width / W, height / H);
       ctx.setTransform(scale, 0, 0, scale, (width - W * scale) / 2, (height - H * scale) / 2); ctx.imageSmoothingEnabled = false;
       const elapsed = clamp(state.elapsed + (state.paused || state.preview ? 0 : Math.min(80, Math.max(0, now - sampledAt.current))), 0, state.duration);
-      render(ctx, state, elapsed, clock, sim, state.paused ? 0 : delta, media.matches);
+      const frameRound = render(ctx, state, elapsed, clock, sim, state.paused ? 0 : delta, media.matches);
+      const frameKey = frameRound ? [frameRound.id, frameRound.tactic, frameRound.aggressor, frameRound.victim, frameRound.helper, frameRound.impact].join(':') : '';
+      if (frameKey !== narrationKey) { narrationKey = frameKey; setVisibleRound(frameRound); }
       request = requestAnimationFrame(draw);
     };
     request = requestAnimationFrame(draw);
@@ -385,13 +399,14 @@ export default function ArenaShow(props: SportsStageProps) {
   const rounds = useMemo(() => arenaRounds(order, props.duration), [order, props.duration]);
   const ranks = props.preview ? {} : arenaRanks(order, props.elapsed, props.duration);
   const finished = !props.preview && !!rounds.length && props.elapsed >= rounds.at(-1)!.resolve;
-  const round = arenaFocusRound(order, props.elapsed, props.duration);
-  const narration = arenaNarration(props.preview ? undefined : finished ? rounds.at(-1) : round, props.candidates, order, props.elapsed, props.preview);
+  const plannedRound = finished ? rounds.at(-1) : arenaFocusRound(order, props.elapsed, props.duration);
+  const round = visibleRound?.id === plannedRound?.id ? visibleRound : plannedRound;
+  const narration = arenaNarration(props.preview ? undefined : round, props.candidates, order, props.elapsed, props.preview);
   const alive = props.candidates.length - Object.values(ranks).filter(rank => rank !== 1).length;
   return <section className="arena-show" aria-label="전원 동시 장외 난투">
     <div className="arena-stage">
       <canvas ref={canvas} className="arena-canvas" aria-label={finished ? `${props.candidates.find(candidate => candidate.id === order[0])?.name} 우승` : '여러 무리가 동시에 붙고 밀고 뒤집는 장외 난투'} />
-      <ArenaStory round={props.preview ? undefined : finished ? rounds.at(-1) : round} candidates={props.candidates} elapsed={props.elapsed} preview={props.preview} finished={finished} title={narration.title} detail={narration.detail} />
+      <ArenaStory round={props.preview ? undefined : round} candidates={props.candidates} elapsed={props.elapsed} preview={props.preview} finished={finished} title={narration.title} detail={narration.detail} />
       {props.paused && <div className="arena-paused">난투 잠시 멈춤</div>}
     </div>
     <aside className="arena-board" aria-label="생존 및 확정 순위">

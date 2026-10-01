@@ -1,5 +1,5 @@
 import type { Candidate } from '../election';
-import type { LadderActorFrame, LadderFrame, LadderInteraction, LadderTimeline } from '../ladderLogic';
+import { ladderLeapHeight, type LadderActorFrame, type LadderFrame, type LadderInteraction, type LadderTimeline } from '../ladderLogic';
 
 export type LadderPose = 'idle' | 'climb' | 'run' | 'bridge' | 'balance' | 'fall' | 'hang' | 'clamber' | 'drop' | 'slide' | 'swing' | 'launch' | 'rotate' | 'ride' | 'transfer' | 'win' | 'arrived';
 type TransferMotion = 'slide' | 'swing' | 'launch' | 'drop' | 'rotate' | 'conveyor' | 'portal' | 'pounce';
@@ -129,7 +129,8 @@ export function ladderArtActors(timeline: LadderTimeline, frame: LadderFrame, ca
     const next = Math.min(Infinity, ...boundaries.filter(time => time > boundary + .001));
     // Pulling the body onto the rung includes the whole reach of the free arm.
     // A short ordinary crossing must use its full recovery for that turn.
-    const duration = actor.eventStage === 'resolve' ? Math.min(350, next - boundary) : Math.min(250, (next - boundary) * .6);
+    const pushOff = actor.eventStage === 'action' && ['launch', 'pounce', 'drop', 'slide'].includes(actor.motionType ?? '');
+    const duration = actor.eventStage === 'resolve' ? Math.min(350, next - boundary) : Math.min(pushOff ? 90 : 250, (next - boundary) * .6);
     const continuousPull = actor.pose === 'clamber' && actor.eventStage === 'resolve' && ['swing', 'launch', 'drop', 'slide'].includes(actor.motionType ?? '');
     if (!continuousPull && elapsed >= boundary && elapsed < boundary + duration) {
       const previous = readFrame(Math.max(0, boundary - .001)).actors.find(item => item.id === actor.id)!;
@@ -180,7 +181,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
       angle = climb.angle; handContact = climb.handContact; footContact = climb.footContact;
     } else if (p < .32) {
       const flight = clamp(actor.transferProgress ?? p / .32), takeoff = ease(flight / .18), reach = ease((flight - .72) / .28);
-      hip = { x: mix(0, 7, reach), y: mix(-13 + (1 - takeoff) * 4, -11.8, reach) }; angle = -.18 * Math.sin(flight * Math.PI) * (1 - reach);
+      hip = { x: mix(-.8 * (1 - takeoff), 7, reach), y: mix(-15 + (1 - takeoff) * 2.4, -11.8, reach) }; angle = -.18 * Math.sin(flight * Math.PI) * (1 - reach);
       hands = [{ x: mix(-12, 4, reach), y: mix(-25, -22, reach) }, { x: mix(14, 8, reach), y: mix(-28, -17, reach) }];
       feet = [{ x: mix(-4, 1, reach), y: -Math.sin(flight * Math.PI) * 5 }, { x: mix(8, 6, reach), y: -Math.sin(flight * Math.PI) * 7 }];
       footContact = [false, false];
@@ -222,6 +223,13 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
     // Rung targets stay in world space, so the torso's effort never drags a grip.
     const weight = Math.sin(motor * Math.PI) * side;
     hip.x = weight * (.52 + personality * .03); hip.y += Math.sin(motor * Math.PI * 2) * .14 + breath; angle = weight * .019;
+    if (actor.eventStage === 'setup' && (actor.motionType === 'launch' || actor.motionType === 'pounce' && actor.interaction?.role === 'thrower')) {
+      const prepare = ease(actor.phase), direction = Math.sign((actor.toLane ?? actor.lane) - (actor.fromLane ?? actor.lane)) || 1;
+      // Both soles and the supporting grip stay on their rungs while the knees
+      // compress. The push starts from this stance rather than a frozen climb.
+      hip.y += prepare * 2.4; hip.x -= direction * prepare * .8;
+      angle -= direction * prepare * .035;
+    }
     if (topOut > 0) {
       // The ladder ends at the terrace. Push off its edge, plant one foot, then
       // release the supporting hand instead of reaching for rungs in the sky.
@@ -265,7 +273,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
       if (actor.eventKind === 'zipline') hip.x = -sweep * .6;
     } else if (actor.motionType === 'launch') {
       const crouch = (1 - takeoff) * 4, tuck = Math.sin(flight * Math.PI) * (1 - land), kick = Math.sin(clamp(flight / .28) * Math.PI) * 2.4;
-      hip = { x: -.55 * (1 - takeoff) + pulse * .8, y: -13 + crouch }; angle = -.2 * Math.sin(flight * Math.PI);
+      hip = { x: -.55 * (1 - takeoff) + pulse * .8, y: -15 + crouch * .6 + takeoff * 2 }; angle = -.2 * Math.sin(flight * Math.PI);
       hands = [{ x: mix(-11, -13, takeoff), y: mix(-12, -24, takeoff) }, { x: mix(9, 14, takeoff), y: mix(-14, -28, takeoff) }];
       feet = [{ x: -3.2 - kick + tuck * 4, y: -takeoff * 1.5 - tuck * 6.5 }, { x: mix(3.2, 10, takeoff) - tuck * 3, y: -takeoff * 2 - tuck * 8 }];
       if (actor.eventKind === 'balloon') { hands = [{ x: -4, y: -32 }, { x: 5, y: -31 }]; angle = Math.sin(p * Math.PI) * .055; }
@@ -699,7 +707,7 @@ export function drawLadderCrossing(ctx: CanvasRenderingContext2D, actor: LadderA
   if (!reduced && ['launch', 'swing', 'drop', 'pounce'].includes(actor.motionType)) {
     const action = clamp(actor.actionProgress ?? actor.motionPhase ?? actor.phase), catchAt = actor.motionType === 'drop' || actor.motionType === 'slide' ? .64 : .86;
     if (actor.transferStage === 'flight' && p > .12 && p < .88 && (!actor.interaction || actor.interaction.stage === 'approach' || actor.interaction.stage === 'flight')) {
-      const dx = to.x - from.x, arc = actor.motionType === 'launch' ? -4.6 : actor.motionType === 'pounce' ? -3 : actor.motionType === 'swing' ? 4.6 : 0;
+      const dx = to.x - from.x, arc = actor.motionType === 'launch' ? -ladderLeapHeight(actor.fromRow ?? actor.rungProgress) : actor.motionType === 'pounce' ? -1.8 : actor.motionType === 'swing' ? 3.2 : 0;
       const dy = to.y - from.y + arc * geometry.rungGap * Math.PI * Math.cos(p * Math.PI);
       const length = Math.max(1, Math.hypot(dx, dy)), vx = dx / length, vy = dy / length;
       const amount = Math.sin(p * Math.PI);

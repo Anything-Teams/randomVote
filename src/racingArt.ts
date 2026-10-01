@@ -180,9 +180,10 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   path(ctx, () => { ctx.moveTo(pelvis.x - 5, pelvis.y - 2); ctx.lineTo(shoulder.x - 5, shoulder.y - 2); ctx.quadraticCurveTo(shoulder.x + 3, shoulder.y - 4, shoulder.x + 6, shoulder.y + 2); ctx.lineTo(pelvis.x + 5, pelvis.y + 3); ctx.closePath(); }, candidate.color, '#243447');
   bone({ x: pelvis.x - 2, y: pelvis.y - 3 }, { x: shoulder.x + 1, y: shoulder.y - 1 }, 2, '#ffffffbb');
   riderArm(shoulder, nearHand, false);
-  if (toss > .08 && tossRelease <= .5) {
+  if (toss > 0 && tossRelease <= .5) {
+    ctx.save(); ctx.globalAlpha *= ease(toss / .3);
     ctx.fillStyle = '#edb349'; ctx.strokeStyle = '#493520'; ctx.lineWidth = .8; ctx.beginPath(); ctx.roundRect(nearHand.x - 4, nearHand.y - 3.5, 8, 7, 1.6); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#fff0a9'; ctx.fillRect(nearHand.x - 2.5, nearHand.y - 2, 3, 1.4);
+    ctx.fillStyle = '#fff0a9'; ctx.fillRect(nearHand.x - 2.5, nearHand.y - 2, 3, 1.4); ctx.restore();
   }
   const head = { x: shoulder.x + 3, y: shoulder.y - 9 };
   bone({ x: shoulder.x + 1, y: shoulder.y - 2 }, { x: head.x - 1, y: head.y + 3 }, 3, '#ecc39e');
@@ -191,13 +192,13 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   bone({ x: head.x - 3, y: head.y - 7 }, { x: head.x + 2, y: head.y - 8 }, 1.6, '#ecf3ee');
   ctx.fillStyle = '#15273e'; ctx.fillRect(head.x + .8, head.y - 2, 4.5, 2.2);
   ctx.restore(); ctx.restore(); leg(legData[2]); leg(legData[3]);
-  if (stun > .08) {
+  if (stun > 0) {
     // A loose helmet and orbiting stars make the short rider stun readable.
-    const cx = 4 - stun * 7, cy = -82 + stun * 16;
-    ctx.globalAlpha = alpha * stun;
+    const helmet = raceHorseAttachments(index, clock, speed, reduced, motion, lean).helmet, cx = helmet.x, cy = helmet.y - 10;
+    ctx.globalAlpha = alpha * stun * .58;
     for (let star = 0; star < 3; star++) {
       const orbit = (clock / 230 + star * Math.PI * 2 / 3), sx = cx + Math.cos(orbit) * 13, sy = cy + Math.sin(orbit) * 3;
-      ctx.fillStyle = '#ffe691'; ctx.fillRect(sx - 2.5, sy - .8, 5, 1.6); ctx.fillRect(sx - .8, sy - 2.5, 1.6, 5);
+      ctx.fillStyle = '#c2b58c'; ctx.beginPath(); ctx.ellipse(sx, sy, 1.7, .65, orbit, 0, Math.PI * 2); ctx.fill();
     }
   }
   ctx.restore();
@@ -282,7 +283,7 @@ export function drawRaceDust(ctx: CanvasRenderingContext2D, index: number, x: nu
       const age = (sinceContact + particle * period) / 590;
       if (age >= 1) continue;
       const origin = [-25, -23, 20, 23][leg] + reach, trail = age * (38 + strength * 8);
-      ctx.fillStyle = `rgba(211,187,143,${(1 - age) ** 2 * .24 * strength})`; ctx.beginPath();
+      ctx.fillStyle = `rgba(211,187,143,${(1 - age) ** 2 * Math.min(1, age / .14) ** 2 * .18 * strength})`; ctx.beginPath();
       ctx.ellipse(x + (origin - trail) * scale, y + (1 - Math.sin(age * Math.PI) * 5) * scale, (1.1 + age * 5) * scale, (.55 + age * 2.2) * scale, -.1, 0, Math.PI * 2); ctx.fill();
     }
   }

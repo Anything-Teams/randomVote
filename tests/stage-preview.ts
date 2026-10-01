@@ -10,7 +10,7 @@ const longNames: Record<number, string> = { 0: '가나다라마바사아자차�
 const candidates = CANDIDATE_COLORS.map((color, index) => ({ id: String(index + 1), name: longNames[index] ?? `후보 ${index + 1}`, color }));
 const host = document.querySelector<HTMLDivElement>('#stage')!;
 let game: Phaser.Game | undefined;
-type PreviewKind = StoryKind | 'winner' | 'voting' | 'finale' | 'last-run';
+type PreviewKind = StoryKind | 'winner' | 'voting' | 'counting' | 'finale' | 'last-run';
 let selectedKind: PreviewKind = 'brawl';
 
 function preview(kind: PreviewKind, freezeAt?: number, captureAt?: number) {
@@ -27,7 +27,7 @@ function preview(kind: PreviewKind, freezeAt?: number, captureAt?: number) {
   const percentages = Object.fromEntries(candidates.map(candidate => [candidate.id, votes[candidate.id] / totalVotes * 100]));
   const result: ElectionResult = { candidates, winnerId: '1', totalVotes, votes, percentages, events: event ? [event] : [], eliminatedIds: kind === 'scandal' ? ['3'] : [] };
   const drama = createDrama(result);
-  const startAt = captureAt ?? (kind === 'voting' ? 5000 : kind === 'winner' ? WINNER_START : kind === 'last-run' ? WINNER_START - 6000 : kind === 'finale' ? WINNER_START - 1200 : elapsedAtProgress(32));
+  const startAt = captureAt ?? (kind === 'voting' ? 5000 : kind === 'counting' ? 14_000 : kind === 'winner' ? WINNER_START : kind === 'last-run' ? WINNER_START - 6000 : kind === 'finale' ? WINNER_START - 1200 : elapsedAtProgress(32));
   const initialProgress = kind === 'voting' ? 0 : countProgress(startAt);
   const initial = frameAt(drama, initialProgress);
   const state: StageState = { phase: kind === 'voting' ? 'voting' : kind === 'winner' ? 'winner' : 'counting', candidates, winnerId: '1', topic: '오늘 커피 쏠 사람은?', percentages: kind === 'winner' || kind === 'voting' ? percentages : initial.percentages, finalPercentages: percentages, finalVotes: result.votes, finishStartPercentages: frameAt(drama, countProgress(WINNER_START - 4000)).percentages, progress: initialProgress, totalVotes: result.totalVotes, preview: false, reducedMotion: false, elapsed: startAt, events: result.events, storyOutcomes: event ? [storyOutcome(result, event, drama)] : [] };
