@@ -71,7 +71,7 @@ function Preview() {
       {[0, 5, 12, 20, 28, 36, 40, 44].map(second => <button type="button" key={second} onClick={() => seek(second * 1000)}>{second}초</button>)}
       <button type="button" onClick={togglePlay}>{playing ? '정지' : '재생'}</button>
       <button type="button" onClick={() => { setPreview(false); setElapsed(0); setPlaying(true); setRunId(id => id + 1); }}>처음부터</button>
-      <button type="button" onClick={() => { setCount(2); setLongNames(false); setInputOrderArrival(false); setTargetLane(0); setStorySeed(439); setPreview(false); setElapsed(37_400); setPlaying(false); setRunId(id => id + 1); }}>희귀 보물 쟁탈</button>
+      <button type="button" onClick={() => { setCount(2); setLongNames(false); setInputOrderArrival(false); setTargetLane(0); setStorySeed(19); setPreview(false); setElapsed(34_900); setPlaying(false); setRunId(id => id + 1); }}>희귀 보물 쟁탈</button>
     </nav>
     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, flex: 'none' }}>
       <output style={{ minWidth: 39 }}>{(elapsed / 1000).toFixed(1)}초</output>

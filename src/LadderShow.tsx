@@ -83,7 +83,13 @@ function render(ctx: CanvasRenderingContext2D, props: LadderShowProps, timeline:
   const events = props.preview ? [] : runningStories(timeline, elapsed);
   const focused = new Set(events.flatMap(event => event.actors));
   actors.filter(actor => actor.motionType && actor.eventStage !== 'setup').forEach(actor => drawLadderCrossing(ctx, actor, geometry, clock, reduced, actor.id === story?.actorId));
-  events.forEach(event => drawLadderEvent(ctx, toArtEvent(event), geometry, clock, reduced, actors.find(actor => actor.id === event.actorId)));
+  events.forEach(event => {
+    drawLadderEvent(ctx, toArtEvent(event), geometry, clock, reduced, actors.find(actor => actor.id === event.actorId));
+    if (Math.abs(event.toLane - event.fromLane) > 1 && ['wind', 'balloon'].includes(event.kind)) {
+      const partner = actors.find(actor => actor.id === event.partnerId);
+      if (partner) drawLadderEvent(ctx, { ...toArtEvent(event), actorId: partner.id, lane: event.toLane, toLane: event.fromLane, fromRow: partner.fromRow }, geometry, clock, reduced, partner);
+    }
+  });
   const ordered = [...actors].sort((a, b) => b.rungProgress - (b.depthOffset ?? 0) - a.rungProgress + (a.depthOffset ?? 0));
   ordered.forEach(actor => drawLadderName(ctx, actor, geometry, focused.has(actor.id), clock, reduced));
   ordered.forEach(actor => drawLadderActor(ctx, actor, geometry, clock, reduced, focused.has(actor.id)));
@@ -149,8 +155,10 @@ export default function LadderShow(props: LadderShowProps) {
   const pastStories = props.preview ? [] : timeline?.events.filter(event => props.elapsed >= event.action).slice(-3) ?? [];
   const roofRunner = !props.preview && timeline?.roofFinish && props.elapsed >= timeline.roofFinish.runStart && props.elapsed < timeline.roofFinish.claimAt ? props.candidates.find(candidate => candidate.id === timeline.roofFinish!.actorId) : undefined;
   const departing = props.elapsed < LADDER_START_DELAY * props.duration / 44_000;
-  const title = winner ? `${winner.name} · 황금 보물 획득!` : roofRunner ? `${roofRunner.name} · 옆줄에서 먼저 올라왔다!` : person && story ? `${person.name}${grapple && partner ? ` ↔ ${partner.name}` : ''} · ${story.title}` : props.preview ? '하늘 보물 쟁탈전' : departing ? '구름 위 보물로 출발!' : props.elapsed > 35500 ? '보물상자가 바로 앞!' : '모두 한 칸씩, 위로!';
-  const detail = winner ? `${targetLane + 1}번 상자의 황금 보물을 차지한 ${winner.name}님이 당첨됐습니다.` : roofRunner ? `정상에 먼저 발을 딛은 ${roofRunner.name}님이 황금 상자로 달려갑니다! 다른 선수들도 각자의 속도로 계속 올라옵니다.` : story ? storyDetail(story, spotlight, person, partner, storyBeat === 'catch') : props.preview ? '황금 보물 위치를 고르세요. 누가 어떤 길을 갈지는 시작한 뒤에 드러납니다.' : departing ? '손잡이를 움켜쥐고, 구름 위로 올라갑니다.' : props.elapsed > 35500 ? `${targetLane + 1}번 상자에 누가 먼저 닿을까요?` : '서로의 움직임을 살피며 사다리를 오릅니다.';
+  const ambushActor = frame?.actors.find(actor => actor.id === timeline?.roofFinish?.actorId);
+  const ambushStage = ambushActor?.interaction?.stage;
+  const title = winner ? `${winner.name} · 황금 보물 획득!` : roofRunner ? `${roofRunner.name} · 정상에서 기습!` : person && story ? `${person.name}${grapple && partner ? ` ↔ ${partner.name}` : ''} · ${story.title}` : props.preview ? '하늘 보물 쟁탈전' : departing ? '구름 위 보물로 출발!' : props.elapsed > 35500 ? '보물상자가 바로 앞!' : '모두 한 칸씩, 위로!';
+  const detail = winner ? `${targetLane + 1}번 상자의 황금 보물을 차지한 ${winner.name}님이 당첨됐습니다.` : roofRunner ? ambushStage === 'approach' ? `${roofRunner.name}님이 옆줄에서 뛰어듭니다. 상대가 보물에 손을 뻗기 직전입니다!` : ambushStage === 'grip' || ambushStage === 'throw' ? '상대의 두 다리를 붙잡았습니다! 몸을 들어 원래 사다리 쪽으로 던집니다.' : ambushStage === 'flight' ? '상대가 원래 사다리 쪽으로 날아갑니다. 기습한 선수가 정상으로 몸을 올립니다!' : '상대는 옆줄 손잡이를 잡고 버팁니다. 기습한 선수가 정상 보물을 차지합니다!' : story ? storyDetail(story, spotlight, person, partner, storyBeat === 'catch') : props.preview ? '황금 보물 위치를 고르세요. 누가 어떤 길을 갈지는 시작한 뒤에 드러납니다.' : departing ? '손잡이를 움켜쥐고, 구름 위로 올라갑니다.' : props.elapsed > 35500 ? `${targetLane + 1}번 상자에 누가 먼저 닿을까요?` : '서로의 움직임을 살피며 사다리를 오릅니다.';
   const selectDoor = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!props.preview || !props.onTargetChange || !geometryRef.current) return;
     const box = event.currentTarget.getBoundingClientRect(), geometry = geometryRef.current, x = event.clientX - box.left, y = event.clientY - box.top;

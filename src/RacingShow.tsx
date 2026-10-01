@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { randomInt } from './election';
 import type { SportsStageProps } from './sports';
-import { activeRacingIncident, activeRacingTrick, racingTrickStatus, buildRacingTimeline, createRacingIncidents, racingIncidentStatus, racingIncidentSetback, racingStandings, readRacingTravel, RACING_STORIES, type RacingTimeline, type RacingStanding } from './racingNarrative';
+import { activeRacingBump, activeRacingIncident, activeRacingTrick, racingTrickStatus, buildRacingTimeline, createRacingIncidents, racingIncidentStatus, racingIncidentSetback, racingStandings, readRacingTravel, RACING_STORIES, type RacingTimeline, type RacingStanding } from './racingNarrative';
 import { drawRaceDust, drawRaceHorse, raceHorseAttachments, drawRaceStadium, raceBox, raceLabel, type RaceHorseMotion } from './racingArt';
 import { drawRacingCourse, drawRacingStartingGate, drawRacingTopView } from './racingCourse';
 import { createRacingCamera, placeRacingField, racingFocusIds, type RacingCamera } from './racingCamera';
-import { combineRacingHorseMotion, drawRacingIncidentEffects, drawRacingTrickEffects, placeRacingDuel, placeRacingTrick, racingIncidentMotion, racingTrickMotion } from './racingEffects';
+import { combineRacingHorseMotion, drawRacingIncidentEffects, drawRacingTrickEffects, placeRacingDuel, placeRacingTrick, placeRacingBump, racingBumpMotion, racingIncidentMotion, racingTrickMotion } from './racingEffects';
 import { drawRacingObstacles, placeRacingObstacles, placeRacingFalls, racingObstacleJump, racingObstacleMotion, racingObstacleStatus } from './racingObstacles';
+import { racingGaitPhase } from './racingMotionClock';
 import './racing.css';
 
 type RacePhase = 'preview' | 'paddock' | 'countdown' | 'race' | 'straight' | 'photo' | 'winner';
@@ -101,6 +102,14 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
     badge = status.stage === 'stunned' ? '기수 일시 기절 · 실제 감속' : status.stage === 'chase' ? '회복 · 재추격' : kick ? '뒷발차기 견제' : '모래주머니 투척';
     focusId = elapsed < trick.impact ? trick.actorId : trick.targetId;
   }
+  const bump = activeRacingBump(timeline, elapsed);
+  if (bump && (!challenge || elapsed >= challenge.recovered + 450) && !trick) {
+    const defender = props.candidates.find(item => item.id === bump.actorId)?.name ?? '앞말';
+    const rival = props.candidates.find(item => item.id === bump.targetId)?.name ?? '추격마';
+    headline = defender + ' · ' + (elapsed < bump.impact ? '어깨로 진로를 지킵니다' : elapsed < bump.lowest ? '몸통을 맞대며 견제!' : '견제를 풀고 다시 질주');
+    detail = elapsed < bump.impact ? rival + '가 옆으로 붙습니다. 앞말도 몸을 기울여 자리를 지킵니다.' : elapsed < bump.lowest ? '두 말의 어깨가 닿습니다. ' + rival + '가 발을 짧게 딛고 중심을 잡는 사이 앞말이 보폭을 이어갑니다.' : '기수가 고삐를 바로 잡고 다시 보폭을 늘립니다. 순위 경쟁은 쉬지 않고 이어집니다.';
+    badge = '몸통 견제 · 실제 접촉'; focusId = bump.actorId;
+  }
   const late = timeline.lateFall;
   if (late && elapsed >= late.impact - 450 && elapsed < timeline.finishTimes[late.actorId]) {
     const name = props.candidates.find(candidate => candidate.id === late.actorId)?.name ?? '경주마';
@@ -132,17 +141,18 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
   const baseLocations = placements.map(item => ({ ...item, x: item.x - 57 * item.scale }));
   const obstacles = placeRacingObstacles(timeline, scene.camera, placements, w);
   const trick = phase === 'race' ? activeRacingTrick(timeline, elapsed) : undefined;
-  const locations = placeRacingFalls(placeRacingTrick(trick, placeRacingDuel(incident, baseLocations, obstacles, elapsed), elapsed), timeline, elapsed, h, reduced).sort((a, b) => a.y - b.y);
+  const bump = activeRacingBump(timeline, elapsed);
+  const locations = placeRacingFalls(placeRacingBump(bump, placeRacingTrick(trick, placeRacingDuel(incident, baseLocations, obstacles, elapsed), elapsed), elapsed, baseLocations, reduced), timeline, elapsed, h, reduced).sort((a, b) => a.y - b.y);
   const motions = new Map(locations.map(item => {
     const own = obstacles.filter(obstacle => obstacle.actorId === item.id);
     const jump = reduced ? 0 : Math.max(0, ...own.map(obstacle => racingObstacleJump(obstacle, item)));
     const late = timeline.lateFall?.actorId === item.id ? racingObstacleMotion(timeline.lateFall, elapsed, reduced) : {};
     const obstacleMotion = own.reduce<RaceHorseMotion>((motion, obstacle) => ({ ...motion, ...racingObstacleMotion(obstacle, elapsed, reduced) }), late);
-    return [item.id, combineRacingHorseMotion(racingIncidentMotion(incident, item.id, elapsed, reduced), racingTrickMotion(trick, item.id, elapsed, locations, reduced), obstacleMotion, { jump: jump * (1 - (obstacleMotion.fall ?? 0)) })];
+    return [item.id, combineRacingHorseMotion(racingIncidentMotion(incident, item.id, elapsed, reduced), racingTrickMotion(trick, item.id, elapsed, locations, reduced), racingBumpMotion(bump, item.id, elapsed, locations, reduced), obstacleMotion, { jump: jump * (1 - (obstacleMotion.fall ?? 0)) })];
   }));
   const physicalLocations = locations.map(item => {
     const before = readRacingTravel(timeline, item.id, elapsed - 100), effort = clamp((item.distance - before) * 335, .45, 1.35);
-    const pose = raceHorseAttachments(item.index, clock, effort, reduced, { phase: item.distance * 62 + item.index * .193, ...motions.get(item.id) });
+    const pose = raceHorseAttachments(item.index, clock, effort, reduced, { phase: racingGaitPhase(item.index, elapsed), ...motions.get(item.id) });
     const world = (point: { x: number; y: number }) => ({ x: item.x + point.x * item.scale, y: item.y + point.y * item.scale });
     return { ...item, hand: world(pose.hand), helmet: world(pose.helmet), boot: world(pose.boot) };
   });
@@ -171,13 +181,13 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
     }
     const candidate = props.candidates[item.index], before = readRacingTravel(timeline, item.id, elapsed - 100), effort = clamp((item.distance - before) * 335, .45, 1.35);
     const motion = motions.get(item.id)!;
-    drawRaceDust(ctx, item.index, item.x, item.y, item.scale, item.distance * 62 * (560 + item.index % 4 * 22), reduced, effort * (1 - smooth((motion.jump ?? 0) / .35)) * (1 - (motion.fall ?? 0) * .85));
+    drawRaceDust(ctx, item.index, item.x, item.y, item.scale, Math.max(0, elapsed - 5500), reduced, effort * (1 - smooth((motion.jump ?? 0) / .35)) * (1 - (motion.fall ?? 0) * .85));
     const standing = standings.find(standing => standing.id === item.id);
     const velocityRatio = standing?.finished ? Math.exp(-(elapsed - standing.finishTime) / 1100) : 1;
     // Invert the renderer's easing so stride shrinks with the continuous run-out velocity.
     const settle = .5 - Math.sin(Math.asin(2 * velocityRatio - 1) / 3);
-    // Course progress drives hoof cadence, so a checked or stumbling horse really shortens its steps.
-    drawRaceHorse(ctx, candidate, item.index, item.x, item.y, item.scale, clock, effort, reduced, false, 0, { settle, phase: item.distance * 62 + item.index * .193, ...motion });
+    // Cadence keeps real time during every event; actual pace changes only the stride length.
+    drawRaceHorse(ctx, candidate, item.index, item.x, item.y, item.scale, clock, effort, reduced, false, 0, { settle, phase: racingGaitPhase(item.index, elapsed), ...motion });
   });
   drawRacingObstacles(ctx, groundObjects.slice(nextGroundObject), w, elapsed, reduced, 'ground');
   drawRacingIncidentEffects(ctx, incident, locations, elapsed, reduced, 'air');
@@ -234,7 +244,7 @@ export default function RacingShow(props: SportsStageProps & { storySeed?: numbe
   useEffect(() => { const query = window.matchMedia('(prefers-reduced-motion: reduce)'); const update = () => setReducedMotion(query.matches); query.addEventListener('change', update); return () => query.removeEventListener('change', update); }, []);
   useEffect(() => {
     const element = canvas.current, ctx = element?.getContext('2d'); if (!element || !ctx) return;
-    let w = 1, h = 1, ratio = 1, hasCanvasSize = false, frame = 0, previous = performance.now(), clock = 0, boardAt = -1000, viewKey = '';
+    let w = 1, h = 1, ratio = 1, hasCanvasSize = false, frame = 0, previous = performance.now(), boardAt = -1000, viewKey = '';
     const scene: RaceScene = { camera: createRacingCamera(), elapsed: null };
     const resize = () => {
       const rect = element.getBoundingClientRect(), nextW = Math.max(1, rect.width), nextH = Math.max(1, rect.height), nextRatio = Math.min(2, window.devicePixelRatio || 1);
@@ -247,14 +257,13 @@ export default function RacingShow(props: SportsStageProps & { storySeed?: numbe
       // A real resize repaints immediately instead of leaving an emptied canvas until the next frame.
       const current = latest.current, plan = latestTimeline.current, now = performance.now();
       const elapsed = current.preview || current.paused ? current.elapsed : Math.min(current.duration, current.elapsed + Math.max(0, now - synchronizedAt.current));
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0); render(ctx, w, h, current, plan, elapsed, clock, reducedMotion, scene, 0);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0); render(ctx, w, h, current, plan, elapsed, elapsed, reducedMotion, scene, 0);
     };
     const observer = new ResizeObserver(resize); observer.observe(element); resize();
     const animate = (now: number) => {
       const current = latest.current, plan = latestTimeline.current, delta = Math.min(50, Math.max(0, now - previous)); previous = now;
-      if (!current.paused && !reducedMotion) clock += delta;
       const elapsed = current.preview || current.paused ? current.elapsed : Math.min(current.duration, current.elapsed + Math.max(0, now - synchronizedAt.current));
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, w, h); render(ctx, w, h, current, plan, elapsed, clock, reducedMotion, scene, delta);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, w, h); render(ctx, w, h, current, plan, elapsed, elapsed, reducedMotion, scene, delta);
       const incident = displayedIncident(plan, elapsed), phase = phaseAt(elapsed, current.duration, current.preview);
       const standings = racingStandings(plan, elapsed);
       const immediateKey = phase + ':' + incident?.start + ':' + standings.map(standing => standing.id).join('|') + ':' + current.candidates.map(candidate => candidate.name).join('|');

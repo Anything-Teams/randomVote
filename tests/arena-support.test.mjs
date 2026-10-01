@@ -40,6 +40,16 @@ test('a hooked ankle and an airborne side kick put the rendered foot at the actu
   }
 });
 
+test('the two side-kick hops have a real planted sole between their airborne poses', () => {
+  const body = { ...fighter('sidekick'), depthY: 425, phase: .6, footStrength: 0 };
+  for (let at = 0; at <= 160; at += 16) {
+    body.y = 425 - 22 * (1 - at / 160);
+    drawArenaFighter(ctx, body, at);
+  }
+  assert.ok(body.animation.skeleton.feet.every(foot => Math.abs(foot.y) < .001), 'both soles come down to the standing plane before the next push-off');
+  assert.ok(body.animation.contactPoints.feet.every(foot => Math.abs(foot.y + 2 * body.scale - body.depthY) < .001));
+});
+
 // Unlike a single straight path, this reproduces old footholds left behind at an upward turn.
 test('sideways, upward and downward direction changes preserve support heels and reachable legs', () => {
   const targets = [{ x: 620, y: 425 }, { x: 620, y: 350 }, { x: 565, y: 440 }, { x: 435, y: 410 }];
@@ -66,6 +76,25 @@ test('sideways, upward and downward direction changes preserve support heels and
       }
     }
     assert.ok(plantedFrames > 200, 'the test includes many actual supporting steps');
+  }
+});
+
+test('a sudden sideways-to-upward turn takes a new step instead of collapsing the pelvis', () => {
+  for (const index of [0, 1, 2, 3]) {
+    const body = fighter('walk', index);
+    let previousHip;
+    for (let at = 0; at < 6000; at += 16) {
+      const velocity = at < 2200 ? [120, 0] : at < 4000 ? [0, -120] : [-100, 80];
+      body.velocityX = velocity[0]; body.velocityY = velocity[1];
+      body.x += velocity[0] * .016; body.y += velocity[1] * .016;
+      if (velocity[0]) body.facing = Math.sign(velocity[0]);
+      body.gaitDistance += Math.hypot(...velocity) * .016;
+      drawArenaFighter(ctx, body, at);
+      const hip = body.animation.supportHip;
+      assert.ok(hip.y < -15, `ordinary travel must not turn into a seated pose: ${index}/${at}/${hip.y}`);
+      if (previousHip) assert.ok(hip.y - previousHip.y < .7, 'planting a heel cannot abruptly drop the torso');
+      previousHip = { ...hip };
+    }
   }
 });
 

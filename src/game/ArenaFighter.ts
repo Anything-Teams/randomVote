@@ -3,9 +3,9 @@ import type { Candidate } from '../election';
 export type ArenaPose = 'idle' | 'guard' | 'walk' | 'run' | 'grapple' | 'brace' | 'push' | 'dodge' | 'lift' | 'throw' | 'airborne' | 'held' | 'roll' | 'land' | 'recover' | 'cheer' | 'clap' | 'bow' | 'trip' | 'suplex' | 'drag' | 'sidekick' | 'stunned';
 type Point = { x: number; y: number };
 type Motion = { crouch: number; lean: number; hipX: number; head: number; mouth: number; backX: number; backY: number; frontX: number; frontY: number; spread: number; contact: number; shoulderLift: number; clapTurn: number; cheerTurn: number; applause: number };
-type FootMemory = { anchor: Point; from: Point; to: Point; ground: Point; lift: number; swinging: boolean; swingStart: number; swingStrength?: number; settleAt: number; settleFrom: Point; settleTo: Point; settleLift: number };
-export type ArenaFighterAnimation = { clock: number | null; signature: string; epoch?: number | string; facing?: number; supportHip?: Point; motion: Motion | null; gait: number; distance: number; moving: boolean; airborne: boolean; feet: [FootMemory, FootMemory] | null; localFeet: [Point, Point] | null; grip?: Point; secondaryGrip?: Point; pose?: ArenaPose; depthStride?: number; pivotStep?: number; contactPoints?: { origin: Point; hands: Point[]; waist: Point; feet: Point[] }; skeleton?: { hips: Point[]; knees: Point[]; feet: Point[]; shorts: Point[][]; pelvis: Point[] } };
-export type ArenaActor = { candidate: Candidate; index: number; x: number; y: number; depthY?: number; scale: number; facing: number; pose: ArenaPose; angle: number; yaw?: number; pivotTurn?: number; footTarget?: Point; footStrength?: number; kickLeg?: number; alpha: number; velocityX: number; velocityY: number; gaitDistance: number; phase: number; power?: number; chargePreparation?: number; chargeStrength?: number; gripStrength?: number; gripTarget?: Point; secondaryGripTarget?: Point; animation?: ArenaFighterAnimation; motionEpoch?: number | string; motionImmediate?: boolean };
+type FootMemory = { anchor: Point; from: Point; to: Point; ground: Point; lift: number; swinging: boolean; swingStart: number; swingStrength?: number; settleAt: number; settleFrom: Point; settleTo: Point; settleLift: number; replant?: { at: number; from: Point; to: Point } };
+export type ArenaFighterAnimation = { clock: number | null; signature: string; epoch?: number | string; facing?: number; supportHip?: Point; motion: Motion | null; gait: number; distance: number; moving: boolean; airborne: boolean; feet: [FootMemory, FootMemory] | null; localFeet: [Point, Point] | null; grip?: Point; secondaryGrip?: Point; pose?: ArenaPose; depthStride?: number; pivotStep?: number; contactPoints?: { origin: Point; head: Point; hands: Point[]; waist: Point; feet: Point[] }; skeleton?: { hips: Point[]; knees: Point[]; feet: Point[]; shorts: Point[][]; pelvis: Point[] } };
+export type ArenaActor = { candidate: Candidate; index: number; x: number; y: number; depthY?: number; scale: number; facing: number; pose: ArenaPose; angle: number; yaw?: number; pivotTurn?: number; footTarget?: Point; footStrength?: number; kickLeg?: number; alpha: number; velocityX: number; velocityY: number; gaitDistance: number; phase: number; power?: number; chargePreparation?: number; chargeStrength?: number; gripMode?: 'wrist' | 'waist' | 'ankle'; gripLocked?: boolean; gripStrength?: number; gripTarget?: Point; secondaryGripTarget?: Point; animation?: ArenaFighterAnimation; motionEpoch?: number | string; motionImmediate?: boolean };
 
 /** Being lifted changes screen height, while occlusion follows the ground beneath each fighter. */
 export function arenaDrawOrder<T extends { y: number; index: number; depthY?: number }>(actors: readonly T[]): T[] {
@@ -133,6 +133,34 @@ function groundedFeet(actor: ArenaActor, state: ArenaFighterAnimation, clock: nu
   }) as [Point, Point];
 }
 
+/** Meet between the chests, not between the feet of a body leaning out from a held wrist. */
+export function arenaWristGripPoint(first: ArenaActor, second: ArenaActor, clock: number): Point {
+  const shoulder = (actor: ArenaActor): Point => {
+    const personality = actor.index % 4;
+    const breath = Math.sin((clock + actor.index * 719) / (580 + personality * 65));
+    const held = actor.pose === 'held';
+    const fallback = held ? { crouch: 1.6, lean: 3, hipX: 0 } : actor.pose === 'brace' ? { crouch: 3.2, lean: -7 + breath * .5, hipX: -1.2 + breath * .3 } : { crouch: 3.1 + breath * .35, lean: 6 + breath * .8, hipX: Math.sin(clock / 420 + actor.index) * .55 };
+    const reuse = !actor.motionImmediate && actor.animation?.pose === actor.pose;
+    const motion = reuse && actor.animation?.motion || fallback;
+    const hip = reuse && !held && actor.animation?.supportHip || { x: motion.hipX, y: -20 + motion.crouch };
+    const width = .28 + Math.abs(Math.cos(actor.yaw ?? 0)) * .72;
+    const chest = rotate({ x: (18 + actor.index % 3) * .43 * width, y: -20 }, motion.lean * Math.PI / 180);
+    const body = rotate({ x: (hip.x + chest.x) * actor.scale * actor.facing, y: (hip.y + chest.y) * actor.scale }, actor.angle);
+    return { x: actor.x + body.x, y: actor.y - actor.scale * 2 + body.y };
+  };
+  const a = shoulder(first), b = shoulder(second);
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + 12 };
+}
+
+const contactContext = Object.fromEntries(['save', 'restore', 'translate', 'rotate', 'scale', 'fillRect', 'beginPath', 'ellipse', 'fill', 'moveTo', 'lineTo', 'closePath'].map(name => [name, () => {}])) as unknown as CanvasRenderingContext2D;
+
+/** Predict the exact current pose without advancing the scene's animation or painting pixels. */
+export function sampleArenaFighterContacts(actor: ArenaActor, clock: number) {
+  const animation = actor.animation ? structuredClone(actor.animation) : createArenaFighterAnimation();
+  drawArenaFighter(contactContext, { ...actor, animation }, clock);
+  return animation.contactPoints!;
+}
+
 /** One skin palette covers every bare body part; motion uses a small, connected skeleton. */
 export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActor, clock: number) {
   const { candidate, index, x, y, scale, facing, pose, phase } = actor;
@@ -156,9 +184,9 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const target: Motion = { crouch: .2 + breath * .2, lean: breath * .7, hipX: breath * .12, head: breath * 1.1, mouth: 1.2, backX: -9, backY: 0, frontX: 10, frontY: 0, spread: 1 + personality * .035, contact: actor.gripTarget ? clamp(actor.gripStrength ?? 1) : 0, shoulderLift: actor.gripTarget ? clamp((y - actor.gripTarget.y - 66) / (scale * 14)) * 3 : 0, clapTurn: ['idle', 'walk', 'run', 'bow', 'clap'].includes(pose) ? 1 : 0, cheerTurn: 0, applause: 0 };
   if (pose === 'guard' || pose === 'grapple') { target.crouch = 1.2 + personality * .25; target.lean = 2 + personality * .4; target.backX = -5; target.backY = -12; target.frontX = 15; target.frontY = -15; target.head = -target.lean * .3; }
   if (pose === 'grapple') { target.crouch = 3.1 + breath * .35; target.hipX = Math.sin(clock / 420 + index) * .55; target.lean = 6 + breath * .8; target.spread += .16; }
-  if (pose === 'brace') { target.crouch = 4.8; target.hipX = -1.2 + breath * .3; target.lean = -7 + breath * .5; target.backX = -1; target.backY = -12; target.frontX = 16; target.frontY = -14; target.spread += .35; target.mouth = .9; }
-  if (pose === 'push') { target.crouch = 3.4 + breath * .3; target.hipX = 1.2; target.lean = 10 + power * 5; target.backX = 7; target.backY = -14; target.frontX = 22; target.frontY = -16; target.spread += .22; target.mouth = 1.8; }
-  if (pose === 'dodge') { target.crouch = 4; target.hipX = -2; target.lean = -8; target.backX = -5; target.backY = -17; target.frontX = 13; target.frontY = -22; target.head = 3; }
+  if (pose === 'brace') { target.crouch = 3.2; target.hipX = -1.2 + breath * .3; target.lean = -7 + breath * .5; target.backX = -1; target.backY = -12; target.frontX = 16; target.frontY = -14; target.spread += .20; target.mouth = .9; }
+  if (pose === 'push') { target.crouch = 2.8 + breath * .2; target.hipX = 1.2; target.lean = 10 + power * 5; target.backX = 7; target.backY = -14; target.frontX = 22; target.frontY = -16; target.spread += .16; target.mouth = 1.8; }
+  if (pose === 'dodge') { target.crouch = 2.7; target.hipX = -2; target.lean = -14; target.backX = -5; target.backY = -17; target.frontX = 13; target.frontY = -22; target.head = 6; }
   if (pose === 'lift') {
     const drive = ease((phase - .16) / .76);
     target.crouch = mix(6.4, 1.2, drive); target.hipX = mix(-1.4, 2.1, drive); target.lean = mix(11, -10, drive);
@@ -172,7 +200,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   if (pose === 'trip') { target.crouch = 3.8; target.lean = 13; target.hipX = 1; target.backX = 4; target.backY = -15; target.frontX = 19; target.frontY = -17; }
   if (pose === 'suplex') { const arch = ease((phase - .56) / .34); target.crouch = mix(6, 2, ease((phase - .34) / .22)) + arch * 6; target.lean = mix(10, -35, arch); target.hipX = mix(1, -3, arch); target.backX = 6; target.backY = mix(-20, -29, arch); target.frontX = 17; target.frontY = mix(-24, -31, arch); target.mouth = 2.4; }
   if (pose === 'drag') { target.crouch = 12; target.lean = 26; target.hipX = 1.5; target.backX = 6; target.backY = 4; target.frontX = 16; target.frontY = 6; target.mouth = 2; }
-  if (pose === 'held') { target.crouch = 2; target.backX = -5; target.backY = -8; target.frontX = 12; target.frontY = -9; target.mouth = 2; }
+  if (pose === 'held') { target.crouch = 1.6; target.lean = 3; target.backX = -10; target.backY = -17; target.frontX = 12; target.frontY = -12; target.mouth = 2; }
   if (pose === 'roll') { target.crouch = 5; target.lean = 20; target.backX = 2; target.backY = -22; target.frontX = 11; target.frontY = -22; target.head = 4; target.mouth = 2; }
   if (pose === 'sidekick') { target.crouch = 2; target.lean = -8; target.backX = -10; target.backY = -21; target.frontX = 13; target.frontY = -24; target.mouth = 2.3; }
   if (pose === 'stunned') { target.crouch = .4; target.lean = 0; target.backX = -11; target.backY = -2; target.frontX = 12; target.frontY = -2; target.mouth = 1; }
@@ -204,9 +232,9 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   }
   if (moving) {
     const activity = ease(speed / 120), running = pose === 'run' ? ease((speed - 35) / 80) : 0;
-    target.crouch = mix(target.crouch, Math.max(target.crouch, 2.2 + running) + Math.abs(Math.sin(gait)) * .65, activity);
+    target.crouch = mix(target.crouch, Math.max(target.crouch, 1.0 + running * 1.1) + Math.abs(Math.sin(gait)) * .35, activity);
     const depth = Math.abs(actor.velocityY) / Math.max(1, speed);
-    target.crouch = Math.max(target.crouch, 3.5 * ease(depth) + Math.abs(Math.sin(gait)) * .3);
+    target.crouch = Math.max(target.crouch, 1.8 * ease(depth) + Math.abs(Math.sin(gait)) * .2);
     target.hipX += Math.sin(gait) * .45 * activity;
     if (pose === 'walk' || pose === 'run') {
       const swing = Math.cos(gait + personality * .07), reach = mix(4.5, 7, running) * activity;
@@ -245,6 +273,11 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     state.localFeet ??= airFeet;
     const amount = reset ? 1 : 1 - Math.exp(-delta / 60);
     feet = state.localFeet.map((foot, leg) => pointMix(foot, airFeet[leg], amount)) as [Point, Point];
+    if (pose === 'sidekick') {
+      // Between the two hops the soles really plant; rising knees tuck only after push-off.
+      const tuck = ease(((actor.depthY ?? y) - y) / (scale * 6));
+      feet = feet.map((foot, leg) => pointMix({ x: leg ? 6 : -5, y: 0 }, foot, tuck)) as [Point, Point];
+    }
   } else feet = groundedFeet(actor, state, clock, moving, reset, motion.spread);
   if (actor.footTarget && (pose === 'trip' || pose === 'sidekick')) {
     const leg = actor.kickLeg ?? 1, root = rotate({ x: actor.footTarget.x - x, y: actor.footTarget.y - y }, -actor.angle);
@@ -253,18 +286,41 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const yaw = actor.yaw ?? 0, turnWidth = .28 + Math.abs(Math.cos(yaw)) * .72, front = Math.cos(yaw) >= 0;
   const hipOffsets = [-4.5, 4.5].map(offset => ({ x: offset * Math.cos(yaw), y: offset * Math.sin(yaw) * .42 }));
   if (!air) {
-    // Move weight over the planted heels. Clamping the feet instead dragged them when direction changed.
+    // A turn takes a short replacement step before a heel can pull the pelvis down.
+    feet = feet.map((foot, leg) => {
+      const memory = state.feet![leg];
+      const reach = Math.hypot(foot.x - hip.x - hipOffsets[leg].x, foot.y - hip.y - hipOffsets[leg].y);
+      if (!reset && actor.pivotTurn === undefined && !memory.replant && !memory.swinging && reach > 20.7) {
+        memory.replant = { at: clock, from: { ...memory.ground }, to: { x: x + facing * (leg ? 4 : -4) * scale + actor.velocityX * .135, y: y + actor.velocityY * .135 } };
+        memory.to = { ...memory.replant.to };
+      }
+      if (!memory.replant) return foot;
+      const p = clamp((clock - memory.replant.at) / 135);
+      memory.ground = pointMix(memory.replant.from, memory.replant.to, ease(p));
+      memory.lift = Math.sin(p * Math.PI) * 3.2; memory.swinging = true;
+      if (p >= 1) {
+        const local = { x: (memory.ground.x - x) / (scale * facing), y: (memory.ground.y - y) / scale };
+        if (Math.hypot(local.x - hip.x - hipOffsets[leg].x, local.y - hip.y - hipOffsets[leg].y) > 20.7) {
+          // A second direction change during the step needs another landing, not a deep squat.
+          memory.replant = { at: clock, from: { ...memory.ground }, to: { x: x + facing * (leg ? 4 : -4) * scale + actor.velocityX * .135, y: y + actor.velocityY * .135 } };
+          memory.to = { ...memory.replant.to };
+        } else { memory.anchor = { ...memory.ground }; memory.to = { ...memory.ground }; memory.swinging = false; memory.lift = 0; memory.replant = undefined; }
+      }
+      return { x: (memory.ground.x - x) / (scale * facing), y: (memory.ground.y - y) / scale - memory.lift };
+    }) as [Point, Point];
+    // Only a supporting heel fixes the pelvis. The other leg is free to take its step.
+    const support = feet.map((_, leg) => leg).filter(leg => !state.feet![leg].swinging && state.feet![leg].lift < .05);
     const reach = 21.7;
-    const lowX = Math.max(...feet.map((foot, leg) => foot.x - hipOffsets[leg].x - reach));
-    const highX = Math.min(...feet.map((foot, leg) => foot.x - hipOffsets[leg].x + reach));
+    const lowX = Math.max(-Infinity, ...support.map(leg => feet[leg].x - hipOffsets[leg].x - reach));
+    const highX = Math.min(Infinity, ...support.map(leg => feet[leg].x - hipOffsets[leg].x + reach));
     const follow = reset ? 1 : 1 - Math.exp(-delta / 110);
     hip.x = Math.max(lowX, Math.min(highX, mix(state.supportHip?.x ?? hip.x, hip.x, follow)));
-    const lowestHip = Math.max(...feet.map((foot, leg) => foot.y - hipOffsets[leg].y - Math.sqrt(Math.max(0, reach ** 2 - (foot.x - hip.x - hipOffsets[leg].x) ** 2))));
+    const lowestHip = Math.max(-Infinity, ...support.map(leg => feet[leg].y - hipOffsets[leg].y - Math.sqrt(Math.max(0, reach ** 2 - (feet[leg].x - hip.x - hipOffsets[leg].x) ** 2))));
     hip.y = Math.max(lowestHip, mix(state.supportHip?.y ?? hip.y, hip.y, follow));
   }
   state.supportHip = { ...hip };
   const hips = hipOffsets.map(offset => ({ x: hip.x + offset.x, y: hip.y + offset.y }));
-  if (air) feet = feet.map((foot, leg) => reachable(hips[leg], foot, 21.8)) as [Point, Point];
+  feet = feet.map((foot, leg) => air || state.feet![leg].swinging || state.feet![leg].lift > .05 ? reachable(hips[leg], foot, 21.8) : foot) as [Point, Point];
   state.localFeet = feet;
   const depthStride = moving ? ease((Math.abs(actor.velocityY) / Math.max(1, speed) - .18) / .55) : 1;
   state.depthStride = reset ? depthStride : mix(state.depthStride ?? depthStride, depthStride, 1 - Math.exp(-delta / 160));
@@ -275,7 +331,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   let hands = [{ x: motion.backX, y: motion.backY }, { x: motion.frontX, y: motion.frontY }];
   if (actor.gripTarget) {
     const secondary = actor.secondaryGripTarget ?? { x: actor.gripTarget.x - facing * scale * 7, y: actor.gripTarget.y + scale * 2 };
-    const follow = reset ? 1 : 1 - Math.exp(-delta / 65);
+    const follow = reset || actor.gripLocked ? 1 : 1 - Math.exp(-delta / 65);
     state.grip = state.grip ? pointMix(state.grip, actor.gripTarget, follow) : { ...actor.gripTarget };
     state.secondaryGrip = state.secondaryGrip ? pointMix(state.secondaryGrip, secondary, follow) : { ...secondary };
   }
@@ -284,7 +340,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
       const root = rotate({ x: point.x - x, y: point.y - (y - 2 * scale) }, -actor.angle);
       return rotate({ x: root.x / (scale * facing) - hip.x, y: root.y / scale - hip.y }, -lean);
     };
-    hands = [pointMix(hands[0], localHand(state.secondaryGrip), motion.contact), pointMix(hands[1], localHand(state.grip), motion.contact)];
+    hands = [pose === 'held' && actor.gripMode === 'wrist' ? hands[0] : pointMix(hands[0], localHand(state.secondaryGrip), motion.contact), pointMix(hands[1], localHand(state.grip), motion.contact)];
   }
   hands = hands.map((hand, arm) => reachable(shoulders[arm], hand, 21.3));
   if (pose === 'clap' && motion.contact < .03 && target.frontX - target.backX < 5.01 && hands[1].x - hands[0].x < 5.4) {
@@ -345,7 +401,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     ctx.translate(x, rootY); ctx.rotate(actor.angle); ctx.scale(scale * facing, scale); ctx.translate(0, -pivotY);
   } else { ctx.translate(x, y - 2 * scale); ctx.rotate(actor.angle); ctx.scale(scale * facing, scale); }
   const worldPoint = (point: Point): Point => { const p = rotate({ x: point.x * scale * facing, y: (point.y - pivotY) * scale }, actor.angle); return { x: x + p.x, y: rootY + p.y }; };
-  state.contactPoints = { origin: { x, y }, hands: hands.map(hand => worldPoint(bodyPoint(hand))), waist: worldPoint(torsoPoint({ x: 0, y: -4 })), feet: feet.map(worldPoint) };
+  const headTop = rotate({ x: 0, y: -12 }, motion.head * Math.PI / 180);
+  state.contactPoints = { origin: { x, y }, head: worldPoint(torsoPoint({ x: headTop.x, y: headY + headTop.y })), hands: hands.map(hand => worldPoint(bodyPoint(hand))), waist: worldPoint(torsoPoint({ x: 0, y: -4 })), feet: feet.map(worldPoint) };
   const rect = (px: number, py: number, width: number, height: number, color: string) => { ctx.fillStyle = color; ctx.fillRect(px, py, width, height); };
   const leg = (back: boolean) => {
     const index = back ? 0 : 1, ankle = feet[index], joint = knees[index], origin = hips[index];

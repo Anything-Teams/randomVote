@@ -20,8 +20,9 @@ export function racingFocusIds(timeline: RacingTimeline, elapsed: number): strin
     const ranked = racingStandings(timeline, elapsed), position = ranked.findIndex(item => item.id === obstacle.actorId);
     return [obstacle.actorId, ...ranked.slice(Math.max(0, position - 1), position + 2).map(item => item.id)];
   });
+  const bumpActors = (timeline.bumps ?? []).filter(item => elapsed >= item.start && elapsed < item.end).flatMap(item => [item.actorId, item.targetId]);
   const trickActors = (timeline.tricks ?? []).filter(item => elapsed >= item.start - 500 && elapsed < item.recovered + 500).flatMap(item => [item.actorId, item.targetId]);
-  return [...new Set([...leaders, ...straightOpponents, ...incidentActors, ...courseActors, ...trickActors])].filter(id => leader - readRacingTravel(timeline, id, elapsed) <= RACING_FOCUS_GAP);
+  return [...new Set([...leaders, ...straightOpponents, ...incidentActors, ...courseActors, ...trickActors, ...bumpActors])].filter(id => leader - readRacingTravel(timeline, id, elapsed) <= RACING_FOCUS_GAP);
 }
 
 /** A fixed distance projection and persistent horses replace rank-based scene cuts. */
@@ -42,7 +43,8 @@ export function placeRacingField(camera: RacingCamera, candidates: Candidate[], 
   return candidates.map((candidate, index) => {
     const isFeatured = focus.includes(candidate.id);
     // Each horse keeps its course row while focus only controls the camera and labels.
-    const targetY = h * (candidates.length <= 1 ? .79 : .54 + index / (candidates.length - 1) * .36);
+    const fieldDepth = Math.min(h * .36, 34 * scale * Math.max(1, candidates.length - 1));
+    const targetY = candidates.length <= 1 ? h * .79 : h * .72 - fieldDepth / 2 + index / (candidates.length - 1) * fieldDepth;
     const targetScale = scale;
     let pose = camera.horses.get(candidate.id);
     if (!pose || reset) { pose = { y: targetY, scale: targetScale }; camera.horses.set(candidate.id, pose); }

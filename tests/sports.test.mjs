@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 const compiled = await build({ entryPoints: ['src/sports.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createSportsOrder } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const arenaCompiled = await build({ entryPoints: ['src/arenaLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { arenaRounds, arenaRanks, arenaThrow, arenaExchange, arenaBeat, arenaAction, arenaFocusRound, arenaMiniExchanges, arenaLocalContact, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaGuardTarget, arenaReleaseTarget, arenaMove, ARENA_MAX_GROUND_SPEED } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
+const { arenaRounds, arenaRanks, arenaEliminatedIds, arenaThrow, arenaExchange, arenaBeat, arenaAction, arenaFocusRound, arenaMiniExchanges, arenaLocalContact, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaGuardTarget, arenaReleaseTarget, arenaMove, ARENA_MAX_GROUND_SPEED } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
 const fighterCompiled = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { arenaDrawOrder } = await import(`data:text/javascript;base64,${Buffer.from(fighterCompiled.outputFiles[0].text).toString('base64')}`);
 const storyCompiled = await build({ entryPoints: ['src/arenaStoryLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
@@ -81,7 +81,9 @@ test('arena tactics use living, distinct participants and preserve every drawn r
       const order = [...ids.slice(rotation), ...ids.slice(0, rotation)];
       const rounds = arenaRounds(order, duration);
       const alive = new Set(order);
-      assert.equal(rounds.length, size - 1);
+      const eliminations = rounds.flatMap(arenaEliminatedIds);
+      assert.equal(eliminations.length, size - 1);
+      assert.deepEqual(new Set(eliminations), new Set(order.slice(1)), 'each drawn loser leaves exactly once, including a two-person shove');
       let previousEnd = 0;
       for (const round of rounds) {
         assert.ok(round.start + 0.000001 >= previousEnd, `overlapping rounds for ${size} players: ${round.start} < ${previousEnd}`);
@@ -96,10 +98,13 @@ test('arena tactics use living, distinct participants and preserve every drawn r
         }
         const before = arenaRanks(order, round.resolve - 0.01, duration);
         const after = arenaRanks(order, round.resolve, duration);
-        assert.equal(before[round.victim], undefined);
-        assert.equal(after[round.victim], order.indexOf(round.victim) + 1);
+        for (const id of arenaEliminatedIds(round)) {
+          assert.ok(alive.has(id) && id !== round.aggressor);
+          assert.equal(before[id], undefined);
+          assert.equal(after[id], order.indexOf(id) + 1);
+          alive.delete(id);
+        }
         assert.equal(after[order[0]], round.final ? 1 : undefined);
-        alive.delete(round.victim);
         previousEnd = round.end;
       }
       assert.deepEqual(arenaRanks(order, duration, duration), Object.fromEntries(order.map((id, rank) => [id, rank + 1])));
@@ -277,7 +282,7 @@ test('focus reserves physical approach and uses living actors without changing t
       const round = arenaFocusRound(order, elapsed, duration);
       if (!round) continue;
       const ranks = arenaRanks(order, elapsed, duration);
-      for (const part of arenaAction(round, elapsed).actors) assert.ok(order.includes(part.id) && !ranks[part.id] || part.id === round.victim && elapsed >= round.impact);
+      for (const part of arenaAction(round, elapsed).actors) assert.ok(order.includes(part.id) && (!ranks[part.id] || arenaEliminatedIds(round).includes(part.id) && elapsed >= round.impact));
       if (elapsed < round.start) assert.equal(arenaAction(round, elapsed).lift, 0, 'early arrival waits in an active guard instead of attacking ahead of time');
     }
     assert.ok(rounds.filter(round => round.tactic === 'team' || round.tactic === 'betrayal').length <= 1);

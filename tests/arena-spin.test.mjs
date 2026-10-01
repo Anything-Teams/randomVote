@@ -40,10 +40,10 @@ test('a defender is briefly lifted, plants fully, changes the grip and then coun
   assert.equal(turning.liftedId, round.victim);
   assert.deepEqual(turning.attackers, [round.aggressor]);
   assert.ok(turning.actors.every(actor => actor.gripId), 'both bodies remain connected through the turn');
-  assert.ok(turning.lift > 40);
+  assert.ok(turning.lift > 11 && turning.lift <= 12, 'a pivot lifts briefly while keeping the waist within hand reach');
   assert.ok(release.actors.every(actor => !actor.gripId), 'the grip is released when the throw starts');
   assert.equal(release.liftedId, round.victim);
-  assert.equal(release.lift, 42);
+  assert.equal(release.lift, 12);
   assert.match(arenaStoryState(round, round.start + 3800).action, /한 바퀴|함께 회전/);
 });
 

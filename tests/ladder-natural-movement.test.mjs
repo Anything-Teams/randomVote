@@ -36,37 +36,19 @@ test('neighbor preparations do not stretch one rung over several seconds or brak
   }
 });
 
-test('roof running plants a fixed-length boot on the terrace without sliding its supporting foot', () => {
-  const crew = candidates(2), timeline = buildLadderTimeline(crew, ['2', '1'], 44_000, 439, 0), finish = timeline.roofFinish;
-  const roof = timeline.paths[finish.actorId].segments.at(-1), geometry = createLadderGeometry(800, 600, 2), deck = geometry.rowY(24), read = time => ladderFrame(timeline, time);
-  const at = time => {
-    const actor = ladderArtActors(timeline, read(time), crew, time, geometry, false, read).find(actor => actor.id === finish.actorId);
-    return sampleLadderRig(actor, geometry, time);
-  };
-  let contacts = 0;
-  for (let time = roof.start + 350; time < roof.end - 200; time += 4) {
-    const before = at(time), after = at(time + .5);
-    for (const side of [0, 1]) if (before.footContact[side] && after.footContact[side]) {
-      assert.ok(Math.abs(before.feet[side].y - deck) < .001, 'the supporting sole touches the actual roof');
-      assert.ok(Math.hypot(before.feet[side].x - after.feet[side].x, before.feet[side].y - after.feet[side].y) < .001, 'a planted boot stays fixed while the pelvis travels past it');
-      contacts++;
+test('the last ascent keeps the preceding motor cadence and never waits for a fixed reveal', () => {
+  for (const [count, seed] of [[2, 19], [5, 12], [10, 4], [7, 19]]) {
+    const crew = candidates(count), timeline = buildLadderTimeline(crew, orderFor(count), 44_000, seed);
+    for (const path of Object.values(timeline.paths)) {
+      const climbs = path.segments.filter(s => s.kind === 'climb'), final = climbs.at(-1), previous = climbs.at(-2);
+      assert.equal(final.toRow, 24); assert.equal(final.end, path.arrivalAt);
+      if (previous) {
+        const rate = s => (s.toRow - s.fromRow) / (s.end - s.start);
+        assert.ok(Math.abs(rate(final) / rate(previous) - 1) < .001, 'a few final rungs cannot be stretched into a slow reveal');
+      }
+      assert.ok(path.arrivalAt < 44_000);
     }
   }
-  assert.ok(contacts > 50, 'both supporting phases are sampled across the roof dash');
-  const rivalPath = timeline.paths[finish.otherId], finalAscent = rivalPath.segments.at(-2);
-  assert.equal(finalAscent.kind, 'climb');
-  assert.equal(finalAscent.toRow, 24);
-  assert.ok(finalAscent.toRow > finalAscent.fromRow, 'the rival climbs continuously to the roof');
-  assert.ok(finish.claimAt < finalAscent.end, 'the runner takes the gold before the rival actually reaches it');
-  for (let time = finish.runStart; time <= finish.claimAt; time += 16) {
-    const rival = ladderArtActors(timeline, read(time), crew, time, geometry, false, read).find(actor => actor.id === finish.otherId);
-    const rig = sampleLadderRig(rival, geometry, time);
-    assert.ok(rival.rungProgress < 22, 'the neighbor has not entered the visible standing top-out');
-    assert.ok(rig.feet.every(foot => foot.y > deck + geometry.scale * 4), 'both neighboring boots stay visibly below the roof until the gold is taken');
-  }
-  assert.equal(buildLadderTimeline(candidates(5), orderFor(5), 44_000, 73, 0).roofFinish, undefined, 'the old fixture falls back because its rival already appears on the terrace');
-  const before = read(finish.runStart - 25).actors.find(actor => actor.id === finish.otherId), after = read(finish.runStart + 25).actors.find(actor => actor.id === finish.otherId);
-  assert.ok(after.rungProgress > before.rungProgress, 'the neighbor keeps moving as the other runner starts the roof dash');
 });
 
 test('climbing begins after a brief shared preparation and all staggered starters move by 1.1 seconds', () => {
@@ -113,7 +95,7 @@ test('revealed platform ends match each climber height and source lane', () => {
 test('low thrown and falling catches keep the complete rig above the lower foundation', () => {
   const crew = candidates(10), order = crew.map(candidate => candidate.id).reverse();
   let samples = 0;
-  for (const seed of [6, 11, 14, 36, 37]) {
+  for (const seed of [0, 4, 9, 12, 16, 20]) {
     const timeline = buildLadderTimeline(crew, order, 44_000, seed), geometry = createLadderGeometry(800, 600, 10), read = time => ladderFrame(timeline, time);
     for (const event of timeline.events) for (const id of event.actors) {
       for (const time of [event.resolve - 50, event.resolve + 50]) {

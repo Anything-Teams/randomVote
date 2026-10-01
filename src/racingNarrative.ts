@@ -16,8 +16,9 @@ export type RacingStraightSwap = { aheadId: string; behindId: string; start: num
 export type RacingStraightWave = { start: number; end: number; beforeOrder: string[]; swaps: RacingStraightSwap[] };
 export type RacingCourseChallenge = { id: string; kind: 'hay-jump' | 'puddle'; actorId: string; distance: number; encounter: number; outcome: 'clear' | 'clip' | 'slip'; impact: number; lowest: number; recovered: number; loss: number; lossCurve?: { at: number; lost: number }[]; catchupStart?: number; catchupEnd?: number };
 export type RacingTrick = { id: string; kind: 'rear-kick' | 'beanbag'; actorId: string; targetId: string; start: number; release: number; impact: number; lowest: number; recovered: number; loss: number };
+export type RacingBump = { actorId: string; targetId: string; start: number; impact: number; lowest: number; end: number; loss: number };
 export type RacingLateFall = { actorId: string; impact: number; lowest: number; recovered: number; outcome: 'clip'; approachOrder: string[]; distanceCurve?: { at: number; distance: number }[] };
-export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[]; obstacles: RacingCourseChallenge[]; tricks: RacingTrick[]; lateFall?: RacingLateFall; straight: { start: number; waves: RacingStraightWave[] } };
+export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[]; obstacles: RacingCourseChallenge[]; tricks: RacingTrick[]; bumps: RacingBump[]; lateFall?: RacingLateFall; straight: { start: number; waves: RacingStraightWave[] } };
 export type RacingStanding = { id: string; distance: number; rank: number; finished: boolean; finishTime: number };
 export type RacingIncidentStatus = { stage: 'setup' | 'action' | 'outcome'; beforeRank: number; currentRank: number; afterRank: number; opponentIds: string[]; overtakenIds: string[]; passedByIds: string[]; nextRivalId?: string };
 export const RACING_STORIES: { kind: RacingIncidentKind; title: string; setup: string; action: string; outcome: string }[] = [
@@ -134,7 +135,7 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   const waves = planStraightWaves(straightOrder, finishOrder, straightStart, finish);
   const finishStep = Math.min(240 * scale, 2000 / Math.max(1, ids.length - 1));
   const finishTimes = Object.fromEntries(finishOrder.map((id, rank) => [id, finish + rank * finishStep]));
-  const timeline: RacingTimeline = { start, finish, ids, finishOrder, finishTimes, knots: knots.sort((a, b) => a.at - b.at), incidents, obstacles: [], tricks: [], straight: { start: straightStart, waves } };
+  const timeline: RacingTimeline = { start, finish, ids, finishOrder, finishTimes, knots: knots.sort((a, b) => a.at - b.at), incidents, obstacles: [], tricks: [], bumps: [], straight: { start: straightStart, waves } };
   planCourseChallenges(timeline);
   reconcileCourseChallenges(timeline);
   planFallRecoveries(timeline);
@@ -142,6 +143,7 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   reconcileCourseChallenges(timeline);
   planFallRecoveries(timeline);
   planLateFall(timeline);
+  planRacingBumps(timeline);
   return timeline;
 }
 
@@ -208,8 +210,56 @@ export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed
   }
   const lost = timeline.incidents.reduce((sum, incident) => sum + racingIncidentSetback(incident, id, elapsed), 0)
     + timeline.obstacles.filter(obstacle => obstacle.actorId === id).reduce((sum, obstacle) => sum + racingObstacleLoss(obstacle, elapsed), 0)
-    + (timeline.tricks ?? []).filter(trick => trick.targetId === id).reduce((sum, trick) => sum + racingTrickLoss(trick, elapsed), 0);
+    + (timeline.tricks ?? []).filter(trick => trick.targetId === id).reduce((sum, trick) => sum + racingTrickLoss(trick, elapsed), 0)
+    + (timeline.bumps ?? []).filter(bump => bump.targetId === id).reduce((sum, bump) => sum + racingBumpLoss(bump, elapsed), 0);
   return clamp(plannedDistance(timeline, id, elapsed) - lost);
+}
+
+export function racingBumpLoss(bump: RacingBump, elapsed: number) {
+  return setbackLoss(elapsed, bump.impact, bump.lowest, bump.end, bump.loss);
+}
+
+export function activeRacingBump(timeline: RacingTimeline, elapsed: number) {
+  return timeline.bumps?.find(bump => elapsed >= bump.start && elapsed < bump.end);
+}
+
+/** A defender makes contact only when an adjacent lane's actual nose catches it. */
+function planRacingBumps(timeline: RacingTimeline) {
+  if (timeline.ids.length < 2) return;
+  const scale = (timeline.finish - timeline.start) / 33500;
+  const windows = [[timeline.start + 13300 * scale, timeline.start + 16100 * scale], [timeline.straight.start + 700 * scale, timeline.finish - 2700 * scale]];
+  const occupied = (id: string, start: number, end: number) => timeline.obstacles.some(item => item.actorId === id && item.encounter - 1600 * scale < end && item.recovered + 300 * scale > start)
+    || timeline.tricks.some(item => [item.actorId, item.targetId].includes(id) && item.start < end && item.recovered > start)
+    || timeline.incidents.some(item => ['balance', 'gust', 'fatigue'].includes(item.kind) && [item.actorId, item.rivalId].includes(id) && item.start < end && item.end > start)
+    || timeline.lateFall?.actorId === id && timeline.lateFall.impact - 450 * scale < end;
+  for (const [from, to] of windows) for (let at = from; at < to; at += 80 * scale) {
+    const standings = racingStandings(timeline, at), lead = standings[0].distance;
+    for (let index = 0; index < timeline.ids.length - 1; index++) {
+      const a = timeline.ids[index], b = timeline.ids[index + 1];
+      const difference = (time: number) => readRacingDistance(timeline, a, time) - readRacingDistance(timeline, b, time);
+      if (difference(at) * difference(at + 80 * scale) >= 0) continue;
+      let left = at, right = at + 80 * scale;
+      const initialSign = Math.sign(difference(at));
+      for (let iteration = 0; iteration < 28; iteration++) { const middle = (left + right) / 2; if (Math.sign(difference(middle)) === initialSign) left = middle; else right = middle; }
+      const impact = (left + right) / 2, start = impact - 1100 * scale, lowest = impact + 350 * scale, end = impact + 1300 * scale;
+      const actorId = initialSign > 0 ? a : b, targetId = initialSign > 0 ? b : a;
+      if (lead - readRacingDistance(timeline, actorId, impact) > .032 || occupied(a, start, end) || occupied(b, start, end)) continue;
+      let minimumSpeed = Infinity;
+      for (let sample = impact; sample < lowest; sample += 16 * scale) minimumSpeed = Math.min(minimumSpeed, (readRacingDistance(timeline, targetId, sample + 8) - readRacingDistance(timeline, targetId, sample - 8)) / 16);
+      let loss = Math.min(.0012, Math.max(0, minimumSpeed) * (lowest - impact) / 1.5 * .22);
+      // Recovery shares the existing acceleration budget, so a bump cannot add a late burst.
+      const pace = 1 / (timeline.finish - timeline.start);
+      for (let sample = lowest + 8; sample < end; sample += 8) {
+        const speed = (readRacingDistance(timeline, targetId, sample + 8) - readRacingDistance(timeline, targetId, sample - 8)) / 16;
+        const p = (sample - lowest) / (end - lowest), gainPerLoss = 6 * p * (1 - p) / (end - lowest);
+        loss = Math.min(loss, Math.max(0, pace * 1.47 - speed) / gainPerLoss);
+      }
+      if (loss < .00025) continue;
+      const bump = { actorId, targetId, start, impact, lowest, end, loss }, contactPlan = { ...timeline, bumps: [bump] };
+      if ([100, 200, 300].some(age => Math.abs(readRacingDistance(contactPlan, actorId, impact + age * scale) - readRacingDistance(contactPlan, targetId, impact + age * scale)) > .001)) continue;
+      timeline.bumps.push(bump); return;
+    }
+  }
 }
 
 /** A rare runner already near the front stays in contention until a visible finish-line misstep. */

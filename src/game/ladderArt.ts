@@ -127,6 +127,8 @@ export function ladderArtActors(timeline: LadderTimeline, frame: LadderFrame, ca
     timeline.events.filter(event => event.actors.includes(actor.id)).forEach(event => {
       boundaries.push(event.action, event.resolve, event.end);
     });
+    const finish = timeline.roofFinish;
+    if (finish && [finish.actorId, finish.otherId].includes(actor.id)) boundaries.push(finish.runStart, finish.contactAt!, finish.releaseAt!, finish.catchAt!, finish.claimAt, finish.recoverAt!);
     const boundary = Math.max(-Infinity, ...boundaries.filter(time => time <= elapsed));
     const next = Math.min(Infinity, ...boundaries.filter(time => time > boundary + .001));
     // Pulling the body onto the rung includes the whole reach of the free arm.
@@ -137,6 +139,14 @@ export function ladderArtActors(timeline: LadderTimeline, frame: LadderFrame, ca
     if (!continuousPull && elapsed >= boundary && elapsed < boundary + duration) {
       const previous = readFrame(Math.max(0, boundary - .001)).actors.find(item => item.id === actor.id)!;
       const previousArt = adapt(previous);
+      if (previousArt.interaction?.role === 'thrower' && previousArt.interaction.phase >= .32 && previousArt.interaction.phase < .67) {
+        const other = readFrame(Math.max(0, boundary - .001)).actors.find(item => item.id === previousArt.interaction!.partnerId);
+        if (other) {
+          const rig = rawLadderRig(adapt(other), geometry, boundary - .001, reduced);
+          const direction = Math.sign((previousArt.toLane ?? previousArt.lane) - (previousArt.fromLane ?? previousArt.lane)) || 1;
+          previousArt.contactTargets = previousArt.interaction.kind === 'top-throw' ? rig.feet : [rig.hands[1], { x: rig.hip.x + direction * 5.8 * geometry.scale, y: rig.hip.y - geometry.scale }];
+        }
+      }
       actor.transition = { from: previousArt, progress: (elapsed - boundary) / duration, clock: boundary, shift: { x: geometry.laneX(actor.lane) - geometry.laneX(previousArt.lane), y: geometry.rowY(actor.rungProgress) - geometry.rowY(previousArt.rungProgress) } };
     }
     return actor;
@@ -148,7 +158,7 @@ export function ladderArtActors(timeline: LadderTimeline, frame: LadderFrame, ca
     const victim = rawLadderRig(partner, geometry, elapsed, reduced), direction = Math.sign((actor.toLane ?? actor.lane) - (actor.fromLane ?? actor.lane)) || 1;
     // One hand catches a wrist; the other takes the near side of the belt.
     // These are the actual rendered victim points, rather than an assumed torso.
-    actor.contactTargets = [victim.hands[1], { x: victim.hip.x + direction * 5.8 * geometry.scale, y: victim.hip.y - geometry.scale }];
+    actor.contactTargets = actor.interaction.kind === 'top-throw' ? victim.feet : [victim.hands[1], { x: victim.hip.x + direction * 5.8 * geometry.scale, y: victim.hip.y - geometry.scale }];
   });
   return actors;
 }
@@ -170,7 +180,15 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
   const catchLane = actor.toLane ?? actor.gripLane ?? actor.lane;
   const catchHands: [Point, Point] = [0, 1].map(side => ({ x: geometry.laneX(catchLane) + (side ? 1 : -1) * facing * 6 * scale, y: catchY })) as [Point, Point];
   const motor = reduced ? 0 : step;
-  if (actor.interaction?.role === 'victim' && actor.eventStage === 'action' && actor.interaction.phase < .6) {
+  if (actor.interaction?.kind === 'top-throw' && actor.interaction.role === 'victim' && actor.eventStage === 'action' && actor.interaction.phase < .6) {
+    const p = actor.interaction.phase, contactRow = p < .32 ? actor.rungProgress : actor.supportRow ?? actor.rungProgress;
+    const climbActor = { ...actor, rungProgress: contactRow, interaction: undefined, motionType: undefined, pose: 'climb' as const, transition: undefined };
+    const climbing = rawLadderRig(climbActor, geometry, clock, reduced), origin = { x: base.x, y: geometry.rowY(contactRow) };
+    const local = (point: Point): Point => ({ x: (point.x - origin.x) / scale, y: (point.y - origin.y) / scale });
+    hip = local(climbing.hip); hands = climbing.hands.map(local) as [Point, Point]; feet = climbing.feet.map(local) as [Point, Point];
+    angle = 0; handContact = p < .32 ? climbing.handContact : [false, false]; footContact = p < .32 ? climbing.footContact : [false, false];
+    if (p >= .32) { const alarm = ease((p - .32) / .16); hands[0].x -= alarm * 3; hands[0].y -= alarm * 5; hands[1].x += alarm * 3; hands[1].y -= alarm * 5; }
+  } else if (actor.interaction?.role === 'victim' && actor.eventStage === 'action' && actor.interaction.phase < .6) {
     const p = actor.interaction.phase, ready = ease((p - .18) / .14), lift = ease((p - .32) / .28);
     hip = { x: 7 * ready, y: -13 }; angle = 0;
     hands = [{ x: mix(-8, 16, ready), y: mix(-16, -23, ready) }, { x: mix(8, 0, ready), y: mix(-16, -19, ready) }];
@@ -201,6 +219,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
       hands = hands.map((point, side) => ({ x: mix(point.x, local(climb.hands[side]).x, settle), y: mix(point.y, local(climb.hands[side]).y, settle) })) as [Point, Point];
       feet = feet.map((point, side) => ({ x: mix(point.x, local(climb.feet[side]).x, settle), y: mix(point.y, local(climb.feet[side]).y, settle) })) as [Point, Point];
       contactAmount = ease((p - .32) / .06) * (1 - release);
+      if (actor.interaction.kind === 'top-throw') hip.x -= 5 * contactAmount;
       handContact = settle > .999999 ? climb.handContact : [false, false]; footContact = settle > .999999 ? climb.footContact : [settle < .000001, settle < .000001];
     }
   } else if (actor.pose === 'climb') {

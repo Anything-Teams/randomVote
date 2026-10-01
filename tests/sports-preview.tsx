@@ -19,6 +19,7 @@ function Preview() {
   const [playing, setPlaying] = useState(false);
   const [storySeed, setStorySeed] = useState(1);
   const [reverseArenaOrder, setReverseArenaOrder] = useState(false);
+  const [arenaOrder, setArenaOrder] = useState('');
   const clock = useRef({ began: 0, age: 0 });
   useEffect(() => {
     if (!playing) return;
@@ -30,7 +31,9 @@ function Preview() {
     }, 50);
     return () => window.clearInterval(timer);
   }, [playing, duration]);
-  const selectedOrder = order.filter(id => Number(id) <= count);
+  const customOrder = arenaOrder.trim().split(/[,\s]+/).filter(Boolean);
+  const validCustom = customOrder.length === count && new Set(customOrder).size === count && customOrder.every(id => candidates.slice(0, count).some(candidate => candidate.id === id));
+  const selectedOrder = mode === 'arena' && validCustom ? customOrder : order.filter(id => Number(id) <= count);
   const props = { candidates: candidates.slice(0, count), order: mode === 'arena' && reverseArenaOrder ? [...selectedOrder].reverse() : selectedOrder, elapsed, duration, paused: !playing, preview: false };
   return <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', padding: 8, gap: 8, background: '#101d2f' }}>
     <nav aria-label="스포츠 검증 조작" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -50,6 +53,7 @@ function Preview() {
         </select>
       </label>}
       {mode === 'arena' && <label style={{ color: '#d8e5ef', fontSize: 11 }}><input type="checkbox" aria-label="난투 순위 뒤집기" checked={reverseArenaOrder} onChange={event => { setReverseArenaOrder(event.target.checked); setElapsed(0); setPlaying(false); }} /> 순위 뒤집기</label>}
+      {mode === 'arena' && <label style={{ color: '#d8e5ef', fontSize: 11 }}>순위 <input aria-label="난투 검증 순위" value={arenaOrder} placeholder="예: 1,2,3" onChange={event => { setArenaOrder(event.target.value); setPlaying(false); setElapsed(0); }} style={{ width: 132 }} /></label>}
       {[...new Set([0, 5000, 12000, 20000, 28000, 36000, 39000, duration].filter(age => age <= duration))].map(age => <button key={age} onClick={() => { setPlaying(false); setElapsed(age); }}>{age / 1000}초</button>)}
       <button onClick={() => setPlaying(value => !value)}>{playing ? '정지' : '재생'}</button>
     </nav>

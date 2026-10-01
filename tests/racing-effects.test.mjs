@@ -6,12 +6,13 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { buildRacingTimeline, createRacingIncidents, readRacingDistance, racingStandings, readRacingTravel, racingTrickLoss, RACING_STORIES } = await source('src/racingNarrative.ts');
+const { buildRacingTimeline, createRacingIncidents, readRacingDistance, racingStandings, readRacingTravel, racingTrickLoss, racingBumpLoss, RACING_STORIES } = await source('src/racingNarrative.ts');
 const { createRacingCamera, placeRacingField } = await source('src/racingCamera.ts');
-const { combineRacingHorseMotion, drawRacingTrickEffects, racingIncidentMotion, placeRacingDuel, placeRacingTrick, racingTrickMotion, racingTrickProjectile } = await source('src/racingEffects.ts');
+const { combineRacingHorseMotion, drawRacingTrickEffects, racingIncidentMotion, placeRacingDuel, placeRacingTrick, racingTrickMotion, racingTrickProjectile, placeRacingBump, racingBumpContact, racingBumpMotion } = await source('src/racingEffects.ts');
 const { raceHorseAttachments, drawRaceHorse, drawRaceDust } = await source('src/racingArt.ts');
 const { racingObstacleMotion } = await source('src/racingObstacles.ts');
 const { drawRacingTopView, racingLaneStart, racingStartingLayout, racingCoursePoint, drawRacingStartingGate } = await source('src/racingCourse.ts');
+const { racingGaitPhase } = await source('src/racingMotionClock.ts');
 const players = Array.from({ length: 10 }, (_, index) => ({ id: String(index), name: `선수 ${index}`, color: '#abcdef' }));
 
 test('a reversed ten-horse field overtakes gradually without a late speed surge', () => {
@@ -119,7 +120,7 @@ function recordingContext() {
     createLinearGradient() { return { addColorStop() {} }; },
     transform(a, b, c, d, e, f) { const m = [...matrix]; matrix = [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d, m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]]; },
     fill() { fills.push({ color: this.fillStyle, alpha: this.globalAlpha }); }, fillRect() { fills.push({ color: this.fillStyle, alpha: this.globalAlpha }); },
-    closePath() {}, roundRect() {}, strokeRect() {}, clip() {}, bezierCurveTo() {}, quadraticCurveTo() {}, ellipse(x, y, rx, ry) { ellipses.push({ ...transform(x, y), rx, ry }); }, fillText(text, x, y) { labels.push({ text, x, y, color: this.fillStyle }); },
+    closePath() {}, roundRect() {}, strokeRect() {}, clip() {}, bezierCurveTo() {}, quadraticCurveTo(_cx, _cy, x, y) { points.push(transform(x, y)); }, ellipse(x, y, rx, ry) { ellipses.push({ ...transform(x, y), rx, ry }); }, fillText(text, x, y) { labels.push({ text, x, y, color: this.fillStyle }); },
   };
   return { ctx, lines, arcs, fills, labels, ellipses };
 }
@@ -129,13 +130,106 @@ function physicalField(timeline, list, elapsed, width = 960, height = 540) {
   const trick = timeline.tricks.find(item => elapsed >= item.start && elapsed < item.recovered);
   const field = placeRacingTrick(trick, raw, elapsed);
   return field.map(item => {
-    const motion = racingTrickMotion(trick, item.id, elapsed, field), phase = item.distance * 62 + item.index * .193;
+    const motion = racingTrickMotion(trick, item.id, elapsed, field), phase = racingGaitPhase(item.index, elapsed);
     const effort = Math.max(.45, Math.min(1.35, (item.distance - readRacingDistance(timeline, item.id, elapsed - 100)) * 335));
     const attachments = raceHorseAttachments(item.index, elapsed, effort, false, { phase, ...motion });
     const world = point => ({ x: item.x + point.x * item.scale, y: item.y + point.y * item.scale });
     return { ...item, effort, phase, motion, hand: world(attachments.hand), helmet: world(attachments.helmet), boot: world(attachments.boot) };
   });
 }
+
+test('event checks retain real-time stride cadence while only their physical step length changes', () => {
+  const list = players, order = players.map(item => item.id).reverse();
+  const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, 3));
+  const boundaries = [...timeline.incidents.flatMap(item => [item.start, item.end]), ...timeline.obstacles.flatMap(item => [item.impact, item.lowest, item.recovered]), ...timeline.tricks.flatMap(item => [item.impact, item.lowest, item.recovered]), ...timeline.bumps.flatMap(item => [item.impact, item.lowest, item.end])];
+  for (const at of boundaries) for (let index = 0; index < list.length; index++) {
+    const phase = racingGaitPhase(index, at), next = racingGaitPhase(index, at + 16);
+    assert.ok(Math.abs(next - phase - 16 / (560 + index % 4 * 22)) < 1e-12, 'an event cannot dilate or restart the gait clock');
+    const normal = raceHorseAttachments(index, at, 1.35, false, { phase });
+    const checked = raceHorseAttachments(index, at, .45, false, { phase, check: 1, brace: 1 });
+    assert.equal(normal.pitch, checked.pitch, 'a shortened step retains its real-time gallop phase');
+    assert.equal(normal.bounce, checked.bounce, 'all running horses keep their cadence while a rival loses actual distance');
+    assert.deepEqual(raceHorseAttachments(index, at, .45, false, { phase, check: 1, brace: 1 }), checked, 'pause and seek reproduce the same body without a second cosmetic clock');
+  }
+});
+
+test('shoulder bumps select a close real crossing and impede only the contacted rival before continuous recovery', () => {
+  let countBumps = 0;
+  for (const count of [2, 5, 10]) for (let seed = 0; seed < 40; seed++) {
+    const list = players.slice(0, count), order = list.map(item => item.id).reverse();
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed)), without = { ...timeline, bumps: [] };
+    for (const bump of timeline.bumps) {
+      countBumps++;
+      assert.equal(Math.abs(timeline.ids.indexOf(bump.actorId) - timeline.ids.indexOf(bump.targetId)), 1, 'a defender cannot cross unrelated lanes to attack');
+      assert.ok(Math.abs(readRacingDistance(timeline, bump.actorId, bump.impact) - readRacingDistance(timeline, bump.targetId, bump.impact)) < 1e-8, 'the real noses meet at contact');
+      for (const obstacle of timeline.obstacles) if ([bump.actorId, bump.targetId].includes(obstacle.actorId)) assert.ok(obstacle.encounter - 1600 >= bump.end || obstacle.recovered + 300 <= bump.start, 'a body check stays separate from a course accident');
+      for (const trick of timeline.tricks) if ([bump.actorId, bump.targetId].some(id => [trick.actorId, trick.targetId].includes(id))) assert.ok(trick.start >= bump.end || trick.recovered <= bump.start);
+      const middle = (bump.impact + bump.lowest) / 2;
+      const speed = (plan, id, at) => (readRacingDistance(plan, id, at + 8) - readRacingDistance(plan, id, at - 8)) / 16;
+      assert.ok(speed(timeline, bump.targetId, middle) < speed(without, bump.targetId, middle) * .99, 'contact causes a real short loss of pace');
+      assert.equal(racingBumpLoss(bump, bump.lowest), bump.loss);
+      assert.equal(racingBumpLoss(bump, bump.end), 0);
+      for (const id of timeline.ids) if (id !== bump.targetId) for (let at = bump.start; at <= bump.end; at += 80) assert.equal(readRacingDistance(timeline, id, at), readRacingDistance(without, id, at), 'the whole field never enters slow motion');
+      for (const id of [bump.actorId, bump.targetId]) for (let at = bump.start; at < bump.end; at += 16) assert.ok(speed(timeline, id, at) > 0, 'each horse continues forwards throughout the check');
+    }
+    assert.deepEqual(racingStandings(timeline, 44_000).map(item => item.id), order);
+  }
+  assert.ok(countBumps >= 15, 'ordinary seeded races include visible position defence');
+});
+
+test('bump approach, weight shift and separation keep their course positions and fixed neighbouring rows', () => {
+  const fixture = Array.from({ length: 10 }, (_, index) => ({ ...players[index], id: String(index + 1) }));
+  const finish = ['4', '1', '7', '2', '9', '3', '5', '10', '6', '8'];
+  for (const [count, seed] of [[2, 1], [10, 3]]) for (const [width, height] of [[320, 180], [960, 540]]) {
+    const list = fixture.slice(0, count), order = finish.filter(id => list.some(item => item.id === id));
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed)), bump = timeline.bumps[0];
+    assert.ok(bump, 'the verified replay includes the physical check');
+    let previous, previousMotion = {};
+    for (let at = bump.start - 16; at < bump.end + 16; at += 16) {
+      const base = placeRacingField(createRacingCamera(), list, timeline, at, width, height, 0, true).map(item => ({ ...item, x: item.x - 57 * item.scale }));
+      const field = placeRacingBump(bump, base, at);
+      for (let index = 0; index < field.length; index++) {
+        assert.equal(field[index].x, base[index].x);
+        assert.equal(field[index].distance, base[index].distance, 'body contact never invents forward movement');
+        assert.equal(field[index].scale, base[index].scale);
+        assert.ok(Math.abs(field[index].y - base[index].y) <= 18 * base[index].scale + 1e-9);
+        if (![bump.actorId, bump.targetId].includes(base[index].id)) assert.deepEqual(field[index], base[index]);
+        if (previous) assert.ok(Math.abs(field[index].y - previous[index].y) < 2, 'both runners lean into and release contact without snapping lanes');
+      }
+      const motion = racingBumpMotion(bump, bump.targetId, at, field);
+      for (const key of ['bodyLean', 'brace', 'check']) assert.ok(Math.abs((motion[key] ?? 0) - (previousMotion[key] ?? 0)) < .18, 'the rival absorbs contact through continuous body weight');
+      assert.deepEqual(placeRacingBump(bump, base, at, base, true), base);
+      assert.deepEqual(racingBumpMotion(bump, bump.targetId, at, field, true), {});
+      previous = field; previousMotion = motion;
+    }
+  }
+});
+
+test('a bump connects the painted shoulder contours and an out-of-reach rider never braces', () => {
+  const fixture = Array.from({ length: 10 }, (_, index) => ({ ...players[index], id: String(index + 1) }));
+  const finish = ['4', '1', '7', '2', '9', '3', '5', '10', '6', '8'];
+  for (const [count, seed] of [[2, 1], [10, 3]]) {
+    const list = fixture.slice(0, count), order = finish.filter(id => list.some(item => item.id === id));
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed)), bump = timeline.bumps[0];
+    for (const age of [0, 64, 100]) {
+      const at = bump.impact + age, base = placeRacingField(createRacingCamera(), list, timeline, at, 960, 540, 0, true).map(item => ({ ...item, x: item.x - 57 * item.scale }));
+      const field = placeRacingBump(bump, base, at), contact = racingBumpContact(bump, field, at);
+      assert.ok(contact.gap < 2 * contact.scale, 'the shoulder surfaces meet at the actual crossing and maintain contact as weight transfers');
+      if (age === 0) continue;
+      for (const id of [bump.actorId, bump.targetId]) {
+        const item = field.find(item => item.id === id), motion = racingBumpMotion(bump, id, at, field), phase = racingGaitPhase(item.index, at);
+        const pose = raceHorseAttachments(item.index, at, 1, false, { phase, ...motion }), recording = recordingContext();
+        drawRaceHorse(recording.ctx, list[item.index], item.index, item.x, item.y, item.scale, at, 1, false, false, 0, { phase, ...motion });
+        const contour = recording.lines.find(line => line.width === .8);
+        for (const [index, attachment] of [[0, pose.farShoulder], [1, pose.nearShoulder]]) assert.ok(Math.hypot(contour.points[index].x - item.x - attachment.x * item.scale, contour.points[index].y - item.y - attachment.y * item.scale) < 1e-8, 'physical contact uses the visible body surface');
+        assert.ok(motion.brace > .1, 'both riders visibly carry the impact');
+      }
+      const far = field.map(item => item.id === bump.targetId ? { ...item, x: item.x + 1000 } : item);
+      assert.equal(racingBumpMotion(bump, bump.targetId, at, far).brace, 0);
+      for (const item of field) if (![bump.actorId, bump.targetId].includes(item.id)) assert.deepEqual(racingBumpMotion(bump, item.id, at, field), {});
+    }
+  }
+});
 
 test('rear kicks and landed beanbags slow actual travel and lose ground before recovery without changing the result', () => {
   let rankLosses = 0;

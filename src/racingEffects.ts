@@ -1,8 +1,9 @@
-import type { RaceHorseMotion } from './racingArt';
-import type { RacingIncident, RacingTrick } from './racingNarrative';
+import { raceHorseAttachments, type RaceHorseMotion } from './racingArt';
+import { racingGaitPhase } from './racingMotionClock';
+import type { RacingIncident, RacingTrick, RacingBump } from './racingNarrative';
 import type { RacingObstacle } from './racingObstacles';
 
-export type RacingEffectPlacement = { id: string; x: number; y: number; scale: number; hand?: { x: number; y: number }; helmet?: { x: number; y: number }; boot?: { x: number; y: number } };
+export type RacingEffectPlacement = { id: string; x: number; y: number; scale: number; index?: number; hand?: { x: number; y: number }; helmet?: { x: number; y: number }; boot?: { x: number; y: number } };
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const smooth = (value: number) => { const p = clamp(value); return p * p * (3 - 2 * p); };
 const pulse = (phase: number, start: number, end: number) => phase <= start || phase >= end ? 0 : Math.sin(Math.PI * smooth((phase - start) / (end - start)));
@@ -11,10 +12,11 @@ const phaseAt = (incident: RacingIncident, elapsed: number) => (elapsed - incide
 /** Independent actions meet at zero; an inactive channel never replaces a moving pose. */
 export function combineRacingHorseMotion(...motions: RaceHorseMotion[]): RaceHorseMotion {
   const combined: RaceHorseMotion = {};
-  for (const key of ['jump', 'crouch', 'check', 'slip', 'trip', 'fall', 'spill', 'kick', 'toss', 'stun'] as const) {
+  for (const key of ['jump', 'crouch', 'check', 'slip', 'trip', 'fall', 'spill', 'kick', 'toss', 'stun', 'brace'] as const) {
     if (motions.some(motion => motion[key] !== undefined)) combined[key] = Math.max(0, ...motions.map(motion => motion[key] ?? 0));
   }
   if (motions.some(motion => motion.stumble !== undefined)) combined.stumble = Math.max(-1, Math.min(1, motions.reduce((sum, motion) => sum + (motion.stumble ?? 0), 0)));
+  if (motions.some(motion => motion.bodyLean !== undefined)) combined.bodyLean = Math.max(-1, Math.min(1, motions.reduce((sum, motion) => sum + (motion.bodyLean ?? 0), 0)));
   if (combined.crouch) combined.crouch *= 1 - (combined.fall ?? 0);
   for (const motion of motions) {
     if ((motion.kick ?? 0) > 0) { combined.kickReach = motion.kickReach; combined.kickX = motion.kickX; combined.kickY = motion.kickY; }
@@ -58,6 +60,57 @@ export function placeRacingDuel<T extends RacingEffectPlacement>(incident: Racin
     const step = Math.max(-18 * scale, Math.min(18 * scale, target - item.y));
     return item.id === actor.id || item.id === rival.id ? { ...item, y: item.y + step * join } : item;
   });
+}
+
+function bumpBodyMotion(bump: RacingBump, id: string, elapsed: number): RaceHorseMotion {
+  const actor = id === bump.actorId, age = elapsed - bump.impact;
+  const pressure = smooth(age / 100) * (1 - smooth((age - 180) / 470));
+  const windup = smooth((elapsed - bump.start) / (bump.impact - bump.start)) * (1 - smooth((elapsed - bump.impact - 220) / 500));
+  return actor ? { bodyLean: windup * .22 + pressure * .62, brace: pressure * .25, check: pressure * .12 }
+    : { bodyLean: -pressure * .65, brace: pressure * .7, check: pressure * .25 };
+}
+
+function bumpShoulder(bump: RacingBump, item: RacingEffectPlacement, elapsed: number, far: boolean) {
+  const index = item.index ?? 0, pose = raceHorseAttachments(index, elapsed, 1, false, { phase: racingGaitPhase(index, elapsed), ...bumpBodyMotion(bump, item.id, elapsed) });
+  const point = far ? pose.farShoulder : pose.nearShoulder;
+  return { x: item.x + point.x * item.scale, y: item.y + point.y * item.scale };
+}
+
+/** The two painted barrel surfaces meet while their real longitudinal distances stay untouched. */
+export function placeRacingBump<T extends RacingEffectPlacement>(bump: RacingBump | undefined, placements: T[], elapsed: number, coursePlacements: T[] = placements, reduced = false): T[] {
+  if (!bump || reduced || elapsed < bump.start || elapsed >= bump.end) return placements;
+  const actor = coursePlacements.find(item => item.id === bump.actorId), target = coursePlacements.find(item => item.id === bump.targetId);
+  if (!actor || !target) return placements;
+  const sign = actor.y > target.y ? 1 : -1, s = Math.min(actor.scale, target.scale), center = (actor.y + target.y) / 2;
+  const a = bumpShoulder(bump, { ...actor, y: 0 }, elapsed, sign > 0), b = bumpShoulder(bump, { ...target, y: 0 }, elapsed, sign < 0);
+  const separation = Math.abs(a.y - b.y);
+  const join = smooth((elapsed - bump.start) / (bump.impact - bump.start)) * (1 - smooth((elapsed - bump.impact - 350) / (bump.end - bump.impact - 350)));
+  const recoil = pulse((elapsed - bump.impact) / 1000, .15, 1) * 4 * s;
+  return placements.map(item => {
+    if (![actor.id, target.id].includes(item.id)) return item;
+    const base = item.id === actor.id ? actor : target;
+    const goal = center + (item.id === actor.id ? sign : -sign) * (separation / 2 + (item.id === target.id ? recoil : 0));
+    const move = Math.max(-18 * s, Math.min(18 * s, goal - base.y));
+    return { ...item, y: item.y + (base.y + move - item.y) * join };
+  });
+}
+
+export function racingBumpContact(bump: RacingBump | undefined, placements: RacingEffectPlacement[], elapsed: number) {
+  if (!bump || elapsed < bump.impact || elapsed >= bump.end) return undefined;
+  const actor = placements.find(item => item.id === bump.actorId), target = placements.find(item => item.id === bump.targetId);
+  if (!actor || !target) return undefined;
+  const sign = actor.y > target.y ? 1 : -1, scale = Math.min(actor.scale, target.scale);
+  const a = bumpShoulder(bump, actor, elapsed, sign > 0), b = bumpShoulder(bump, target, elapsed, sign < 0);
+  const gap = Math.hypot(a.x - b.x, a.y - b.y), strength = 1 - smooth((gap / scale - 2) / 6);
+  return { actor: a, target: b, gap, scale, strength };
+}
+
+export function racingBumpMotion(bump: RacingBump | undefined, id: string, elapsed: number, placements: RacingEffectPlacement[], reduced = false): RaceHorseMotion {
+  if (!bump || reduced || elapsed < bump.start || elapsed >= bump.end || ![bump.actorId, bump.targetId].includes(id)) return {};
+  const motion = bumpBodyMotion(bump, id, elapsed);
+  if (id === bump.actorId) return motion;
+  const strength = racingBumpContact(bump, placements, elapsed)?.strength ?? 0;
+  return { bodyLean: (motion.bodyLean ?? 0) * strength, brace: (motion.brace ?? 0) * strength, check: (motion.check ?? 0) * strength };
 }
 
 /** Projected origins match drawRaceHorse: hooves at y, the nose at x + 57 * scale. */
