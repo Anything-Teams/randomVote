@@ -30,7 +30,7 @@ function preview(kind: PreviewKind, freezeAt?: number, captureAt?: number) {
   const startAt = captureAt ?? (kind === 'voting' ? 5000 : kind === 'winner' ? WINNER_START : kind === 'last-run' ? WINNER_START - 6000 : kind === 'finale' ? WINNER_START - 1200 : elapsedAtProgress(32));
   const initialProgress = kind === 'voting' ? 0 : countProgress(startAt);
   const initial = frameAt(drama, initialProgress);
-  const state: StageState = { phase: kind === 'voting' ? 'voting' : kind === 'winner' ? 'winner' : 'counting', candidates, winnerId: '1', topic: '오늘 커피 쏠 사람은?', percentages: kind === 'winner' || kind === 'voting' ? percentages : initial.percentages, finalPercentages: percentages, finalVotes: result.votes, finishStartPercentages: frameAt(drama, countProgress(WINNER_START - 4000)).percentages, progress: initialProgress, totalVotes: result.totalVotes, preview: false, reducedMotion: false, elapsed: startAt, cheeringId: '3', events: result.events, storyOutcomes: event ? [storyOutcome(result, event, drama)] : [] };
+  const state: StageState = { phase: kind === 'voting' ? 'voting' : kind === 'winner' ? 'winner' : 'counting', candidates, winnerId: '1', topic: '오늘 커피 쏠 사람은?', percentages: kind === 'winner' || kind === 'voting' ? percentages : initial.percentages, finalPercentages: percentages, finalVotes: result.votes, finishStartPercentages: frameAt(drama, countProgress(WINNER_START - 4000)).percentages, progress: initialProgress, totalVotes: result.totalVotes, preview: false, reducedMotion: false, elapsed: startAt, events: result.events, storyOutcomes: event ? [storyOutcome(result, event, drama)] : [] };
   class PreviewScene extends ElectionScene {
     private began: number | undefined;
     private shownStatus = '';

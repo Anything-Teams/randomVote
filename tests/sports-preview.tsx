@@ -18,6 +18,7 @@ function Preview() {
   const [elapsed, setElapsed] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [storySeed, setStorySeed] = useState(1);
+  const [reverseArenaOrder, setReverseArenaOrder] = useState(false);
   const clock = useRef({ began: 0, age: 0 });
   useEffect(() => {
     if (!playing) return;
@@ -29,7 +30,8 @@ function Preview() {
     }, 50);
     return () => window.clearInterval(timer);
   }, [playing, duration]);
-  const props = { candidates: candidates.slice(0, count), order: order.filter(id => Number(id) <= count), elapsed, duration, paused: !playing, preview: false };
+  const selectedOrder = order.filter(id => Number(id) <= count);
+  const props = { candidates: candidates.slice(0, count), order: mode === 'arena' && reverseArenaOrder ? [...selectedOrder].reverse() : selectedOrder, elapsed, duration, paused: !playing, preview: false };
   return <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', padding: 8, gap: 8, background: '#101d2f' }}>
     <nav aria-label="스포츠 검증 조작" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
       {['racing', 'arena'].map(value => <button key={value} onClick={() => { setMode(value); setPlaying(false); setElapsed(0); setDuration(SPORT_DURATION); }}>{value === 'racing' ? '경마' : '난투'}</button>)}
@@ -47,6 +49,7 @@ function Preview() {
           {[40_000, 44_000, 62_000].map(value => <option key={value} value={value}>{value / 1000}초</option>)}
         </select>
       </label>}
+      {mode === 'arena' && <label style={{ color: '#d8e5ef', fontSize: 11 }}><input type="checkbox" aria-label="난투 순위 뒤집기" checked={reverseArenaOrder} onChange={event => { setReverseArenaOrder(event.target.checked); setElapsed(0); setPlaying(false); }} /> 순위 뒤집기</label>}
       {[...new Set([0, 5000, 12000, 20000, 28000, 36000, 39000, duration].filter(age => age <= duration))].map(age => <button key={age} onClick={() => { setPlaying(false); setElapsed(age); }}>{age / 1000}초</button>)}
       <button onClick={() => setPlaying(value => !value)}>{playing ? '정지' : '재생'}</button>
     </nav>

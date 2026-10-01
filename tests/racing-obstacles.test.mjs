@@ -8,10 +8,31 @@ async function source(path) {
 }
 const { buildRacingTimeline, createRacingIncidents, readRacingDistance, racingStandings, racingObstacleLoss, racingIncidentSetback } = await source('src/racingNarrative.ts');
 const { createRacingCamera, placeRacingField } = await source('src/racingCamera.ts');
-const { racingObstacleDistance, racingCourseObstacles, placeRacingObstacles, racingObstacleJump, racingObstacleMotion, racingObstacleStatus } = await source('src/racingObstacles.ts');
-const { racingTopLegPose, racingGateWalk, racingGateLegPose } = await source('src/racingCourse.ts');
-const { racingGroundMarks } = await source('src/racingArt.ts');
+const { racingObstacleDistance, racingCourseObstacles, placeRacingObstacles, racingObstacleJump, racingObstacleMotion, racingObstacleStatus, placeRacingFalls } = await source('src/racingObstacles.ts');
+const { racingTopLegPose, racingGateWalk, racingGateLegPose, drawRacingCourse } = await source('src/racingCourse.ts');
+const { racingGroundMarks, raceHorseAttachments } = await source('src/racingArt.ts');
 const players = Array.from({ length: 10 }, (_, index) => ({ id: String(index), name: `선수 ${index}`, color: '#abcdef' }));
+
+test('race course draws safely through temporarily tiny canvas sizes during layout changes', () => {
+  const previousDocument = globalThis.document;
+  globalThis.document = { createElement: () => ({ getContext: () => null }) };
+  let boxes = 0;
+  const context = new Proxy({
+    roundRect(_x, _y, width, height, radius) {
+      assert.ok(width > 0 && height > 0 && radius >= 0, 'canvas never receives a negative corner radius');
+      boxes++;
+    },
+    createLinearGradient: () => ({ addColorStop() {} }),
+    createRadialGradient: () => ({ addColorStop() {} }),
+  }, { get: (target, key) => target[key] ?? (() => {}) });
+  try {
+    for (const [width, height] of [[1, 1], [8, 2], [320, 180], [960, 540]]) drawRacingCourse(context, width, height, 0, false);
+    assert.ok(boxes > 0);
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+  }
+});
 
 test('course obstacles enter from the right, travel left with the ground, and persist past the story', () => {
   const covered = new Set();
@@ -181,5 +202,44 @@ test('a guarded lane checks actual travel before the horse escapes and accelerat
     assert.ok(speed(timeline, checkAt) < speed(unconstrained, checkAt) * .8, `${kind} must slow actual travel while the reins are checked`);
     assert.ok(speed(timeline, escapeAt) > speed(unconstrained, escapeAt), 'escaping the guarded line creates real acceleration');
     assert.equal(racingIncidentSetback(incident, '0', incident.end), 0);
+  }
+});
+
+
+test('failed course jumps visibly collapse the horse and displace the rider before standing back up', () => {
+  for (const count of [2, 10]) for (let seed = 0; seed < 16; seed++) {
+    const list = players.slice(0, count), order = list.map(player => player.id).reverse();
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
+    const failures = timeline.obstacles.filter(item => item.outcome !== 'clear'); assert.ok(failures.length);
+    for (const obstacle of failures) {
+      const at = obstacle.impact + (obstacle.lowest - obstacle.impact) * .7, motion = racingObstacleMotion(obstacle, at);
+      assert.ok(motion.fall > .99 && motion.spill > .99, 'a failed jump includes an unmistakable collapse and rider displacement');
+      const standing = raceHorseAttachments(0, at, .7, false), down = raceHorseAttachments(0, at, .7, false, motion);
+      assert.ok(down.bounce - standing.bounce > 15 && down.pitch > .3, 'the torso reaches the ground rather than doing another jump');
+      assert.ok(down.riderAngle < -.45, 'the rider slips out of the normal crouch');
+      assert.deepEqual(racingObstacleMotion(obstacle, obstacle.recovered), {}, 'the rider and horse return to normal after recovery');
+    }
+  }
+});
+
+
+test('a collapsed horse slides into view and returns continuously while preserving progress and the fixed obstacle lane', () => {
+  for (const count of [2, 10]) for (let seed = 0; seed < 12; seed++) {
+    const list = players.slice(0, count), order = list.map(player => player.id).reverse(), timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
+    for (const obstacle of timeline.obstacles.filter(item => item.outcome !== 'clear')) {
+      let previous;
+      for (let elapsed = obstacle.impact - 16; elapsed <= obstacle.recovered + 16; elapsed += 16) {
+        const original = placeRacingField(createRacingCamera(), list, timeline, elapsed, 960, 540, 0, true), moved = placeRacingFalls(original, timeline, elapsed, 540);
+        assert.deepEqual(placeRacingFalls(original, timeline, elapsed, 540, true), original);
+        for (let i = 0; i < moved.length; i++) {
+          assert.equal(moved[i].x, original[i].x); assert.equal(moved[i].distance, original[i].distance);
+          assert.ok(moved[i].y <= 540 - moved[i].scale * 8);
+          if (previous) assert.ok(Math.abs(moved[i].y - previous[i].y) < 4, 'fall and standing recovery do not snap between rows');
+        }
+        const fixed = placeRacingObstacles(timeline, { center: .5, span: .067 }, original, 960).find(item => item.id === obstacle.id);
+        assert.equal(fixed.y, original.find(item => item.id === obstacle.actorId).y, 'the obstacle remains on the original course row as the horse skids away');
+        previous = moved;
+      }
+    }
   }
 });

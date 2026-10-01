@@ -384,11 +384,12 @@ function transferFrame(timeline: LadderTimeline, segment: LadderPathSegment, ela
       if (phase >= flightEnd) pose = 'hang';
     } else if (type === 'swing') row -= 4.6 * Math.sin(progress * Math.PI);
     else if (type === 'launch') row += 4.6 * Math.sin(progress * Math.PI);
-    else if (type === 'rotate') row -= .7 * Math.sin(progress * Math.PI);
     if (phase >= flightEnd && type !== 'drop' && type !== 'slide') pose = airborne ? 'hang' : 'balance';
   } else if (stage === 'resolve') {
     row = catchRoot + (landingRow - catchRoot) * smooth(phase);
-    pose = 'clamber';
+    // A deck already holds the boots. Turn toward the ladder without another
+    // hang-and-pull cycle after walking or riding across it.
+    pose = airborne ? 'clamber' : 'balance';
   }
   const lane = segment.fromLane + (segment.toLane - segment.fromLane) * progress;
   const gripLane = stage === 'setup' ? segment.fromLane : stage === 'resolve' || transferStage === 'catch' ? segment.toLane : undefined;

@@ -19,6 +19,7 @@ function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number
   ctx.font = '800 ' + size + 'px "Malgun Gothic", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = color; ctx.fillText(text, x, y);
 }
 function box(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string, border?: string) {
+  if (w <= 0 || h <= 0) return;
   ctx.beginPath(); ctx.roundRect(x, y, w, h, Math.min(2, w / 3, h / 3)); ctx.fillStyle = color; ctx.fill();
   if (border) { ctx.strokeStyle = border; ctx.lineWidth = .7; ctx.stroke(); }
 }

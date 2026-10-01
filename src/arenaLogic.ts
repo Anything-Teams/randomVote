@@ -1,6 +1,6 @@
 import type { Candidate } from './election';
 
-export type ArenaTactic = 'team' | 'bait' | 'edge' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final';
+export type ArenaTactic = 'team' | 'bait' | 'catch' | 'shove' | 'edge' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final';
 export type ArenaRound = { id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
 export type ArenaPoint = { x: number; y: number };
 export type ArenaMovingBody = ArenaPoint & { facing: number; motorX?: number; motorY?: number };
@@ -20,17 +20,18 @@ export type ArenaChargeFallFrame = Omit<ArenaThrowFrame, 'stage'> & { stage: 'ov
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 const ease = (n: number) => { const t = clamp(n); return t * t * (3 - 2 * t); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
-const soloTactics: Exclude<ArenaTactic, 'team' | 'betrayal' | 'final'>[] = ['bait', 'counter', 'brace', 'lift'];
-const eliminationTactics: ArenaTactic[] = ['bait', 'counter', 'edge', 'brace', 'lift'];
+const soloTactics: Exclude<ArenaTactic, 'team' | 'betrayal' | 'final'>[] = ['bait', 'counter', 'brace', 'catch', 'lift'];
+const eliminationTactics: ArenaTactic[] = ['bait', 'catch', 'edge', 'shove', 'counter', 'brace', 'lift'];
 
 /** Shared ground movement keeps acceleration, braking and a zero-delta pause consistent. */
 export function arenaMove(body: ArenaMovingBody, target: ArenaPoint, seconds: number, speed = 116): void {
   if (seconds <= 0) return;
   speed = Math.min(ARENA_MAX_GROUND_SPEED, Math.max(0, speed));
   const dx = target.x - body.x, dy = target.y - body.y, distance = Math.hypot(dx, dy);
+  const groundDistance = Math.hypot(dx, dy * 2.2);
   const acceleration = speed * 3.4, brake = speed * 4.2;
-  const wantedSpeed = Math.min(speed, Math.sqrt(2 * brake * Math.max(0, distance - .6)));
-  const wantedX = distance > .01 ? dx / distance * wantedSpeed : 0, wantedY = distance > .01 ? dy / distance * wantedSpeed : 0;
+  const wantedSpeed = Math.min(speed, Math.sqrt(2 * brake * Math.max(0, groundDistance - .6)));
+  const wantedX = distance > .01 ? dx / groundDistance * wantedSpeed : 0, wantedY = distance > .01 ? dy / groundDistance * wantedSpeed : 0;
   const changeX = wantedX - (body.motorX ?? 0), changeY = wantedY - (body.motorY ?? 0);
   const change = Math.hypot(changeX, changeY), limit = Math.min(1, acceleration * seconds / Math.max(.001, change));
   body.motorX = (body.motorX ?? 0) + changeX * limit; body.motorY = (body.motorY ?? 0) + changeY * limit;
@@ -75,8 +76,30 @@ export function arenaEdgeTargets(round: ArenaRound, elapsed: number, center: Are
   return { side, pressure, stage: p < .28 ? 'approach' : p < .48 ? 'contest' : p < .9 ? 'push' : 'tip', aggressor: { x: victimX - side * 53, y: center.y }, victim: { x: victimX, y: center.y } };
 }
 
+/** The receiver absorbs a charge, steps across it, then lifts from an established grip. */
+export function arenaCatchTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
+  const p = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
+  const side = center.x >= 500 ? 1 : -1, charge = ease((p - .18) / .37), turn = ease((p - .60) / .25);
+  const receiver = { x: center.x + side * (26 - turn * 8), y: center.y + turn * 10 };
+  const charger = { x: mix(center.x - side * 92, center.x - side * 24, charge) + side * turn * 11, y: center.y - turn * 13 };
+  return { side, charge, turn, stage: p < .18 ? 'prepare' as const : p < .55 ? 'charge' as const : p < .72 ? 'catch' as const : 'turn' as const, preparation: ease(p / .18), receiver, charger };
+}
+
+/** A third fighter bumps a wrestling pair; one catches their footing while the drawn loser is pushed out. */
+export function arenaShoveTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
+  const p = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
+  const side = center.x >= 500 ? 1 : -1;
+  const rim = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((center.y - 416) / 112) ** 2));
+  const approach = ease((p - .18) / .40), pressure = ease((p - .62) / .38);
+  const victimX = mix(center.x + side * 26, rim - side * 3, pressure);
+  return { side, pressure, stage: p < .18 ? 'wrestle' as const : p < .58 ? 'approach' as const : p < .76 ? 'contact' as const : 'push' as const,
+    aggressor: { x: mix(center.x - side * 91, victimX - side * 53, approach), y: center.y + mix(47, 10, approach) },
+    victim: { x: victimX, y: center.y },
+    helper: { x: mix(center.x - side * 26, victimX - side * 80, pressure), y: center.y - mix(8, 35, pressure) } };
+}
+
 export function arenaExitDirection(round: ArenaRound, origin: ArenaPoint, outIndex: number): number {
-  return round.tactic === 'bait' || round.tactic === 'edge' ? origin.x < 500 ? -1 : 1 : round.final ? 1 : outIndex % 2 ? 1 : -1;
+  return round.tactic === 'bait' || round.tactic === 'edge' || round.tactic === 'shove' || round.tactic === 'catch' ? origin.x < 500 ? -1 : 1 : round.final ? 1 : outIndex % 2 ? 1 : -1;
 }
 
 /** Body contacts and commentary share an actual attack, rather than only an alliance label. */
@@ -86,7 +109,18 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
   const action: ArenaAction = { stage: release ? 'release' : post ? 'throw' : beat.stage === 'approach' ? 'approach' : beat.stage === 'hold' ? 'link' : 'lift', actors: [], attackers: [a], targetId: v, allies: [], liftedId: v, lift: beat.liftProgress * (round.exchange ? 18 : ARENA_LIFT_HEIGHT), outcome: release ? 'resisted' : elapsed >= round.resolve ? 'success' : 'pending', betrayed: false };
   const actor = (id: string, role: ArenaActionActor['role'], x: number, y: number, pose: ArenaActionPose, phase: number, gripId: string | undefined, badge: string) => ({ id, role, offset: { x, y }, pose, phase, gripId, badge });
   const phase = p >= .52 ? beat.liftProgress : clamp((p - .30) / .22);
-  if (round.tactic === 'team' && h) {
+  if (round.tactic === 'shove' && h) {
+    const shove = arenaShoveTargets(round, elapsed, { x: 675, y: 430 });
+    action.stage = release ? 'release' : post ? 'throw' : shove.stage === 'wrestle' ? 'link' : shove.stage === 'approach' ? 'approach' : 'joint-attack';
+    action.lift = 0; action.liftedId = undefined;
+    action.actors = [actor(a, 'aggressor', -91, 47, p < .58 ? 'guard' : 'push', shove.pressure, p < .58 ? undefined : v, '옆에서 밀기'), actor(v, 'victim', 26, 0, 'brace', shove.pressure, p < .62 ? h : a, '맞잡다가 밀림'), actor(h, 'helper', -26, -8, p < .62 ? 'grapple' : 'dodge', shove.pressure, p < .62 ? v : undefined, '발 고쳐 딛기')];
+  } else if (round.tactic === 'catch') {
+    const catchState = arenaCatchTargets(round, elapsed, { x: 675, y: 430 });
+    const caught = p >= .55;
+    action.stage = release ? 'release' : post ? 'throw' : catchState.stage === 'prepare' || catchState.stage === 'charge' ? 'approach' : catchState.stage === 'catch' ? 'link' : 'lift';
+    action.lift = ease((p - .72) / .28) * (round.exchange ? 14 : ARENA_LIFT_HEIGHT);
+    action.actors = [actor(a, 'aggressor', 26, 0, !caught ? 'brace' : p < .72 ? 'grapple' : 'lift', ease((p - .72) / .28), caught ? v : undefined, '돌진 받아 되치기'), actor(v, 'victim', -92 + catchState.charge * 68, 0, catchState.stage === 'prepare' ? 'brace' : caught ? 'brace' : 'run', catchState.charge, caught ? a : undefined, caught ? '몸통이 잡혔다' : '돌진')];
+  } else if (round.tactic === 'team' && h) {
     action.stage = release ? 'release' : post ? 'throw' : p < .30 ? 'approach' : p < .52 ? 'link' : 'joint-attack';
     action.attackers = [a, h]; action.allies = [a, h];
     action.actors = [actor(a, 'aggressor', -44, 0, p >= .52 ? 'lift' : 'grapple', phase, v, '함께 공격'), actor(v, 'victim', 0, 0, 'brace', phase, a, release ? '공격 버팀' : '양쪽에 대응'), actor(h, 'helper', 44, 0, p >= .52 ? 'lift' : 'grapple', phase, v, '함께 공격')];
@@ -129,8 +163,8 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
     action.actors = [actor(a, 'aggressor', ax, ay, ap, phase, round.tactic === 'bait' ? undefined : v, '공격'), actor(v, 'victim', vx, vy, vp, phase, round.tactic === 'bait' ? undefined : a, '대응')];
   }
   if (release) { action.lift *= 1 - ease((elapsed - round.impact) / Math.max(1, (round.end - round.impact) * .24)); action.actors.forEach(part => { part.pose = part.id === action.targetId ? 'dodge' : 'guard'; part.gripId = undefined; }); }
-  else if (post) action.actors.forEach(part => { if (part.id !== v) { part.pose = round.tactic === 'bait' ? 'dodge' : round.tactic === 'edge' ? 'push' : elapsed - round.impact < 350 * (round.resolve - round.impact) / 1100 ? 'throw' : 'guard'; part.gripId = undefined; } });
-  if (action.stage === 'approach') action.actors.forEach(part => { if (round.tactic !== 'bait' || part.pose !== 'brace') part.pose = 'guard'; part.gripId = undefined; });
+  else if (post) action.actors.forEach(part => { if (part.id !== v) { part.pose = round.tactic === 'bait' ? 'dodge' : round.tactic === 'edge' || round.tactic === 'shove' ? part.id === h ? 'dodge' : 'push' : elapsed - round.impact < 350 * (round.resolve - round.impact) / 1100 ? 'throw' : 'guard'; part.gripId = undefined; } });
+  if (action.stage === 'approach' && round.tactic !== 'catch' && round.tactic !== 'shove') action.actors.forEach(part => { if (round.tactic !== 'bait' || part.pose !== 'brace') part.pose = 'guard'; part.gripId = undefined; });
   return action;
 }
 
@@ -188,16 +222,28 @@ export function arenaNearbyResponse(origin: ArenaPoint, fighting: readonly Arena
   return { target, facing: dx < 0 ? -1 : 1, pose: gap < 100 ? 'dodge' as const : 'guard' as const, threat: nearest };
 }
 
-/** Independent bouts need enough sand between them to read as separate duels. */
-export function arenaContactPoint(origin: ArenaPoint, occupied: readonly ArenaPoint[], edge = false): ArenaPoint {
-  // Five clear patches fit the full ten-person field. Each new encounter
-  // approaches the nearest free patch from its current positions.
-  const candidates = [...(edge ? [] : [{ x: 500, y: 430 }]), { x: 325, y: 350 }, { x: 675, y: 350 }, { x: 325, y: 490 }, { x: 675, y: 490 }];
-  const clearance = (point: ArenaPoint) => Math.min(Infinity, ...occupied.map(other => Math.hypot((point.x - other.x) / 180, (point.y - other.y) / 95)));
-  const travel = (point: ArenaPoint) => Math.hypot(point.x - origin.x, point.y - origin.y);
-  const open = candidates.filter(point => clearance(point) >= 1);
-  if (open.length) return open.sort((a, b) => travel(a) - travel(b))[0];
-  return candidates.sort((a, b) => clearance(b) - clearance(a) || travel(a) - travel(b))[0];
+/** A renewed bout stays where the pair already met, with only a small step around another bout. */
+export function arenaLocalContact(origin: ArenaPoint, occupied: readonly ArenaPoint[]): ArenaPoint {
+  const inside = (point: ArenaPoint) => {
+    const radius = Math.hypot((point.x - 500) / 240, (point.y - 416) / 73);
+    return radius > 1 ? { x: 500 + (point.x - 500) / radius, y: 416 + (point.y - 416) / radius } : point;
+  };
+  const anchor = inside({ ...origin });
+  const clearance = (point: ArenaPoint) => Math.min(Infinity, ...occupied.map(other => Math.hypot((point.x - other.x) / 108, (point.y - other.y) / 63)));
+  if (clearance(anchor) >= 1) return anchor;
+  const options = [anchor, ...[-1, 1].flatMap(side => [{ x: anchor.x + side * 42, y: anchor.y }, { x: anchor.x, y: anchor.y + side * 22 }])].map(inside);
+  return options.sort((a, b) => clearance(b) - clearance(a))[0];
+}
+
+export function arenaApproachSpeed(distance: number): number {
+  return 86 + Math.min(36, Math.max(0, distance - 65) * .18);
+}
+
+/** Edge maneuvers approach the nearest rim early, rather than sprinting there at release. */
+export function arenaRimContact(origin: ArenaPoint): ArenaPoint {
+  const side = origin.x >= 500 ? 1 : -1, y = Math.max(370, Math.min(465, origin.y));
+  const rim = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((y - 416) / 112) ** 2));
+  return { x: rim - side * 108, y };
 }
 
 export function arenaReleaseTarget(origin: ArenaPoint, center: ArenaPoint, role: ArenaActionActor['role'], progress: number): ArenaPoint {
@@ -222,13 +268,15 @@ export function arenaRounds(order: string[], duration = 44_000): ArenaRound[] {
     const aggressor = pool[(seed + index * 7 + index * index) % pool.length];
     const helpers = pool.filter(id => id !== aggressor);
     const possibleHelper = helpers.length ? helpers[((seed >>> 5) + index * 3) % helpers.length] : undefined;
-    const tactic = possibleHelper && index === allianceAt ? (seed % 2 ? 'team' : 'betrayal') : eliminationTactics[(seed + index) % eliminationTactics.length];
+    const planned = eliminationTactics[(seed + index) % eliminationTactics.length];
+    const tactic = possibleHelper && index === allianceAt ? (seed % 2 ? 'team' : 'betrayal') : planned === 'shove' && !possibleHelper ? 'edge' : planned;
     const span = Math.min(5 * unit, spacing);
     const start = 2.6 * unit + (index + 1) * spacing - span;
     const impact = start + span - 1.55 * unit;
-    return { id: `arena-${index}`, index, tactic, aggressor, helper: tactic === 'team' || tactic === 'betrayal' ? possibleHelper : undefined, victim, start, impact, resolve: impact + 1.1 * unit, end: start + span, final: false };
+    return { id: `arena-${index}`, index, tactic, aggressor, helper: tactic === 'team' || tactic === 'betrayal' || tactic === 'shove' ? possibleHelper : undefined, victim, start, impact, resolve: impact + 1.1 * unit, end: start + span, final: false };
   });
-  const finalTactic = order.length <= 4 ? seed % 3 === 1 ? 'bait' : seed % 3 === 2 ? 'edge' : 'final' : 'final';
+  const finishSeed = ((seed >>> 4) ^ seed) >>> 0;
+  const finalTactic = finishSeed % 5 === 1 || finishSeed % 5 === 2 ? 'catch' : order.length <= 4 ? seed % 3 === 1 ? 'bait' : seed % 3 === 2 ? 'edge' : 'final' : 'final';
   rounds.push({ id: 'arena-final', index: preliminaries, tactic: finalTactic, aggressor: order[0], victim: order[1], start: 33.2 * unit, impact: 38.2 * unit, resolve: 39.3 * unit, end: duration, final: true });
   return rounds;
 }
@@ -250,8 +298,8 @@ export function arenaExchange(order: string[], elapsed: number, duration = 44_00
   const unit = duration / 44;
   const span = 4.8 * unit;
   const epoch = Math.floor(elapsed / span);
-  const aggressor = living[epoch % living.length];
-  const victim = living[(epoch + 1) % living.length];
+  const aggressor = living[0];
+  const victim = living[1];
   const tactic = soloTactics[epoch % soloTactics.length];
   return { id: `exchange-${epoch}-${living.join('-')}`, index: epoch, tactic, aggressor, victim, start: epoch * span, impact: epoch * span + 3.2 * unit, resolve: Infinity, end: (epoch + 1) * span, final: false, exchange: true };
 }
@@ -368,12 +416,23 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
     const edge = arenaEdgeTargets(round, elapsed, { x: 675, y: 490 });
     return { title: edge.stage === 'approach' ? '경계에서 서로를 견제한다' : edge.stage === 'contest' ? '끝에서 맞잡았다 · 뒷발로 버틴다' : edge.stage === 'push' ? '한 발씩 밀린다 · 경계가 가깝다!' : '뒷발이 빠졌다! 아래로 넘어간다', detail: elapsed >= round.impact ? `${v}의 뒷발이 경계를 넘었습니다. 들어 올리지 않고 모래판 아래로 밀려 떨어집니다.` : edge.stage === 'push' || edge.stage === 'tip' ? `${a}가 앞발을 딛고 밀어붙입니다. ${v}는 손을 놓지 않고 발을 바꿔 딛으며 버팁니다.` : `${a} · ${v}, 가장자리에서 거리를 좁힙니다. 손을 맞잡고 몸을 낮춰 서로의 힘을 살핍니다.` };
   }
+  if (round.tactic === 'catch' && elapsed < round.resolve) {
+    const state = arenaCatchTargets(round, elapsed, { x: 675, y: 430 });
+    return { title: state.stage === 'prepare' ? '몸을 낮추고 돌진을 기다린다' : state.stage === 'charge' ? '달려든다! 두 팔로 받아낸다' : state.stage === 'catch' ? '붙잡았다! 발을 바꿔 힘을 돌린다' : '돌진의 힘으로 되치기!', detail: state.stage === 'prepare' || state.stage === 'charge' ? `${v}가 몸을 숙이고 돌진합니다. ${a}는 두 팔을 내밀고 중심을 낮춥니다.` : `${a}가 ${v}의 몸통을 붙잡았습니다. 뒤로 한 발 디뎌 충격을 받아낸 뒤, 골반을 돌려 들어 날립니다.` };
+  }
+  if (round.tactic === 'shove' && elapsed < round.resolve) {
+    const shove = arenaShoveTargets(round, elapsed, { x: 675, y: 430 });
+    const detail = elapsed >= round.impact ? `${h}가 손을 놓고 발을 고쳐 딛었습니다. ${v}는 경계 아래로 밀려 떨어집니다.` : shove.stage === 'wrestle' || shove.stage === 'approach' ? `${v} · ${h}가 손을 잡고 싸웁니다. ${a}는 둘의 옆으로 접근하며 빈틈을 살핍니다.` : shove.stage === 'contact' ? `${a}가 어깨와 두 손으로 밀었습니다! ${v} · ${h}의 중심이 함께 흔들립니다.` : `${a}가 발을 딛고 밀어붙입니다. ${h}는 손을 풀고 중심을 잡고, ${v}는 한 발씩 경계로 밀립니다.`;
+    return { title: shove.stage === 'wrestle' ? '맞잡은 두 선수 · 옆에서 빈틈을 본다' : shove.stage === 'approach' ? '몸싸움 틈으로 다가온다' : shove.stage === 'contact' ? '옆에서 밀었다! 중심이 흔들린다' : elapsed >= round.impact ? '한 명은 버텼다! 다른 한 명은 장외' : '발을 고쳐 딛는다! 경계가 가깝다', detail };
+  }
   if (round.exchange && elapsed >= round.impact) return { title: '버텼다! 다시 빈틈을 살핍니다', detail: `${a} · ${v}, 모두 모래판을 지켰습니다. 손을 풀고 다음 빈틈을 봅니다.` };
   if (elapsed >= round.resolve) return { title: round.final ? `${a}, 오늘의 장사!` : `장외! ${v} · ${order.indexOf(round.victim) + 1}위 확정`, detail: round.final ? `${round.tactic === 'bait' ? '마지막 돌진을 피했습니다. 상대가 관성으로 장외에 넘어졌습니다.' : round.tactic === 'edge' ? '끝까지 버티던 상대를 경계 밖으로 밀어냈습니다.' : '버티던 마지막 상대를 뒤집었습니다.'} ${order.length >= 3 ? '1·2·3위 선수들이' : '1·2위 선수들이'} 시상대에서 인사합니다.` : `${v}, 모래판 밖에 착지했습니다. 나머지 선수들의 난투는 계속됩니다.` };
-  const titles: Record<ArenaTactic, string> = { team: '협공 · 한 명은 길을 막고, 한 명은 민다', bait: '미끼 · 돌진을 기다렸다가 옆으로 피한다', edge: '가장자리 승부 · 발을 딛고 밀어낸다', counter: '역습 · 밀리던 쪽이 중심을 낮춘다', betrayal: '배신 · 등을 맡긴 순간 방향을 바꾼다', brace: '버티기 · 발을 박고 힘을 되돌린다', lift: '들배지기 · 체중을 싣고 들어 올린다', final: '마지막 두 명 · 최후의 버티기' };
+  const titles: Record<ArenaTactic, string> = { team: '협공 · 한 명은 길을 막고, 한 명은 민다', bait: '미끼 · 돌진을 기다렸다가 옆으로 피한다', catch: '돌진을 받아 잡고 되치기', shove: '몸싸움에 끼어 어깨로 밀기', edge: '가장자리 승부 · 발을 딛고 밀어낸다', counter: '역습 · 밀리던 쪽이 중심을 낮춘다', betrayal: '배신 · 등을 맡긴 순간 방향을 바꾼다', brace: '버티기 · 발을 박고 힘을 되돌린다', lift: '들배지기 · 체중을 싣고 들어 올린다', final: '마지막 두 명 · 최후의 버티기' };
   const details: Record<ArenaTactic, string> = {
     team: `${h}, ${v}의 퇴로를 막습니다. ${a}, 앞에서 함께 밀어냅니다.`,
     bait: `${a}, 틈을 보입니다. ${v}의 돌진을 옆으로 피해 관성을 이용합니다.`,
+    catch: `${a}, ${v}의 돌진을 두 팔로 받아냅니다. 몸통을 놓지 않고 발을 돌려 되칩니다.`,
+    shove: `${a}, 싸우던 ${v} · ${h}의 옆으로 끼어들어 어깨를 밀어냅니다.`,
     edge: `${a}, 경계 가까이에서 손을 맞잡고 밀어붙입니다. ${v}는 발을 바꿔 딛으며 끝에서 버팁니다.`,
     counter: `${a}, 낮게 파고들어 샅바를 잡습니다. ${v}의 밀기를 되칩니다.`,
     betrayal: `${v} · ${h}, 공동공격 뒤 ${h}가 손을 놓습니다. ${a}가 앞에서 역습합니다.`,

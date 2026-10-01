@@ -136,7 +136,8 @@ export class PixelCitizen {
     const breath = Math.sin(clock / 540);
     const p = this.personality;
     const target: Motion = { y: breath * 0.4, angle: Math.sin(clock / 1100) * 0.6, head: Math.sin(clock / 730) * 1.5, sx: 1, sy: 1, la: 4 + breath * 2, ra: -4 - breath * 2, le: 3, re: -3, ll: 0, rl: 0, lk: 0, rk: 0, mouth: 1, brows: 0 };
-    const groundedStride = this.locomotionDistance === undefined || reduced || !['walk', 'run'].includes(this.pose) ? undefined : citizenStride(this.locomotionDistance, p, smooth(((this.locomotionVelocity ?? 35) - 18) / 38));
+    const gaitActivity = this.pose === 'run' ? Math.max(.6, smooth(((this.locomotionVelocity ?? 35) - 18) / 38)) : smooth(((this.locomotionVelocity ?? 35) - 18) / 38);
+    const groundedStride = this.locomotionDistance === undefined || reduced || !['walk', 'run'].includes(this.pose) ? undefined : citizenStride(this.locomotionDistance, p, gaitActivity);
     if (this.pose === 'walk' || this.pose === 'run') {
       const running = this.pose === 'run';
       const swing = Math.sin(stride * (running ? 1.35 : 1));

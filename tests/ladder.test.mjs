@@ -8,7 +8,7 @@ async function load(entry) {
 }
 const { buildLadderTimeline, ladderFrame, LADDER_STORIES, LADDER_RUNGS, LADDER_ROOF_STEAL_CHANCE } = await load('src/ladderLogic.ts');
 const { createSportsOrder } = await load('src/sports.ts');
-const { createLadderGeometry, ladderArtActors, sampleLadderRig, ladderSuspension, drawLadderCrossing, drawLadderActor } = await load('src/game/ladderArt.ts');
+const { createLadderGeometry, ladderArtActors, sampleLadderRig, ladderSuspension, drawLadderCrossing, drawLadderActor, ladderActorView, LADDER_ARM_LENGTH } = await load('src/game/ladderArt.ts');
 const { drawLadderAdventure } = await load('src/game/ladderAdventureArt.ts');
 const participants = Array.from({ length: 10 }, (_, index) => ({ id: `person-${index}`, name: `참가자 ${index + 1}`, color: '#83c7de' }));
 
@@ -33,6 +33,7 @@ test('both rendered legs stay proportionate and folded across takeoff, flight, c
           const lower = Math.hypot(rig.feet[side].x - rig.knees[side].x, rig.feet[side].y - rig.knees[side].y);
           assert.ok(upper <= geometry.scale * 7 && lower <= geometry.scale * 7, 'neither thigh nor shin grows longer during a jump or recovery');
           assert.ok(upper + lower <= geometry.scale * 14, 'the airborne legs keep the same proportion as the torso');
+          for (const [a, b] of [[rig.shoulders[side], rig.elbows[side]], [rig.elbows[side], rig.hands[side]]]) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) <= geometry.scale * (LADDER_ARM_LENGTH + .001), 'an arm does not lengthen to compensate for an unreachable grip');
           assert.ok(rig.legRoots[side].y > rig.hip.y, 'the trousers connect below the waist rather than drawing thighs from the belt');
           if (actor.eventStage === 'action' && actor.transferStage === 'catch' && actor.pose === 'hang') {
             assert.ok(rig.feet[side].y > rig.hip.y + geometry.scale * 2, 'a hanging boot stays below the pelvis, with the knee folded rather than reaching back to the old body origin');
@@ -61,13 +62,14 @@ test('both rendered legs stay proportionate and folded across takeoff, flight, c
   for (const motion of ['launch', 'swing', 'drop', 'slide', 'rotate', 'conveyor', 'portal', 'pounce']) assert.ok(seen.has(motion), 'all actual crossing mechanisms are exercised');
 });
 
-test('climbing, jumping and catching keep the rear head and shoulders until the award', () => {
+test('vertical grips use the rear view while lateral travel turns a complete face toward movement', () => {
   for (const pose of ['idle', 'climb', 'launch', 'swing', 'drop', 'hang', 'clamber', 'transfer', 'run', 'balance']) {
     const geometry = createLadderGeometry(800, 600, 5), actor = { id: participants[0].id, index: 0, candidate: participants[0], lane: 2, rungProgress: 10, height: 10 / 24, pose, phase: .5, arrived: false };
     const colors = [], context = new Proxy({}, { get: () => () => {}, set: (_, key, value) => { if (key === 'fillStyle') colors.push(value); return true; } });
     drawLadderActor(context, actor, geometry, 1000);
-    assert.ok(!colors.includes('#172d3d'), `${pose} cannot show front eyes while the camera looks at the climber's back`);
-    assert.ok(!colors.includes('#ddc387') && !colors.includes('#f1eadc'), `${pose} cannot put the front buckle or chest stripe onto the back`);
+    const lateral = ['launch', 'swing', 'drop', 'transfer', 'run'].includes(pose);
+    assert.equal(ladderActorView(actor), lateral ? 'quarter' : 'rear');
+    assert.equal(colors.includes('#172d3d'), lateral, 'a horizontal action shows the complete turned face instead of a rigid climbing back');
     const front = [];
     const awardContext = new Proxy({}, { get: () => () => {}, set: (_, key, value) => { if (key === 'fillStyle') front.push(value); return true; } });
     drawLadderActor(awardContext, { ...actor, pose: 'win', arrived: true }, geometry, 1000);
@@ -98,6 +100,17 @@ test('deck transfers land with both boots on the receiving floor instead of hang
         assert.ok(Math.abs(first.rig.feet[side].y - geometry.rowY(segment.toRow)) < .001, 'the sole touches the actual receiving floor');
         assert.ok(Math.hypot(first.rig.feet[side].x - later.rig.feet[side].x, first.rig.feet[side].y - later.rig.feet[side].y) < .001, 'the receiving floor holds each boot still while the arms recover');
       }
+      let priorRow = segment.fromRow;
+      for (let time = action; time < segment.end; time += 16) {
+        const actor = read(time).actors.find(item => item.id === id);
+        assert.ok(actor.rungProgress >= priorRow - 1e-9, 'a supported crossing never inserts a drop-and-pull arc');
+        priorRow = actor.rungProgress;
+      }
+      const recovery = resolve + (segment.end - resolve) * .5;
+      const recoveryActor = ladderArtActors(timeline, read(recovery), candidates, recovery, geometry, false, read).find(item => item.id === id);
+      const recoveryRig = sampleLadderRig(recoveryActor, geometry, recovery);
+      assert.equal(recoveryActor.pose, 'balance', 'a deck landing stays planted rather than starting another hang');
+      assert.ok(Math.abs(recoveryRig.hip.y - first.rig.hip.y) < .001, 'the body holds its height while preparing the next climbing grip');
     }
   }
   assert.deepEqual([...seen].sort(), ['conveyor', 'portal', 'rotate']);
@@ -225,7 +238,7 @@ test('the final lifting grips stay within real arm reach before the throw releas
       const direction = Math.sign(thrower.toLane - thrower.fromLane), belt = { x: b.hip.x + direction * 5.8 * geometry.scale, y: b.hip.y - geometry.scale };
       assert.ok(Math.hypot(a.hands[0].x - b.hands[1].x, a.hands[0].y - b.hands[1].y) < .01, 'the wrist grip is held until release, including tall canvases');
       assert.ok(Math.hypot(a.hands[1].x - belt.x, a.hands[1].y - belt.y) < .01, 'the other hand holds the near belt rather than reaching through the body');
-      for (const side of [0, 1]) assert.ok(Math.hypot(a.hands[side].x - a.shoulders[side].x, a.hands[side].y - a.shoulders[side].y) < geometry.scale * 15, 'the lift uses bent physical arms rather than overstretched reaching');
+      for (const side of [0, 1]) assert.ok(Math.hypot(a.hands[side].x - a.shoulders[side].x, a.hands[side].y - a.shoulders[side].y) < geometry.scale * LADDER_ARM_LENGTH * 2, 'the lift uses bent physical arms rather than overstretched reaching');
     }
   }
 });
@@ -940,4 +953,13 @@ test('rope swings retain a fixed anchor and length, while long routes follow a c
   const context = new Proxy({}, { get: (_, key) => (...args) => touched.push([key, args]), set: (_, key, value) => { touched.push([key, value]); return true; } });
   drawLadderCrossing(context, { ...actor, eventStage: 'setup' }, g, 0, false);
   assert.deepEqual(touched, [], 'the next mechanism cannot be seen before the action');
+  for (const direction of [-1, 1]) for (const progress of [.2, .4, .6]) {
+    const hanging = { ...actor, toLane: actor.fromLane + direction, transferProgress: progress, actionProgress: progress * .86 };
+    const suspension = ladderSuspension(hanging, g);
+    const placed = { ...hanging, lane: (suspension.floor.x - g.left) / g.laneGap, rungProgress: (g.bottom - suspension.floor.y) / g.rungGap };
+    const rig = sampleLadderRig(placed, g, 1000);
+    for (const hand of rig.hands) assert.ok(Math.abs(hand.y - suspension.handle.y) < .001, 'both shortened arms hold the same real crossbar');
+    assert.ok(Math.abs((rig.hands[0].x + rig.hands[1].x) / 2 - suspension.handle.x) < .001, 'the rope cannot quietly detach from the hands during horizontal travel');
+    assert.equal(ladderActorView(placed), 'quarter');
+  }
 });

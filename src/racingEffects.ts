@@ -1,8 +1,8 @@
 import type { RaceHorseMotion } from './racingArt';
-import type { RacingIncident } from './racingNarrative';
+import type { RacingIncident, RacingTrick } from './racingNarrative';
 import type { RacingObstacle } from './racingObstacles';
 
-export type RacingEffectPlacement = { id: string; x: number; y: number; scale: number };
+export type RacingEffectPlacement = { id: string; x: number; y: number; scale: number; hand?: { x: number; y: number }; helmet?: { x: number; y: number }; boot?: { x: number; y: number } };
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const smooth = (value: number) => { const p = clamp(value); return p * p * (3 - 2 * p); };
 const pulse = (phase: number, start: number, end: number) => phase <= start || phase >= end ? 0 : Math.sin(Math.PI * smooth((phase - start) / (end - start)));
@@ -83,4 +83,67 @@ export function drawRacingIncidentEffects(ctx: CanvasRenderingContext2D, inciden
     }
   }
   ctx.restore();
+}
+
+
+/** Adjacent rivals share one lane for a trick; course progress never changes here. */
+export function placeRacingTrick<T extends RacingEffectPlacement>(trick: RacingTrick | undefined, placements: T[], elapsed: number): T[] {
+  if (!trick || trick.kind === 'beanbag' || elapsed < trick.start || elapsed >= trick.recovered) return placements;
+  const actor = placements.find(item => item.id === trick.actorId), target = placements.find(item => item.id === trick.targetId);
+  if (!actor || !target) return placements;
+  const join = smooth((elapsed - trick.start) / Math.max(1, trick.release - trick.start)) * (1 - smooth((elapsed - trick.lowest) / (trick.recovered - trick.lowest)));
+  const center = (actor.y + target.y) / 2, gap = Math.min(actor.scale, target.scale) * (trick.kind === 'rear-kick' ? 3 : 9);
+  const sign = actor.y < target.y ? -1 : 1;
+  return placements.map(item => item.id === actor.id || item.id === target.id ? { ...item, y: item.y + (center + (item.id === actor.id ? sign : -sign) * gap - item.y) * join } : item);
+}
+
+export function racingTrickMotion(trick: RacingTrick | undefined, id: string, elapsed: number, placements: RacingEffectPlacement[], reduced = false): RaceHorseMotion {
+  if (!trick || reduced || elapsed < trick.start || elapsed >= trick.recovered || id !== trick.actorId && id !== trick.targetId) return {};
+  const scale = (trick.lowest - trick.impact) / 1350, actor = id === trick.actorId;
+  if (actor && trick.kind === 'rear-kick') {
+    const p = (elapsed - trick.release) / (trick.impact - trick.release);
+    const kick = elapsed < trick.impact ? smooth(p) : 1 - smooth((elapsed - trick.impact) / (450 * scale));
+    const source = placements.find(item => item.id === id), target = placements.find(item => item.id === trick.targetId);
+    const kickReach = source && target ? clamp((source.x - target.x - 29 * target.scale) / (42 * source.scale)) : .65;
+    const contact = target?.boot ?? (target ? { x: target.x + 5 * target.scale, y: target.y - 31 * target.scale } : undefined);
+    const kickX = source && contact ? (contact.x - source.x) / source.scale : -24 - 42 * kickReach;
+    const kickY = source && contact ? (contact.y - source.y) / source.scale : -31;
+    return { kick, kickReach, kickX, kickY, check: kick * .25 };
+  }
+  if (actor) {
+    const toss = smooth((elapsed - trick.start) / (400 * scale)) * (1 - smooth((elapsed - trick.release - 160 * scale) / (450 * scale)));
+    return { toss, tossRelease: smooth((elapsed - trick.release + 140 * scale) / (280 * scale)) };
+  }
+  const stun = smooth((elapsed - trick.impact) / (300 * scale)) * (1 - smooth((elapsed - trick.lowest + 150 * scale) / (650 * scale)));
+  const chase = smooth((elapsed - trick.lowest) / (350 * scale)) * (1 - smooth((elapsed - trick.recovered + 400 * scale) / (400 * scale)));
+  return { stun, check: stun * .94, stumble: stun * .16, crouch: chase * .85 };
+}
+
+/** The same current hand and helmet coordinates drive release, flight and contact. */
+export function racingTrickProjectile(trick: RacingTrick, placements: RacingEffectPlacement[], elapsed: number) {
+  if (trick.kind !== 'beanbag' || elapsed < trick.release || elapsed > trick.impact) return undefined;
+  const actor = placements.find(item => item.id === trick.actorId), target = placements.find(item => item.id === trick.targetId);
+  if (!actor || !target) return undefined;
+  const p = clamp((elapsed - trick.release) / (trick.impact - trick.release)), s = (actor.scale + target.scale) / 2;
+  const from = actor.hand ?? { x: actor.x + 12 * actor.scale, y: actor.y - 73 * actor.scale };
+  const to = target.helmet ?? { x: target.x + 14 * target.scale, y: target.y - 76 * target.scale };
+  return { x: from.x + (to.x - from.x) * p, y: from.y + (to.y - from.y) * p - Math.sin(p * Math.PI) * 30 * s, scale: s, phase: p, target: to };
+}
+
+export function drawRacingTrickEffects(ctx: CanvasRenderingContext2D, trick: RacingTrick | undefined, placements: RacingEffectPlacement[], elapsed: number, reduced: boolean) {
+  if (!trick || reduced) return;
+  const ball = racingTrickProjectile(trick, placements, elapsed);
+  if (ball) {
+    ctx.save(); ctx.translate(ball.x, ball.y); ctx.scale(ball.scale, ball.scale); ctx.rotate(ball.phase * Math.PI * 3);
+    ctx.fillStyle = '#edb349'; ctx.strokeStyle = '#493520'; ctx.lineWidth = .8; ctx.beginPath(); ctx.roundRect(-4, -3.5, 8, 7, 1.6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff0a9'; ctx.fillRect(-2.5, -2, 3, 1.4); ctx.strokeStyle = '#7c5428'; ctx.beginPath(); ctx.moveTo(1, -2.5); ctx.lineTo(1, 2.5); ctx.stroke(); ctx.restore();
+  }
+  const target = placements.find(item => item.id === trick.targetId), age = (elapsed - trick.impact) / (trick.lowest - trick.impact);
+  if (target && age >= 0 && age < .42) {
+    const contact = trick.kind === 'beanbag' ? target.helmet : target.boot;
+    ctx.save(); ctx.globalAlpha *= 1 - age / .42; ctx.translate(contact?.x ?? target.x + (trick.kind === 'beanbag' ? 14 : 5) * target.scale, contact?.y ?? target.y - (trick.kind === 'beanbag' ? 76 : 31) * target.scale); ctx.scale(target.scale, target.scale);
+    ctx.strokeStyle = '#ffebaa'; ctx.lineWidth = 1.8;
+    for (let ray = 0; ray < 6; ray++) { const a = ray * Math.PI / 3; ctx.beginPath(); ctx.moveTo(Math.cos(a) * (3 + age * 6), Math.sin(a) * (3 + age * 6)); ctx.lineTo(Math.cos(a) * (8 + age * 8), Math.sin(a) * (8 + age * 8)); ctx.stroke(); }
+    ctx.restore();
+  }
 }

@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 const compiled = await build({ entryPoints: ['src/sports.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createSportsOrder } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const arenaCompiled = await build({ entryPoints: ['src/arenaLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { arenaRounds, arenaRanks, arenaThrow, arenaExchange, arenaBeat, arenaAction, arenaFocusRound, arenaMiniExchanges, arenaContactPoint, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaGuardTarget, arenaReleaseTarget, arenaMove, ARENA_MAX_GROUND_SPEED } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
+const { arenaRounds, arenaRanks, arenaThrow, arenaExchange, arenaBeat, arenaAction, arenaFocusRound, arenaMiniExchanges, arenaLocalContact, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaGuardTarget, arenaReleaseTarget, arenaMove, ARENA_MAX_GROUND_SPEED } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
 const fighterCompiled = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { arenaDrawOrder } = await import(`data:text/javascript;base64,${Buffer.from(fighterCompiled.outputFiles[0].text).toString('base64')}`);
 const storyCompiled = await build({ entryPoints: ['src/arenaStoryLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
@@ -348,12 +348,16 @@ test('background mini exchanges engage every available pair independently and ne
 });
 
 test('simultaneous duels reserve separate contacts instead of forming an accidental alliance pileup', () => {
-  for (const origin of [{ x: 500, y: 440 }, { x: 575, y: 425 }, { x: 400, y: 410 }]) {
+  for (let size = 2; size <= 10; size++) {
+    const available = participants.slice(0, size).map((person, index) => ({ id: person.id, ...arenaStartingPoint(index, size) }));
     const occupied = [];
-    for (let pair = 0; pair < 5; pair++) {
-      const center = arenaContactPoint(origin, occupied);
-      for (const other of occupied) assert.ok(Math.hypot((center.x - other.x) / 180, (center.y - other.y) / 95) >= .99, 'independent pairs must have distinct physical room');
+    for (const round of arenaMiniExchanges(available, 12_000)) {
+      const a = available.find(person => person.id === round.aggressor), v = available.find(person => person.id === round.victim);
+      const origin = { x: (a.x + v.x) / 2, y: (a.y + v.y) / 2 };
+      const center = arenaLocalContact(origin, occupied);
+      for (const other of occupied) assert.ok(Math.hypot((center.x - other.x) / 108, (center.y - other.y) / 63) >= .99, 'nearby independent pairs must retain physical room');
       assert.ok((center.x - 500) ** 2 / 303 ** 2 + (center.y - 416) ** 2 / 112 ** 2 < 1, 'the contact stays on the sand');
+      assert.ok(Math.hypot(center.x - origin.x, center.y - origin.y) <= 50, 'starting a bout cannot send a nearby pair to a distant fixed arena patch');
       occupied.push(center);
     }
   }

@@ -13,7 +13,38 @@ const path = (ctx: CanvasRenderingContext2D, draw: () => void, fill: string | Ca
   ctx.beginPath(); draw(); ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = .7; ctx.stroke(); }
 };
 
-export type RaceHorseMotion = { gait?: 'idle' | 'walk' | 'gallop'; phase?: number; settle?: number; victory?: number; jump?: number; stumble?: number; crouch?: number; check?: number; slip?: number; trip?: number };
+export type RaceHorseMotion = { gait?: 'idle' | 'walk' | 'gallop'; phase?: number; settle?: number; victory?: number; jump?: number; stumble?: number; crouch?: number; check?: number; slip?: number; trip?: number; fall?: number; spill?: number; kick?: number; kickReach?: number; kickX?: number; kickY?: number; toss?: number; tossRelease?: number; stun?: number };
+
+export type RaceHorseAttachment = { hand: { x: number; y: number }; helmet: { x: number; y: number }; boot: { x: number; y: number }; bounce: number; pitch: number; riderAngle: number };
+/** Attachments use the same body and rider transforms as the painted limbs. */
+export function raceHorseAttachments(index: number, clock: number, speed: number, reduced: boolean, motion: RaceHorseMotion = {}, lean = 0): RaceHorseAttachment {
+  const ease = (value: number) => { const p = clamp(value, 0, 1); return p * p * (3 - 2 * p); };
+  const mode = motion.gait ?? (speed > .15 ? 'gallop' : 'idle');
+  const fall = reduced ? 0 : clamp(motion.fall ?? 0, 0, 1), kick = reduced ? 0 : clamp(motion.kick ?? 0, 0, 1);
+  const spill = reduced ? 0 : clamp(motion.spill ?? 0, 0, 1), stun = reduced ? 0 : clamp(motion.stun ?? 0, 0, 1);
+  const activity = (reduced || mode === 'idle' ? 0 : 1 - ease(motion.settle ?? 0)) * (1 - fall * .92);
+  const period = mode === 'walk' ? 960 + index % 3 * 34 : 560 + index % 4 * 22;
+  const phase = reduced ? 0 : ((motion.phase ?? clock / period + index * .193) % 1 + 1) % 1, cycle = phase * Math.PI * 2;
+  const breath = reduced ? 0 : Math.sin(clock / 960 + index * .83) * .18;
+  const bob = breath + (.15 + Math.cos((phase - .12) * Math.PI * 2) * (mode === 'walk' ? .30 : 1.15) - breath) * activity;
+  const jump = reduced ? 0 : clamp(motion.jump ?? 0, 0, 1), stumble = reduced ? 0 : motion.stumble ?? 0;
+  const crouch = reduced ? 0 : clamp(motion.crouch ?? 0, 0, 1), check = reduced ? 0 : clamp(motion.check ?? 0, 0, 1);
+  const bounce = bob - 12 + activity * (mode === 'walk' ? 2 : 4) - jump * 24 + Math.abs(stumble) * 7 + fall * 21;
+  const pitch = activity * (clamp(lean, -8, 8) * .004 + (mode === 'walk' ? 0 : -.008 + Math.sin(cycle) * .012)) + stumble * .18 - jump * .035 + fall * .40 - kick * .12;
+  const shoulder = { x: -2 + 13 * activity + crouch * 5 - stumble * 4 - check * 13 - stun * 8, y: -59 + 6 * activity - activity * Math.sin(cycle + .3) * .35 + crouch * 3 - check * 5 + stun * 9 };
+  const victory = reduced ? 0 : ease(motion.victory ?? 0), toss = reduced ? 0 : clamp(motion.toss ?? 0, 0, 1), release = reduced ? 0 : clamp(motion.tossRelease ?? 0, 0, 1);
+  const hand = { x: (16 + 9 * activity - check * 9) * (1 - victory) + 13 * victory, y: (-45 + 2 * activity - check * 2) * (1 - victory) - 78 * victory };
+  hand.x += (-11 + release * 46 - hand.x) * toss; hand.y += (-69 + release * 8 - hand.y) * toss;
+  const reach = Math.min(1, 24.8 / Math.max(.01, Math.hypot(hand.x - shoulder.x, hand.y - shoulder.y)));
+  hand.x = shoulder.x + (hand.x - shoulder.x) * reach; hand.y = shoulder.y + (hand.y - shoulder.y) * reach;
+  const riderAngle = -spill * .54 + stun * .20;
+  const transform = (point: { x: number; y: number }) => {
+    const rx = point.x + 3 - spill * 11, ry = point.y + 43 + spill * 5;
+    const x = -3 + rx * Math.cos(riderAngle) - ry * Math.sin(riderAngle), y = -43 + rx * Math.sin(riderAngle) + ry * Math.cos(riderAngle);
+    return { x: x * Math.cos(pitch) - y * Math.sin(pitch), y: x * Math.sin(pitch) + y * Math.cos(pitch) + bounce };
+  };
+  return { hand: transform(hand), helmet: transform({ x: shoulder.x + 3, y: shoulder.y - 14 }), boot: transform({ x: 5, y: -23 }), bounce, pitch, riderAngle };
+}
 
 /** A grounded four-beat stride, with the rider's pelvis and boots tied to the saddle. */
 export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidate, index: number, x: number, y: number, scale: number, clock: number, speed: number, reduced: boolean, cheer = false, lean = 0, motion: RaceHorseMotion = {}) {
@@ -31,7 +62,10 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   };
   const mode = motion.gait ?? (speed > .15 ? 'gallop' : 'idle');
   const settle = reduced ? 1 : clamp(motion.settle ?? 0, 0, 1);
-  const activity = reduced || mode === 'idle' ? 0 : 1 - ease(settle);
+  const fall = reduced ? 0 : clamp(motion.fall ?? 0, 0, 1);
+  const kick = reduced ? 0 : clamp(motion.kick ?? 0, 0, 1), kickReach = clamp(motion.kickReach ?? .65, 0, 1);
+  const stun = reduced ? 0 : clamp(motion.stun ?? 0, 0, 1), spill = reduced ? 0 : clamp(motion.spill ?? 0, 0, 1);
+  const activity = (reduced || mode === 'idle' ? 0 : 1 - ease(settle)) * (1 - fall * .92);
   const period = mode === 'walk' ? 960 + index % 3 * 34 : 560 + index % 4 * 22;
   const phase = reduced ? 0 : wrap(motion.phase ?? clock / period + index * .193);
   const cycle = phase * Math.PI * 2;
@@ -44,8 +78,8 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   const jump = reduced ? 0 : clamp(motion.jump ?? 0, 0, 1), stumble = reduced ? 0 : motion.stumble ?? 0, crouch = reduced ? 0 : clamp(motion.crouch ?? 0, 0, 1);
   const bob = mix(breath, .15 + Math.cos((phase - .12) * Math.PI * 2) * (mode === 'walk' ? .30 : 1.15), activity);
   // Give the cannon bones room below the belly, rather than folding four short legs into it.
-  const bounce = bob - 12 + activity * (mode === 'walk' ? 2 : 4) - jump * 24 + Math.abs(stumble) * 7;
-  const pitch = activity * (clamp(lean, -8, 8) * .004 + (mode === 'walk' ? 0 : -.008 + Math.sin(cycle) * .012)) + stumble * .18 - jump * .035;
+  const bounce = bob - 12 + activity * (mode === 'walk' ? 2 : 4) - jump * 24 + Math.abs(stumble) * 7 + fall * 21;
+  const pitch = activity * (clamp(lean, -8, 8) * .004 + (mode === 'walk' ? 0 : -.008 + Math.sin(cycle) * .012)) + stumble * .18 - jump * .035 + fall * .40 - kick * .12;
   const bodyPoint = (point: Point): Point => { const p = rotate(point, pitch); return { x: p.x, y: p.y + bounce }; };
   const coat = coats[index % coats.length], dark = ['#583928', '#302e35', '#805632', '#a09b90', '#514a41', '#773e28'][index % 6];
   const legData = [
@@ -61,7 +95,9 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
     const travelX = support ? center + strideLength * (.5 - p / stance) : mix(center - strideLength / 2, center + strideLength / 2, ease(swing)) + fold * (data.rear ? 4 : -6);
     const lift = support ? 0 : fold * (mode === 'walk' ? 3 : data.rear ? 9 : 13);
     const gathered = data.rear ? data.hip.x + 4 : data.hip.x - 7;
-    const hoof = { x: mix(mix(data.rest, travelX, activity), gathered, jump * .65) + slip * (data.rear ? -3 : 12) - (data.rear ? 0 : trip * 13), y: -2 - lift * activity * (1 - jump * .8) * (1 - slip * .9) - jump * (data.rear ? 30 : 37) - (data.rear ? 0 : trip * 6) };
+    let hoof = { x: mix(mix(data.rest, travelX, activity), gathered, jump * .65) + slip * (data.rear ? -3 : 12) - (data.rear ? 0 : trip * 13), y: -2 - lift * activity * (1 - jump * .8) * (1 - slip * .9) - jump * (data.rear ? 30 : 37) - (data.rear ? 0 : trip * 6) };
+    hoof = { x: mix(hoof.x, data.rear ? -33 : 37, fall), y: mix(hoof.y, -1, fall) };
+    if (data.rear) hoof = { x: mix(hoof.x, (motion.kickX ?? -24 - 42 * kickReach) + (data.far ? -1 : 0), kick), y: mix(hoof.y, (motion.kickY ?? -23) + (data.far ? -1 : 0), kick) };
     const hip = bodyPoint(data.hip);
     const ankle = { x: hoof.x - 1.8, y: hoof.y - 3.8 };
     if (data.rear) {
@@ -115,8 +151,10 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   raceBox(ctx, -16, -38, 33, 21, 3, candidate.color, '#192434');
   ctx.fillStyle = '#ffffff77'; ctx.fillRect(-14, -36, 29, 2); raceLabel(ctx, String(index + 1).padStart(2, '0'), -6, -26, 10, '#111e2c', true);
   path(ctx, () => { ctx.moveTo(-11, -40); ctx.bezierCurveTo(-5, -44, 4, -43, 8, -39); ctx.lineTo(7, -36); ctx.lineTo(-10, -36); ctx.closePath(); }, '#2b2430', '#d6b985');
+  // A falling rider slips back, folds at the saddle, then regains the seat.
+  ctx.save(); ctx.translate(-3, -43); ctx.rotate(-spill * .54 + stun * .20); ctx.translate(3 - spill * 11, 43 + spill * 5);
   const pelvis = { x: -3, y: -43 - activity * .55 };
-  const shoulder = { x: mix(-2, 11, activity) + crouch * 5 - stumble * 4 - check * 13, y: mix(-59, -53, activity) - activity * Math.sin(cycle + .3) * .35 + crouch * 3 - check * 5 };
+  const shoulder = { x: mix(-2, 11, activity) + crouch * 5 - stumble * 4 - check * 13 - stun * 8, y: mix(-59, -53, activity) - activity * Math.sin(cycle + .3) * .35 + crouch * 3 - check * 5 + stun * 9 };
   const boot = { x: 5, y: -23 }, knee = joint(pelvis, boot, 12.5, 10.5, 1);
   bone(pelvis, knee, 5.2, '#e3e0d8'); bone(knee, boot, 4.4, '#e3e0d8');
   ctx.strokeStyle = '#b1a07e'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(-1, -39); ctx.lineTo(6, -23); ctx.stroke();
@@ -124,7 +162,11 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   bone({ x: boot.x - 2, y: boot.y }, { x: boot.x + 5, y: boot.y }, 3.8, '#142135');
   const victory = reduced ? (cheer ? 1 : 0) : ease(clamp(motion.victory ?? (cheer ? 1 : 0), 0, 1));
   const farHand = { x: mix(15, 24, activity) - check * 9, y: mix(-46, -43, activity) - check * 2 };
-  const nearHand = { x: mix(mix(16, 25, activity) - check * 9, 13, victory), y: mix(mix(-45, -43, activity) - check * 2, -78, victory) };
+  let nearHand = { x: mix(mix(16, 25, activity) - check * 9, 13, victory), y: mix(mix(-45, -43, activity) - check * 2, -78, victory) };
+  const toss = reduced ? 0 : clamp(motion.toss ?? 0, 0, 1), tossRelease = reduced ? 0 : clamp(motion.tossRelease ?? 0, 0, 1);
+  nearHand = { x: mix(nearHand.x, -11 + tossRelease * 46, toss), y: mix(nearHand.y, -69 + tossRelease * 8, toss) };
+  const nearReach = Math.min(1, 24.8 / Math.max(.01, Math.hypot(nearHand.x - shoulder.x, nearHand.y - shoulder.y)));
+  nearHand = { x: shoulder.x + (nearHand.x - shoulder.x) * nearReach, y: shoulder.y + (nearHand.y - shoulder.y) * nearReach };
   const bridle = rotate({ x: 49 - 23, y: -40 + 29 }, nod);
   ctx.strokeStyle = '#e1c496'; ctx.lineWidth = .9; ctx.beginPath(); ctx.moveTo(bridle.x + 23, bridle.y - 29); ctx.quadraticCurveTo(34, -42, farHand.x, farHand.y); ctx.stroke();
   const riderArm = (a: Point, hand: Point, far: boolean) => {
@@ -138,13 +180,27 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   path(ctx, () => { ctx.moveTo(pelvis.x - 5, pelvis.y - 2); ctx.lineTo(shoulder.x - 5, shoulder.y - 2); ctx.quadraticCurveTo(shoulder.x + 3, shoulder.y - 4, shoulder.x + 6, shoulder.y + 2); ctx.lineTo(pelvis.x + 5, pelvis.y + 3); ctx.closePath(); }, candidate.color, '#243447');
   bone({ x: pelvis.x - 2, y: pelvis.y - 3 }, { x: shoulder.x + 1, y: shoulder.y - 1 }, 2, '#ffffffbb');
   riderArm(shoulder, nearHand, false);
+  if (toss > .08 && tossRelease <= .5) {
+    ctx.fillStyle = '#edb349'; ctx.strokeStyle = '#493520'; ctx.lineWidth = .8; ctx.beginPath(); ctx.roundRect(nearHand.x - 4, nearHand.y - 3.5, 8, 7, 1.6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff0a9'; ctx.fillRect(nearHand.x - 2.5, nearHand.y - 2, 3, 1.4);
+  }
   const head = { x: shoulder.x + 3, y: shoulder.y - 9 };
   bone({ x: shoulder.x + 1, y: shoulder.y - 2 }, { x: head.x - 1, y: head.y + 3 }, 3, '#ecc39e');
   ctx.fillStyle = '#ecc39e'; ctx.beginPath(); ctx.arc(head.x, head.y, 4.7, 0, Math.PI * 2); ctx.fill();
   path(ctx, () => { ctx.moveTo(head.x - 5.5, head.y - 1); ctx.bezierCurveTo(head.x - 6, head.y - 10, head.x + 5, head.y - 11, head.x + 6, head.y - 2); ctx.lineTo(head.x + 9, head.y - 1); ctx.lineTo(head.x - 5.5, head.y - 1); }, candidate.color, '#1b2b3e');
   bone({ x: head.x - 3, y: head.y - 7 }, { x: head.x + 2, y: head.y - 8 }, 1.6, '#ecf3ee');
   ctx.fillStyle = '#15273e'; ctx.fillRect(head.x + .8, head.y - 2, 4.5, 2.2);
-  ctx.restore(); leg(legData[2]); leg(legData[3]); ctx.restore();
+  ctx.restore(); ctx.restore(); leg(legData[2]); leg(legData[3]);
+  if (stun > .08) {
+    // A loose helmet and orbiting stars make the short rider stun readable.
+    const cx = 4 - stun * 7, cy = -82 + stun * 16;
+    ctx.globalAlpha = alpha * stun;
+    for (let star = 0; star < 3; star++) {
+      const orbit = (clock / 230 + star * Math.PI * 2 / 3), sx = cx + Math.cos(orbit) * 13, sy = cy + Math.sin(orbit) * 3;
+      ctx.fillStyle = '#ffe691'; ctx.fillRect(sx - 2.5, sy - .8, 5, 1.6); ctx.fillRect(sx - .8, sy - 2.5, 1.6, 5);
+    }
+  }
+  ctx.restore();
 }
 
 export type RacingGroundProjection = { center: number; pixelsPerLap: number };

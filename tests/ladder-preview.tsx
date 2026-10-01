@@ -75,6 +75,7 @@ function Preview() {
     </nav>
     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, flex: 'none' }}>
       <output style={{ minWidth: 39 }}>{(elapsed / 1000).toFixed(1)}초</output>
+      <input aria-label="사다리 검증 초" type="number" min={0} max={44} step={.1} value={Number((elapsed / 1000).toFixed(1))} onChange={event => seek(Math.max(0, Math.min(DURATION, Number(event.target.value) * 1000)))} style={{ width: 58 }} />
       <input aria-label="사다리 검증 시간" aria-valuetext={`${(elapsed / 1000).toFixed(1)}초`} type="range" min={0} max={DURATION} step={100} value={elapsed} onChange={event => seek(Number(event.target.value))} style={{ flex: 1, minWidth: 0 }} />
       <span>{targetLane + 1}번 보물 · 당첨 지점</span>
     </label>

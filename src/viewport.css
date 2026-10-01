@@ -104,21 +104,12 @@ body { overflow: hidden; }
 .show-actions .start-button { gap: 5px; }
 .news-lower-third div > span { display: block; }
 .news-lower-third { animation-duration: 400ms; }
-.candidate-roll > button { display: flex; align-items: center; gap: 6px; background: white; border: 1px solid #e0e4dc; padding: 4px 6px; min-height: 0; min-width: 0; text-align: left; color: #17233d; animation: candidate-in 500ms ease-out both; }
-.candidate-roll > button > span { padding: 4px; font: 900 10px monospace; color: #14223b; }
-.candidate-roll > button b { font-size: 17px; color: #b5a3a4; }
-.candidate-roll > button:hover { border-color: #d67379; }
-.candidate-roll > button.is-cheered { background: #fff0e9; border-color: #d67379; }
-.candidate-roll > button.is-cheered b, .cheer-heart { color: #ce5865; }
-.cheer-note { margin: 0; flex: none; font-size: 10px; color: #9c5864; }
 .voting-counter { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid #dbe0dc; font-size: 10px; color: #738782; }
 .voting-counter strong { font: 900 23px monospace; color: #17233d; }
-button.moving-row { font: inherit; color: #17233d; text-align: left; border-radius: 0; transition: transform 950ms cubic-bezier(.22,.7,.2,1), background 500ms, box-shadow 500ms; }
+.moving-row { font: inherit; color: #17233d; text-align: left; border-radius: 0; transition: transform 950ms cubic-bezier(.22,.7,.2,1), background 500ms, box-shadow 500ms; }
 .animated-leaderboard.is-resizing .moving-row { transition: background 500ms, box-shadow 500ms; }
 .moving-row .vote-info { width: 100%; }
 .moving-row .vote-track { display: block; }
-.moving-row.is-cheered { background: #fff0e9; box-shadow: inset 0 0 0 1px #d67379; }
-.moving-row.is-leading.is-cheered { background: #fff2c7; }
 .box-sealed .news-ticker p { animation-play-state: paused; }
 .box-sealed .live-pill span { animation: none; }
 .margin-card > strong { font-size: clamp(14px, 1.5vw, 20px); }

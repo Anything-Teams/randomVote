@@ -18,7 +18,8 @@ export function racingFocusIds(timeline: RacingTimeline, elapsed: number): strin
     const ranked = racingStandings(timeline, elapsed), position = ranked.findIndex(item => item.id === obstacle.actorId);
     return [obstacle.actorId, ...ranked.slice(Math.max(0, position - 1), position + 2).map(item => item.id)];
   });
-  return [...new Set([...leaders, ...straightOpponents, ...incidentActors, ...courseActors])];
+  const trickActors = (timeline.tricks ?? []).filter(item => elapsed >= item.start - 500 && elapsed < item.recovered + 500).flatMap(item => [item.actorId, item.targetId]);
+  return [...new Set([...leaders, ...straightOpponents, ...incidentActors, ...courseActors, ...trickActors])];
 }
 
 /** A fixed distance projection and persistent horses replace rank-based scene cuts. */

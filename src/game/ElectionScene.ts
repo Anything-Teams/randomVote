@@ -22,13 +22,12 @@ export type StageState = {
   preview: boolean;
   reducedMotion: boolean;
   elapsed: number;
-  cheeringId?: string;
   events?: ElectionEvent[];
   storyOutcomes?: StoryOutcome[];
   paused?: boolean;
 };
 type Voter = { citizen: PixelCitizen; ballot: Phaser.GameObjects.Rectangle; offset: number; duration: number; lastDrop: number };
-type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; receivedVotes: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; support: Phaser.GameObjects.Text; bar: Phaser.GameObjects.Rectangle; cap: Phaser.GameObjects.Rectangle; finishLine: Phaser.GameObjects.Container; displayed: number; previous: number; previousRank: number; reactedAt: number; voteAt: number; width: number; height: number; movingUntil: number; direction: number; runner: CountingRunner; travel: number; finishStartX?: number; finishCrossed?: boolean; eliminationShare?: number; eliminationWidth?: number };
+type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; receivedVotes: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; bar: Phaser.GameObjects.Rectangle; cap: Phaser.GameObjects.Rectangle; finishLine: Phaser.GameObjects.Container; displayed: number; previous: number; previousRank: number; reactedAt: number; voteAt: number; width: number; height: number; movingUntil: number; direction: number; runner: CountingRunner; travel: number; finishStartX?: number; finishCrossed?: boolean; eliminationShare?: number; eliminationWidth?: number };
 type VoteMote = { rectangle: Phaser.GameObjects.Rectangle; candidateId: string; age: number; startX: number; startY: number; life: number };
 type StoryActor = { candidate: Candidate; citizen: PixelCitizen; name: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle; side: number; scale: number };
 type StoryCut = { event: ElectionEvent; layer: Phaser.GameObjects.Container; dimmer: Phaser.GameObjects.Rectangle; title: Phaser.GameObjects.Text; stageLabel: Phaser.GameObjects.Text; evidence: Phaser.GameObjects.Text; dialogue: Phaser.GameObjects.Container; detail: Phaser.GameObjects.Text; verdict: Phaser.GameObjects.Container; actors: StoryActor[]; props: Phaser.GameObjects.Container[]; stamp: Phaser.GameObjects.Text; lamp: Phaser.GameObjects.Arc; darkness: Phaser.GameObjects.Rectangle; beam: Phaser.GameObjects.Graphics; impactFired: boolean; verdictStarted: boolean };
@@ -89,7 +88,7 @@ export class ElectionScene extends Phaser.Scene {
   private countingProfileVotes: Phaser.GameObjects.Text[] = [];
   private countingProfileKey = '';
   private countingBeatKey = '';
-  private countingReactions = new Map<string, { pose: 'wave' | 'cheer' | 'surprised' | 'nervous'; until: number }>();
+  private countingReactions = new Map<string, { pose: 'surprised' | 'nervous'; until: number }>();
   private countingLastLeader = '';
   private countingCalloutUntil = 0;
   private countingCalloutAt = -10000;
@@ -99,8 +98,6 @@ export class ElectionScene extends Phaser.Scene {
   private countingLastProgress = -1;
   private storyEliminated = new Set<string>();
   private storyActive?: StoryCut;
-  private lastCheeringId = '';
-  private cheerWaveUntil = 0;
 
   constructor(readState: () => StageState) {
     super('election-show');
@@ -441,7 +438,6 @@ export class ElectionScene extends Phaser.Scene {
       this.rect(panel, 0, 0, 4, height - 3, colorOf(candidate));
       const middle = Math.round(height / 2);
       const position = this.text(panel, String(index + 1), 24, middle - 11, 19, '#8dadc1', true);
-      const support = this.text(panel, '♥', 53, middle - 10, 16, '#ff9b9b').setVisible(candidate.id === state.cheeringId);
       this.fitLabel(this.text(panel, candidate.name, 70, middle - 12, 17, '#f9f0dc'), 174, candidate.name.length > 9 ? 13 : 17);
       const badge = this.text(panel, '', 70, middle + 10, 11, '#9cbdc8');
       const barHeight = Math.min(24, Math.round(height * 0.38 / 2) * 2);
@@ -478,7 +474,7 @@ export class ElectionScene extends Phaser.Scene {
       const runner = { x: countingRunnerTarget(state.progress, value, this.countingAverage), velocity: 0 };
       citizen.root.setX(runner.x);
       citizen.locomotionDistance = 0;
-      this.race.push({ candidate, panel, citizen, percentage, receivedVotes, badge, position, glow, frame, support, bar, cap, finishLine, displayed: value, previous: value, previousRank: index, reactedAt: -10000, voteAt: -10000, width, height, movingUntil: 0, direction: 0, runner, travel: 0 });
+      this.race.push({ candidate, panel, citizen, percentage, receivedVotes, badge, position, glow, frame, bar, cap, finishLine, displayed: value, previous: value, previousRank: index, reactedAt: -10000, voteAt: -10000, width, height, movingUntil: 0, direction: 0, runner, travel: 0 });
     });
     this.root.sort('depth');
   }
@@ -527,13 +523,13 @@ export class ElectionScene extends Phaser.Scene {
       this.countingProfilePercentages[index]?.setText(`${(state.percentages[candidate.id] ?? 0).toFixed(2)}%`);
       this.countingProfileVotes[index]?.setText(`${format.format(tallyVotes(candidate.id, state.percentages, state.progress, state.totalVotes, state.finalVotes))}표`);
       const citizen = this.countingProfileCitizens[index];
-      if (citizen) citizen.pose = state.progress > 88 ? 'run' : 'wave';
+      if (citizen) citizen.pose = 'run';
     });
   }
 
   private countReaction(state: StageState, leader: Candidate, previousLeader: string, time: number) {
     const burden = /커피|점심|벌칙|청소/.test(state.topic);
-    this.countingReactions.set(leader.id, { pose: burden ? 'surprised' : 'cheer', until: time + 1500 });
+    this.countingReactions.set(leader.id, { pose: burden ? 'surprised' : 'nervous', until: time + 1500 });
     if (previousLeader) this.countingReactions.set(previousLeader, { pose: 'surprised', until: time + 1300 });
     if (this.storyActive || time - this.countingCalloutAt < 2500) return;
     this.countingCalloutAt = time;
@@ -726,7 +722,7 @@ export class ElectionScene extends Phaser.Scene {
     const motion = (from: number, to: number, start: number, end: number) => Phaser.Math.Linear(from, to, Phaser.Math.Easing.Cubic.InOut(Phaser.Math.Clamp((local - start) / (end - start), 0, 1)));
     const body = cut.actors[0];
     if (state.reducedMotion) {
-      cut.actors.forEach(actor => { actor.citizen.pose = cut.event.kind === 'alliance' || cut.event.kind === 'comeback' ? 'cheer' : 'surprised'; });
+      cut.actors.forEach(actor => { actor.citizen.pose = cut.event.kind === 'alliance' || cut.event.kind === 'comeback' ? 'nervous' : 'surprised'; });
       cut.stamp.setAlpha(1);
       cut.props.forEach((prop, index) => prop.setVisible(true).setPosition(578 + index % 4 * 39, 402 + Math.floor(index / 4) * 26).setScale(0.75));
     } else if (cut.event.kind === 'brawl') {
@@ -782,7 +778,7 @@ export class ElectionScene extends Phaser.Scene {
     } else if (cut.event.kind === 'comeback') {
       if (body) {
         body.citizen.root.setX(motion(447, 788, 240, 1520)).setAngle(local < 1540 ? 7 : 0);
-        body.citizen.pose = local < 1540 ? 'run' : 'cheer';
+        body.citizen.pose = local < 1540 ? 'run' : 'nervous';
         body.name.setX(body.citizen.root.x);
       }
       cut.props.forEach((prop, index) => prop.setVisible(local > 300 + index * 100).setPosition(396 + index * 86, 419 + Math.sin(local / 240 + index) * 11).setAngle(Math.sin(local / 190 + index) * 10).setScale(0.8));
@@ -854,16 +850,16 @@ export class ElectionScene extends Phaser.Scene {
           actor.name.setVisible(false);
           actor.plate.setVisible(false);
           actor.citizen.root.setAlpha(0.2);
-          actor.citizen.pose = cut.event.eliminatedId === actor.candidate.id ? 'surprised' : 'wave';
+          actor.citizen.pose = cut.event.eliminatedId === actor.candidate.id ? 'surprised' : 'nervous';
         });
         const bystanders = state.candidates.filter(candidate => !cut.event.actors.includes(candidate.id) && !this.storyEliminated.has(candidate.id))
-          .sort((a, b) => Number(b.id === state.cheeringId) - Number(a.id === state.cheeringId)).slice(0, 2);
+          .slice(0, 2);
         bystanders.forEach((candidate, index) => {
           const x = index ? 1016 : 264;
           const citizen = this.citizen(cut.layer, candidate, state.candidates.findIndex(item => item.id === candidate.id), x, 444, 2.2);
-          citizen.pose = cut.event.eliminatedId ? 'surprised' : index ? 'nervous' : 'wave';
-          this.text(cut.layer, '동료 후보', x, 465, 12, '#cfe0dc', true);
-          this.countingReactions.set(candidate.id, { pose: cut.event.eliminatedId ? 'surprised' : 'wave', until: time + 2500 });
+          citizen.pose = 'run';
+          this.text(cut.layer, '추격 중', x, 465, 12, '#cfe0dc', true);
+          this.countingReactions.set(candidate.id, { pose: cut.event.eliminatedId ? 'surprised' : 'nervous', until: time + 2500 });
         });
         this.storyBurst(cut.layer, 640, 237, cut.event.eliminatedId ? 0xef705d : gold, 12);
       }
@@ -932,7 +928,7 @@ export class ElectionScene extends Phaser.Scene {
       }
       if (rank <= slot.previousRank - 2 && !eliminated && time - slot.reactedAt > 1500) {
         slot.reactedAt = time;
-        this.countingReactions.set(slot.candidate.id, { pose: index % 2 ? 'wave' : 'cheer', until: time + 850 });
+        this.countingReactions.set(slot.candidate.id, { pose: 'nervous', until: time + 850 });
       }
       slot.previous = raw;
       slot.previousRank = rank;
@@ -986,18 +982,15 @@ export class ElectionScene extends Phaser.Scene {
       slot.citizen.locomotionSpeed = 0.82 + Math.min(0.68, Math.abs(velocity) / 160) + index % 3 * 0.04;
       slot.position.setText(eliminated ? '×' : String(rank + 1)).setColor(rank === 0 ? '#fbd975' : '#a6c5cc');
       slot.badge.setText(eliminated ? '후보 탈락' : slot.height > 62 ? finishRun ? finishAge >= 0 ? '결승선 통과' : '마지막 질주' : rank === 0 ? '선두' : slot.direction > 0 && time < slot.movingUntil ? '표가 몰립니다' : '추격 중' : '').setColor(eliminated ? '#e88073' : '#9cbdc8');
-      const support = slot.candidate.id === state.cheeringId;
-      slot.support.setVisible(support);
-      slot.frame.setStrokeStyle(rank === 0 || support ? 2 : 1, rank === 0 ? colorOf(slot.candidate) : support ? 0xffaaae : 0x30495e);
-      slot.glow.setAlpha(eliminated ? 0.012 : rank === 0 ? 0.08 + (state.reducedMotion ? 0 : Math.sin(time / 380) * 0.015) : support ? 0.06 : 0.028);
+      slot.frame.setStrokeStyle(rank === 0 ? 2 : 1, rank === 0 ? colorOf(slot.candidate) : 0x30495e);
+      slot.glow.setAlpha(eliminated ? 0.012 : rank === 0 ? 0.08 + (state.reducedMotion ? 0 : Math.sin(time / 380) * 0.015) : 0.028);
       const reaction = this.countingReactions.get(slot.candidate.id);
-      const waiting = Math.floor((time + index * 711) / (1800 + index % 3 * 180)) % 7;
       slot.citizen.gestureProgress = Phaser.Math.Clamp(finishAge / 500, 0, 1);
       slot.citizen.pose = eliminated ? 'bow'
         : finishRun && finishAge >= 0 ? finishAge < 500 ? 'brake' : 'finish'
-        : velocity > .3 ? slot.citizen.locomotionVelocity > 36 ? 'run' : 'walk'
+        : velocity > .3 ? 'run'
         : reaction && reaction.until > time ? reaction.pose
-        : waiting === 1 ? 'wave' : waiting === 4 && index % 3 === 0 ? 'bow' : index % 4 === 1 ? 'nervous' : 'idle';
+        : index % 4 === 1 ? 'nervous' : 'idle';
       if (gaining && !eliminated && !state.reducedMotion && time - slot.voteAt > 460 + index * 29) {
         slot.voteAt = time;
         const startX = slot.panel.x + 252 + width - 61;
@@ -1150,12 +1143,12 @@ export class ElectionScene extends Phaser.Scene {
         citizen.root.setDepth(front ? 12 : 8);
         if (side) citizen.root.setScale(-(front ? 2 : 1.7), front ? 2 : 1.7);
         citizen.pose = 'finish';
-        const reaction: Pose = person.id === runner?.id ? 'disappointed' : person.id === state.cheeringId ? 'clap' : (['cheer', 'clap', 'wave', 'encourage'] as Pose[])[identity % 4];
+        const reaction: Pose = person.id === runner?.id ? 'disappointed' : 'idle';
         const bubble = this.add.container(x, y - (front ? 123 : 108)).setDepth(14).setAlpha(0).setVisible(index === 0);
         this.root.add(bubble);
         this.rect(bubble, -49, -9, 98, 29, paper).setStrokeStyle(1, colorOf(person));
         this.rect(bubble, -3, 20, 6, 4, paper);
-        const message = this.text(bubble, person.id === runner?.id ? '아깝다…' : reaction === 'clap' ? '짝짝짝!' : reaction === 'wave' ? '축하해요!' : reaction === 'encourage' ? '잘 부탁해요!' : '와아!', 0, -3, 12, '#243c48', true);
+        const message = this.text(bubble, person.id === runner?.id ? '아깝다…' : '결과 확인', 0, -3, 12, '#243c48', true);
         this.victorySupporters.push({ citizen, x, y, delay: 460 + identity * 91, reaction, bubble, message });
       });
     });
@@ -1184,31 +1177,16 @@ export class ElectionScene extends Phaser.Scene {
     if (this.currentPhase !== state.phase) this.switchPhase(state.phase);
     else if (state.preview && this.signature(state) !== this.previewSignature) this.syncNewspaperCandidates(state);
     const local = state.preview ? rawTime - this.phaseStart : Math.max(0, state.elapsed - (state.phase === 'voting' ? 5000 : state.phase === 'counting' ? COUNT_START : state.phase === 'winner' ? WINNER_START : 0));
-    if ((state.cheeringId ?? '') !== this.lastCheeringId) {
-      this.lastCheeringId = state.cheeringId ?? '';
-      this.cheerWaveUntil = time + 1800;
-      const slot = this.race.find(item => item.candidate.id === state.cheeringId);
-      const selected = slot?.citizen ?? this.newspaperCards.get(state.cheeringId ?? '')?.citizen;
-      if (slot) this.countingReactions.set(slot.candidate.id, { pose: 'wave', until: this.cheerWaveUntil });
-      if (selected && !state.reducedMotion) {
-        const point = selected.root.getWorldTransformMatrix().transformPoint(0, -28);
-        const position = this.root.getWorldTransformMatrix().applyInverse(point.x, point.y);
-        this.burst(position.x, position.y, 0xffa7b1, 12, 100);
-        const heart = this.text(this.root, '♥', position.x, position.y - 8, 25, '#ffc2ca', true).setDepth(250);
-        this.root.sort('depth');
-        this.tweens.add({ targets: heart, y: position.y - 42, alpha: 0, duration: 900, ease: 'Sine.out', onComplete: () => heart.destroy() });
-      }
-    }
     if (state.phase === 'declaration') {
       this.paperHeadline?.setText(state.topic || '오늘의 당선자를 뽑습니다').setFontSize(state.topic.length > 30 ? 23 : 37);
       if (!state.preview && state.candidates.length) this.citizens.forEach((citizen, index) => {
         const focus = Math.floor(local / (4800 / state.candidates.length)) % state.candidates.length;
-        citizen.pose = state.candidates[index]?.id === state.cheeringId && time < this.cheerWaveUntil || focus === index ? 'wave' : index % 3 === 1 && local > 3800 ? 'bow' : 'idle';
+        citizen.pose = focus === index ? 'wave' : index % 3 === 1 && local > 3800 ? 'bow' : 'idle';
       });
       if (state.preview) this.newspaperCards.forEach((slot, id) => {
         const identity = Number(id) || 1;
         const beat = Math.floor((local + identity * 617) / (2300 + identity % 4 * 230)) % 5;
-        slot.citizen.pose = id === state.cheeringId && time < this.cheerWaveUntil || beat === 0 ? 'wave' : beat === 3 && identity % 3 === 1 ? 'bow' : 'idle';
+        slot.citizen.pose = beat === 0 ? 'wave' : beat === 3 && identity % 3 === 1 ? 'bow' : 'idle';
       });
     }
     if (state.phase === 'voting') {
@@ -1276,13 +1254,11 @@ export class ElectionScene extends Phaser.Scene {
           this.tweens.add({ targets: halo, scaleX: 5.2, scaleY: 2.4, alpha: 0, duration: 620, ease: 'Cubic.out', onComplete: () => halo.destroy() });
         }
       }
-      this.victorySupporters.forEach((supporter, index) => {
+      this.victorySupporters.forEach(supporter => {
         const reactionAge = local - supporter.delay;
-        const cycle = (time - this.victoryMomentAt + index * 519) % (4200 + index % 3 * 360);
-        const ongoing: Pose = cycle < 2700 ? supporter.reaction : supporter.reaction === 'disappointed' ? 'encourage' : cycle < 3400 ? 'clap' : 'wave';
         supporter.citizen.gestureProgress = Phaser.Math.Clamp(local / 320, 0, 1);
-        supporter.citizen.pose = state.reducedMotion ? supporter.reaction : reactionAge < 0 ? local < 320 ? 'brake' : 'finish' : reactionAge < 620 ? 'surprised' : ongoing;
-        supporter.citizen.root.setY(supporter.y - (!state.reducedMotion && reactionAge > 0 && reactionAge < 400 ? Math.sin(reactionAge / 400 * Math.PI) * (index % 3 ? 6 : 11) : 0));
+        supporter.citizen.pose = supporter.reaction;
+        supporter.citizen.root.setY(supporter.y);
         const speaking = reactionAge > 680 && reactionAge < 2240;
         supporter.bubble.setAlpha(state.reducedMotion ? 0 : speaking ? Math.min(1, (reactionAge - 680) / 150, (2240 - reactionAge) / 220) : 0);
       });
@@ -1306,7 +1282,7 @@ export class ElectionScene extends Phaser.Scene {
       }
       if (this.winner) {
         this.winner.gestureProgress = Phaser.Math.Clamp(local / 400, 0, 1);
-        this.winner.pose = state.reducedMotion ? this.victoryPayoffPose : local < 400 ? 'brake' : local < payoffAt ? 'cheer' : payoffTime < 620 ? 'surprised' : local >= 6000 && (time - this.victoryMomentAt) % 6500 < 950 ? 'wave' : this.victoryPayoffPose;
+        this.winner.pose = state.reducedMotion ? this.victoryPayoffPose : local < 400 ? 'brake' : local < payoffAt ? 'finish' : payoffTime < 620 ? 'surprised' : local >= 6000 && (time - this.victoryMomentAt) % 6500 < 950 ? 'wave' : this.victoryPayoffPose;
       }
       if (this.victoryPayoffStarted && this.victoryPayoffSweat && !state.reducedMotion) {
         const drop = Math.max(0, payoffTime) % 1100 / 1100;

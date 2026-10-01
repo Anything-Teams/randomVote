@@ -3,8 +3,8 @@ import type { Candidate } from '../election';
 export type ArenaPose = 'idle' | 'guard' | 'walk' | 'run' | 'grapple' | 'brace' | 'push' | 'dodge' | 'lift' | 'throw' | 'airborne' | 'land' | 'recover' | 'cheer' | 'clap' | 'bow';
 type Point = { x: number; y: number };
 type Motion = { crouch: number; lean: number; hipX: number; head: number; mouth: number; backX: number; backY: number; frontX: number; frontY: number; spread: number; contact: number; shoulderLift: number; clapTurn: number; cheerTurn: number; applause: number };
-type FootMemory = { anchor: Point; from: Point; to: Point; ground: Point; lift: number; swinging: boolean; swingStart: number; settleAt: number; settleFrom: Point; settleTo: Point; settleLift: number };
-export type ArenaFighterAnimation = { clock: number | null; signature: string; epoch?: number | string; motion: Motion | null; gait: number; distance: number; moving: boolean; airborne: boolean; feet: [FootMemory, FootMemory] | null; localFeet: [Point, Point] | null; grip?: Point; secondaryGrip?: Point; pose?: ArenaPose };
+type FootMemory = { anchor: Point; from: Point; to: Point; ground: Point; lift: number; swinging: boolean; swingStart: number; swingStrength?: number; settleAt: number; settleFrom: Point; settleTo: Point; settleLift: number };
+export type ArenaFighterAnimation = { clock: number | null; signature: string; epoch?: number | string; motion: Motion | null; gait: number; distance: number; moving: boolean; airborne: boolean; feet: [FootMemory, FootMemory] | null; localFeet: [Point, Point] | null; grip?: Point; secondaryGrip?: Point; pose?: ArenaPose; depthStride?: number; skeleton?: { hips: Point[]; knees: Point[]; feet: Point[]; shorts: Point[][]; pelvis: Point[] } };
 export type ArenaActor = { candidate: Candidate; index: number; x: number; y: number; depthY?: number; scale: number; facing: number; pose: ArenaPose; angle: number; alpha: number; velocityX: number; velocityY: number; gaitDistance: number; phase: number; power?: number; chargePreparation?: number; chargeStrength?: number; gripStrength?: number; gripTarget?: Point; secondaryGripTarget?: Point; animation?: ArenaFighterAnimation; motionEpoch?: number | string; motionImmediate?: boolean };
 
 /** Being lifted changes screen height, while occlusion follows the ground beneath each fighter. */
@@ -69,8 +69,15 @@ function groundedFeet(actor: ArenaActor, state: ArenaFighterAnimation, clock: nu
   const vx = actor.velocityX / speed, vy = actor.velocityY / speed;
   const running = actor.pose === 'run' ? ease((speed - 35) / 80) : 0;
   const charge = clamp(actor.chargeStrength ?? 0);
+  // Shorter strides into depth keep both planted heels within leg reach.
   const vertical = Math.abs(vy), cycleLength = mix(mix(30, 34 + charge * 5, running), 13.2, vertical) * (1 + (index % 3 - 1) * .025);
   const distance = reset ? 0 : Math.max(0, actor.gaitDistance - state.distance);
+  // Starting halfway through a swing gave the first step only a few frames.
+  // Begin with both soles down so acceleration has a full step to unfold.
+  if (moving && !state.moving) {
+    state.gait = .30;
+    state.feet.forEach(foot => { foot.swinging = false; });
+  }
   if (moving) state.gait += distance / Math.max(1, scale * cycleLength);
   const stance = .62;
   return state.feet.map((foot, leg) => {
@@ -79,12 +86,13 @@ function groundedFeet(actor: ArenaActor, state: ArenaFighterAnimation, clock: nu
       if (cycle >= stance) {
         if (!foot.swinging) {
           foot.swinging = true; foot.from = { ...foot.ground }; foot.swingStart = cycle;
+          foot.swingStrength = Math.min(1, (1 - cycle) / (1 - stance));
           const ahead = ((1 - cycle) + stance / 2) * cycleLength * scale;
           foot.to = { x: x + facing * (leg ? 3 : -3) * scale + vx * ahead, y: y + vy * ahead };
         }
         const amount = clamp((cycle - foot.swingStart) / Math.max(.001, 1 - foot.swingStart));
         foot.ground = pointMix(foot.from, foot.to, ease(amount));
-        foot.lift = Math.sin(amount * Math.PI) * mix(3.6, 5.8 + charge * 1.4, running);
+        foot.lift = Math.sin(amount * Math.PI) * mix(mix(3.6, 5.8 + charge * 1.4, running), 2.1, vertical) * (foot.swingStrength ?? 1);
       } else {
         if (foot.swinging) { foot.anchor = { ...foot.to }; foot.swinging = false; }
         foot.ground = { ...foot.anchor }; foot.lift = 0;
@@ -153,6 +161,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   if (moving) {
     const activity = ease(speed / 120), running = pose === 'run' ? ease((speed - 35) / 80) : 0;
     target.crouch = mix(target.crouch, Math.max(target.crouch, 2.2 + running) + Math.abs(Math.sin(gait)) * .65, activity);
+    const depth = Math.abs(actor.velocityY) / Math.max(1, speed);
+    target.crouch = Math.max(target.crouch, 3.5 * ease(depth) + Math.abs(Math.sin(gait)) * .3);
     target.hipX += Math.sin(gait) * .45 * activity;
     if (pose === 'walk' || pose === 'run') {
       const swing = Math.cos(gait + personality * .07), reach = mix(4.5, 7, running) * activity;
@@ -194,7 +204,9 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const hips = [{ x: hip.x - 4.5, y: hip.y }, { x: hip.x + 4.5, y: hip.y }];
   feet = feet.map((foot, leg) => reachable(hips[leg], foot, 21.8)) as [Point, Point];
   state.localFeet = feet;
-  const knees = feet.map((foot, leg) => knee(hips[leg], foot, 11, 11, 1));
+  const depthStride = moving ? ease((Math.abs(actor.velocityY) / Math.max(1, speed) - .18) / .55) : 1;
+  state.depthStride = reset ? depthStride : mix(state.depthStride ?? depthStride, depthStride, 1 - Math.exp(-delta / 160));
+  const knees = feet.map((foot, leg) => knee(hips[leg], foot, 11, 11, leg === 0 ? mix(1, -1, state.depthStride!) : 1));
   const bodyWidth = 18 + index % 3, shoulderWidth = bodyWidth * .43;
   // A grip turns the chest toward the opponent, bringing the far shoulder forward.
   const shoulders = [{ x: mix(-shoulderWidth, 3.5, motion.contact), y: -20 - motion.shoulderLift }, { x: shoulderWidth, y: -20 - motion.shoulderLift }];
@@ -224,14 +236,15 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const shorts = hips.map((origin, leg) => {
     const direction = { x: (knees[leg].x - origin.x) / 11, y: (knees[leg].y - origin.y) / 11 };
     const normal = { x: direction.y, y: -direction.x };
-    const top = { x: origin.x - direction.x * .75, y: origin.y - direction.y * .75 };
-    const hem = { x: origin.x + direction.x * 5.8, y: origin.y + direction.y * 5.8 };
+    const top = { x: origin.x - direction.x * 1.4, y: origin.y - direction.y * 1.4 };
+    const hem = { x: origin.x + direction.x * 6.4, y: origin.y + direction.y * 6.4 };
     const edge = (point: Point, width: number, side: number) => ({ x: point.x + normal.x * width * side, y: point.y + normal.y * width * side });
-    return { direction, normal, points: [edge(top, 4.1, -1), edge(top, 4.1, 1), edge(hem, 3.8, 1), edge(hem, 3.8, -1)] };
+    return { direction, normal, points: [edge(top, 4.3, -1), edge(top, 4.3, 1), edge(hem, 3.8, 1), edge(hem, 3.8, -1)] };
   });
   const waist = [bodyPoint({ x: -bodyWidth / 2, y: -4.3 }), bodyPoint({ x: bodyWidth / 2, y: -4.3 }), bodyPoint({ x: bodyWidth / 2, y: -1.7 }), bodyPoint({ x: -bodyWidth / 2, y: -1.7 })];
-  const crotch = { x: hip.x, y: hip.y + 2.6 };
-  const yoke = [waist[3], waist[2], { x: hip.x + 7.4, y: hip.y + 1.1 }, crotch, { x: hip.x - 7.4, y: hip.y + 1.1 }];
+  const crotch = { x: hip.x, y: hip.y + 4 };
+  const yoke = [waist[0], waist[1], waist[2], { x: hip.x + 8.6, y: hip.y + 3 }, crotch, { x: hip.x - 8.6, y: hip.y + 3 }, waist[3]];
+  state.skeleton = { hips, knees, feet, shorts: shorts.map(panel => panel.points), pelvis: yoke };
   const headWidth = [14, 15, 14, 16][personality], headY = -33 - index % 2;
   ctx.save(); ctx.globalAlpha = actor.alpha;
   if (pose !== 'airborne') { ctx.fillStyle = '#25302d40'; ctx.beginPath(); ctx.ellipse(x, y + 2, 16 * scale, 3.5 * scale, 0, 0, Math.PI * 2); ctx.fill(); }
@@ -313,8 +326,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   ctx.restore(); ctx.restore();
   const fabricShade = shade(candidate.color, .72), fabricLight = shade(candidate.color, 1.1);
   const polygon = (points: Point[], color: string) => {
-    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
-    points.slice(1).forEach(point => ctx.lineTo(point.x, point.y)); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(Math.round(points[0].x), Math.round(points[0].y));
+    points.slice(1).forEach(point => ctx.lineTo(Math.round(point.x), Math.round(point.y))); ctx.closePath(); ctx.fill();
   };
   // Both cuffs follow the thighs; the pelvic yoke joins them without a solid crotch block.
   shorts.forEach(panel => {

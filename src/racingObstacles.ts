@@ -35,7 +35,17 @@ export function racingObstacleMotion(obstacle: RacingCourseChallenge, elapsed: n
   const check = Math.sin(Math.PI * ease(Math.min(1, age / 1.3))) * .95;
   const recovery = ease((elapsed - obstacle.lowest) / Math.max(1, obstacle.recovered - obstacle.lowest));
   const missedStep = Math.sin(Math.PI * ease(Math.min(1, age / 1.1)));
-  return { stumble: stagger * .98, check, trip: obstacle.outcome === 'clip' ? missedStep : 0, slip: obstacle.outcome === 'slip' ? missedStep : 0, crouch: Math.sin(Math.PI * recovery) * .9 };
+  const fall = ease(age / .38) * (1 - ease((age - .95) / .85));
+  return { fall, spill: fall, stumble: stagger * .28, check, trip: obstacle.outcome === 'clip' ? missedStep : 0, slip: obstacle.outcome === 'slip' ? missedStep : 0, crouch: Math.sin(Math.PI * recovery) * .9 };
+}
+
+/** A failed landing skids toward the open foreground, keeping the collapsed body readable. */
+export function placeRacingFalls<T extends RacingEffectPlacement>(placements: T[], timeline: RacingTimeline, elapsed: number, height: number, reduced = false): T[] {
+  if (reduced) return placements;
+  return placements.map(item => {
+    const fall = Math.max(0, ...timeline.obstacles.filter(obstacle => obstacle.actorId === item.id).map(obstacle => racingObstacleMotion(obstacle, elapsed).fall ?? 0));
+    return fall ? { ...item, y: Math.min(height - item.scale * 8, item.y + fall * item.scale * (placements.length > 3 ? 43 : 7)) } : item;
+  });
 }
 
 export function placeRacingObstacles(timeline: RacingTimeline, camera: Pick<RacingCamera, 'center' | 'span'>, placements: RacingEffectPlacement[], width: number): RacingObstacle[] {

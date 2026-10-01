@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { randomInt } from './election';
 import type { SportsStageProps } from './sports';
-import { activeRacingIncident, buildRacingTimeline, createRacingIncidents, racingIncidentStatus, racingIncidentSetback, racingLaneShift, racingStandings, readRacingTravel, RACING_STORIES, type RacingTimeline, type RacingStanding } from './racingNarrative';
-import { drawRaceDust, drawRaceHorse, drawRaceStadium, raceBox, raceLabel } from './racingArt';
+import { activeRacingIncident, activeRacingTrick, racingTrickStatus, buildRacingTimeline, createRacingIncidents, racingIncidentStatus, racingIncidentSetback, racingLaneShift, racingStandings, readRacingTravel, RACING_STORIES, type RacingTimeline, type RacingStanding } from './racingNarrative';
+import { drawRaceDust, drawRaceHorse, raceHorseAttachments, drawRaceStadium, raceBox, raceLabel, type RaceHorseMotion } from './racingArt';
 import { drawRacingCourse, drawRacingStartingGate, drawRacingTopView } from './racingCourse';
 import { createRacingCamera, placeRacingField, racingFocusIds, type RacingCamera } from './racingCamera';
-import { drawRacingIncidentEffects, placeRacingDuel, racingIncidentMotion } from './racingEffects';
-import { drawRacingObstacles, placeRacingObstacles, racingObstacleJump, racingObstacleMotion, racingObstacleStatus } from './racingObstacles';
+import { drawRacingIncidentEffects, drawRacingTrickEffects, placeRacingDuel, placeRacingTrick, racingIncidentMotion, racingTrickMotion } from './racingEffects';
+import { drawRacingObstacles, placeRacingObstacles, placeRacingFalls, racingObstacleJump, racingObstacleMotion, racingObstacleStatus } from './racingObstacles';
 import './racing.css';
 
 type RacePhase = 'preview' | 'paddock' | 'countdown' | 'race' | 'straight' | 'photo' | 'winner';
@@ -69,15 +69,30 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
     const name = subject?.name ?? '경주마', object = challenge.kind === 'hay-jump' ? '건초 장벽' : '물웅덩이';
     const ahead = props.candidates.find(candidate => candidate.id === standings[status.currentRank - 2]?.id);
     const change = status.currentRank > status.beforeRank ? ' · ' + (status.currentRank - status.beforeRank) + '계단 밀렸습니다.' : '';
-    headline = name + ' · ' + (status.stage === 'approach' ? object + ' 접근' : status.stage === 'jump' ? '도약!' : status.stage === 'impact' ? challenge.outcome === 'clip' ? '장벽에 발이 걸렸습니다' : '젖은 착지에서 미끄러졌습니다' : status.stage === 'recover' ? '균형을 되찾는 중' : status.stage === 'chase' ? '다시 추격합니다' : '코스 통과');
+    headline = name + ' · ' + (status.stage === 'approach' ? object + ' 접근' : status.stage === 'jump' ? '도약!' : status.stage === 'impact' ? challenge.outcome === 'clip' ? '발이 걸려 앞으로 넘어졌습니다' : '미끄러져 주저앉았습니다' : status.stage === 'recover' ? '균형을 되찾는 중' : status.stage === 'chase' ? '다시 추격합니다' : '코스 통과');
     detail = '현재 ' + status.currentRank + '위. ' + (status.stage === 'approach' ? '오른쪽에서 ' + object + '이 가까워집니다. 기수가 도약할 보폭을 맞춥니다.'
       : status.stage === 'jump' ? '앞다리를 모아 넘습니다. 착지까지 보폭을 지켜보세요.'
-      : status.stage === 'impact' ? (challenge.outcome === 'clip' ? '낮은 도약 끝에 앞발이 건초를 건드립니다. 기수가 고삐를 당기며 버팁니다.' : '발이 젖은 지면을 밀고 미끄러집니다. 기수가 몸을 세워 중심을 잡습니다.') + change
-      : status.stage === 'recover' ? '보폭이 짧아져 앞말과 간격이 벌어졌습니다. 발을 다시 딛고 중심을 맞춥니다.' + change
+      : status.stage === 'impact' ? (challenge.outcome === 'clip' ? '앞발이 건초에 걸려 무릎을 꿇고 가슴이 땅으로 내려갑니다. 기수도 안장에서 뒤로 미끄러집니다.' : '앞발이 젖은 지면에서 길게 밀립니다. 말이 주저앉고 기수가 몸을 젖혀 버팁니다.') + change
+      : status.stage === 'recover' ? '앞발부터 다시 딛고 몸을 일으킵니다. 기수도 안장으로 돌아옵니다. 그 사이 상대 말이 지나갑니다.' + change
       : status.stage === 'chase' ? '고삐를 풀고 보폭을 되찾습니다. ' + (ahead ? ahead.name + '의 뒤에서 잃은 거리를 좁힙니다.' : '다시 선두 경합에 합류합니다.')
       : challenge.outcome === 'clear' ? '장애물을 넘으며 착지로 이어집니다. 네 발의 달리는 리듬을 지킵니다.' : '흔들림을 수습하고 달리는 리듬을 되찾았습니다. 실제 간격만큼 추격이 이어집니다.');
     badge = status.stage === 'impact' || status.stage === 'recover' ? '실제 감속 · 역전 기회' : status.stage === 'chase' ? '회복 · 재추격' : '코스 장애물';
     focusId = challenge.actorId;
+  }
+  const trick = phase === 'race' ? activeRacingTrick(timeline, elapsed) : undefined;
+  if (trick && (!challenge || !['impact', 'recover'].includes(racingObstacleStatus(timeline, challenge, elapsed).stage))) {
+    const striker = props.candidates.find(candidate => candidate.id === trick.actorId)?.name ?? '뒤의 기수';
+    const target = props.candidates.find(candidate => candidate.id === trick.targetId)?.name ?? '앞의 기수';
+    const status = racingTrickStatus(timeline, trick, elapsed), kick = trick.kind === 'rear-kick';
+    headline = status.stage === 'windup' ? striker + (kick ? ' · 뒷발을 모읍니다' : ' · 모래주머니를 꺼냈습니다')
+      : status.stage === 'flight' ? striker + (kick ? ' · 뒤로 한 번 차기!' : ' · 앞 기수를 향해 투척!')
+      : status.stage === 'stunned' ? target + ' · 기수가 잠깐 멍해졌습니다' : target + ' · 정신을 차리고 재추격!';
+    detail = status.stage === 'windup' ? (kick ? '바로 뒤에서 붙는 말을 보고 뒷발을 모아 견제합니다.' : '뒤의 기수가 고삐를 한 손으로 잡고 작은 모래주머니를 들어 올립니다.')
+      : status.stage === 'flight' ? (kick ? '뒷발이 뒤 기수의 등자 쪽에 닿습니다. 뒤의 말이 고삐를 당깁니다.' : '작은 모래주머니가 포물선을 그려 바로 앞 기수의 헬멧으로 날아갑니다.')
+      : status.stage === 'stunned' ? '현재 ' + status.currentRank + '위. 별이 빙글빙글! 기수가 고삐를 잡은 채 휘청여 말의 속도도 줄어듭니다.' + (status.currentRank > status.beforeRank ? ' 뒤의 말이 지나가며 순위가 밀렸습니다.' : ' 그 사이 상대와 간격이 벌어집니다.')
+      : '현재 ' + status.currentRank + '위. 고개를 바로 세우고 고삐를 풉니다. 잃은 간격을 다시 따라잡습니다.';
+    badge = status.stage === 'stunned' ? '기수 일시 기절 · 실제 감속' : status.stage === 'chase' ? '회복 · 재추격' : kick ? '뒷발차기 견제' : '모래주머니 투척';
+    focusId = elapsed < trick.impact ? trick.actorId : trick.targetId;
   }
   const trackedId = focusId ?? leader?.id, pace = trackedId ? (readRacingTravel(timeline, trackedId, elapsed + 100) - readRacingTravel(timeline, trackedId, elapsed)) * 335 : 1;
   return { phase, standings, headline, detail, focusId, badge, progress: Math.max(0, ...standings.map(standing => standing.distance)), speed: phase === 'race' || phase === 'straight' ? Math.round(clamp(56 * pace, 0, 100)) : 0 };
@@ -100,13 +115,24 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
   // Distance follows the nose; individual sprite scales must not change the finish crossing.
   const baseLocations = placements.map(item => ({ ...item, x: item.x - 57 * item.scale, y: item.y + racingLaneShift(incident, item.id, elapsed) * h * .035 }));
   const obstacles = placeRacingObstacles(timeline, scene.camera, placements, w);
-  const locations = placeRacingDuel(incident, baseLocations, obstacles, elapsed).sort((a, b) => a.y - b.y);
+  const trick = phase === 'race' ? activeRacingTrick(timeline, elapsed) : undefined;
+  const locations = placeRacingFalls(placeRacingTrick(trick, placeRacingDuel(incident, baseLocations, obstacles, elapsed), elapsed), timeline, elapsed, h, reduced).sort((a, b) => a.y - b.y);
   const motions = new Map(locations.map(item => {
     const own = obstacles.filter(obstacle => obstacle.actorId === item.id);
     const jump = reduced ? 0 : Math.max(0, ...own.map(obstacle => racingObstacleJump(obstacle, item)));
-    const obstacleMotion = own.reduce((motion, obstacle) => ({ ...motion, ...racingObstacleMotion(obstacle, elapsed, reduced) }), {});
-    return [item.id, { ...racingIncidentMotion(incident, item.id, elapsed, reduced), ...obstacleMotion, jump }];
+    const obstacleMotion = own.reduce<RaceHorseMotion>((motion, obstacle) => ({ ...motion, ...racingObstacleMotion(obstacle, elapsed, reduced) }), {});
+    return [item.id, { ...racingIncidentMotion(incident, item.id, elapsed, reduced), ...racingTrickMotion(trick, item.id, elapsed, locations, reduced), ...obstacleMotion, jump: jump * (1 - (obstacleMotion.fall ?? 0)) }];
   }));
+  const physicalLocations = locations.map(item => {
+    const before = readRacingTravel(timeline, item.id, elapsed - 100), effort = clamp((item.distance - before) * 335, .45, 1.35);
+    const pose = raceHorseAttachments(item.index, clock, effort, reduced, { phase: item.distance * 62 + item.index * .193, ...motions.get(item.id) });
+    const world = (point: { x: number; y: number }) => ({ x: item.x + point.x * item.scale, y: item.y + point.y * item.scale });
+    return { ...item, hand: world(pose.hand), helmet: world(pose.helmet), boot: world(pose.boot) };
+  });
+  if (trick?.kind === 'rear-kick') {
+    const actor = motions.get(trick.actorId);
+    if (actor) Object.assign(actor, racingTrickMotion(trick, trick.actorId, elapsed, physicalLocations, reduced));
+  }
   if (phase === 'straight' || phase === 'photo') {
     const finishX = w * .5 + (1 - scene.camera.center) / scene.camera.span * w * .65;
     for (let stripe = h * .42; stripe < h; stripe += 8) for (let column = 0; column < 2; column++) { ctx.fillStyle = (Math.floor(stripe / 8) + column) % 2 ? '#142333' : '#eee4c9'; ctx.fillRect(finishX + column * 5, stripe, 5, 8); }
@@ -125,7 +151,7 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
     }
     const candidate = props.candidates[item.index], before = readRacingTravel(timeline, item.id, elapsed - 100), effort = clamp((item.distance - before) * 335, .45, 1.35);
     const motion = motions.get(item.id)!;
-    drawRaceDust(ctx, item.index, item.x, item.y, item.scale, clock, reduced, (motion.jump ?? 0) > .08 ? 0 : effort);
+    drawRaceDust(ctx, item.index, item.x, item.y, item.scale, clock, reduced, (motion.jump ?? 0) > .08 ? 0 : effort * (1 - (motion.fall ?? 0) * .85));
     const standing = standings.find(standing => standing.id === item.id);
     const velocityRatio = standing?.finished ? Math.exp(-(elapsed - standing.finishTime) / 1100) : 1;
     // Invert the renderer's easing so stride shrinks with the continuous run-out velocity.
@@ -135,6 +161,7 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
   });
   drawRacingObstacles(ctx, groundObjects.slice(nextGroundObject), w, elapsed, reduced, 'ground');
   drawRacingIncidentEffects(ctx, incident, locations, elapsed, reduced, 'air');
+  drawRacingTrickEffects(ctx, trick, physicalLocations, elapsed, reduced);
   drawRacingObstacles(ctx, obstacles, w, elapsed, reduced, 'air');
   // The corner map preserves the full field while the main camera follows the race.
   const mw = Math.min(180, w * .25), mh = Math.min(104, h * .23);
