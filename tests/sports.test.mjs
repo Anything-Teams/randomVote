@@ -11,7 +11,9 @@ const { arenaStoryState } = await import(`data:text/javascript;base64,${Buffer.f
 const timingCompiled = await build({ entryPoints: ['src/playbackTiming.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createPlaybackDuration, basePlaybackDuration, PLAYBACK_SECONDS } = await import(`data:text/javascript;base64,${Buffer.from(timingCompiled.outputFiles[0].text).toString('base64')}`);
 const racingCompiled = await build({ entryPoints: ['src/racingNarrative.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { createRacingIncidents, buildRacingTimeline, readRacingDistance, racingLaneShift, RACING_STORIES } = await import(`data:text/javascript;base64,${Buffer.from(racingCompiled.outputFiles[0].text).toString('base64')}`);
+const { createRacingIncidents, buildRacingTimeline, readRacingDistance, readRacingTravel, racingStandings, racingIncidentStatus, racerFinishTime, racingLaneShift, RACING_STORIES } = await import(`data:text/javascript;base64,${Buffer.from(racingCompiled.outputFiles[0].text).toString('base64')}`);
+const cameraCompiled = await build({ entryPoints: ['src/racingCamera.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { createRacingCamera, racingFocusIds, placeRacingField } = await import(`data:text/javascript;base64,${Buffer.from(cameraCompiled.outputFiles[0].text).toString('base64')}`);
 const participants = Array.from({ length: 10 }, (_, index) => ({ id: `player-${index}`, name: `선수 ${index}`, color: '#f9d56e' }));
 
 test('only arena draws a variable runtime, while election and racing keep their existing length', () => {
@@ -183,7 +185,7 @@ test('arena cooperation and betrayal labels follow contact beats and identify th
   assert.doesNotMatch(survived.action, /장외|우승/);
 });
 
-test('racing incidents describe the displayed rank changes and retain all participants', () => {
+test('racing incidents describe real opponents and the displayed rank changes', () => {
   const kinds = new Set();
   for (let size = 2; size <= 10; size++) {
     const list = participants.slice(0, size);
@@ -202,6 +204,22 @@ test('racing incidents describe the displayed rank changes and retain all partic
         assert.deepEqual(rankedAt(incident.end), incident.afterOrder);
         const before = incident.beforeOrder.indexOf(incident.actorId), after = incident.afterOrder.indexOf(incident.actorId);
         assert.ok(incident.kind === 'fatigue' || incident.kind === 'balance' ? after > before : after < before);
+        const outcome = racingIncidentStatus(timeline, incident, incident.end);
+        assert.equal(outcome.currentRank, after + 1);
+        assert.equal(outcome.beforeRank, before + 1);
+        assert.equal(outcome.afterRank, after + 1);
+        assert.equal(outcome.opponentIds.length, Math.abs(after - before));
+        assert.ok(outcome.opponentIds.includes(incident.rivalId));
+        assert.deepEqual(after < before ? outcome.overtakenIds : outcome.passedByIds, outcome.opponentIds);
+        assert.equal(outcome.nextRivalId, undefined);
+        for (let elapsed = incident.start; elapsed <= incident.end; elapsed += 100) {
+          const live = racingIncidentStatus(timeline, incident, elapsed), ranks = racingStandings(timeline, elapsed);
+          const actorRank = ranks.find(standing => standing.id === incident.actorId).rank;
+          assert.equal(live.currentRank, actorRank);
+          if (live.stage === 'outcome') assert.equal(live.currentRank, live.afterRank, 'outcome caption must wait until its announced position is real');
+          for (const id of live.overtakenIds) assert.ok(ranks.find(standing => standing.id === id).rank > actorRank);
+          for (const id of live.passedByIds) assert.ok(ranks.find(standing => standing.id === id).rank < actorRank);
+        }
         for (const id of order) {
           const shift = racingLaneShift(incident, id, incident.start + 3000);
           assert.ok(shift >= -1 && shift <= 1);
@@ -225,11 +243,125 @@ test('every racing horse moves forward through stories and converges to the draw
       for (let elapsed = 0; elapsed <= 44_000; elapsed += 100) {
         for (const id of order) {
           const distance = readRacingDistance(timeline, id, elapsed);
-          assert.ok(Number.isFinite(distance) && distance >= previous.get(id) - 0.0000001, `backward racing motion: ${id}, ${elapsed}ms`);
+          assert.ok(Number.isFinite(distance) && distance >= 0 && distance <= 1 && distance >= previous.get(id) - 0.0000001, `invalid or backward lap motion: ${id}, ${elapsed}ms`);
           previous.set(id, distance);
         }
       }
-      assert.deepEqual([...order].sort((a, b) => previous.get(b) - previous.get(a)), order);
+      assert.deepEqual(racingStandings(timeline, 44_000).map(standing => standing.id), order);
+    }
+  }
+});
+
+test('one-lap finish times preserve the drawn rank without a late reshuffle across the line', () => {
+  for (let size = 2; size <= 10; size++) {
+    const list = participants.slice(0, size);
+    for (let seed = 1; seed <= 30; seed++) {
+      const ids = list.map(player => player.id), rotation = seed % size;
+      const order = [...ids.slice(rotation), ...ids.slice(0, rotation)].reverse();
+      const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
+      assert.equal(timeline.finish, 39_000);
+      assert.equal(racerFinishTime(timeline, order[0]), timeline.finish);
+      assert.ok(racerFinishTime(timeline, order.at(-1)) < 41_400);
+      for (let rank = 0; rank < order.length; rank++) {
+        const id = order[rank], time = racerFinishTime(timeline, id);
+        assert.ok(readRacingDistance(timeline, id, time - .001) < 1);
+        assert.equal(readRacingDistance(timeline, id, time), 1);
+        assert.equal(readRacingDistance(timeline, id, 44_000), 1);
+        assert.deepEqual(racingStandings(timeline, time).filter(standing => standing.finished).map(standing => standing.id), order.slice(0, rank + 1));
+        if (rank) assert.ok(time > racerFinishTime(timeline, order[rank - 1]));
+        assert.ok(Math.abs(readRacingTravel(timeline, id, time + .001) - readRacingTravel(timeline, id, time - .001)) < .00001);
+        assert.ok(readRacingTravel(timeline, id, time + 100) > readRacingTravel(timeline, id, time));
+        assert.ok(readRacingTravel(timeline, id, time + 200) > readRacingTravel(timeline, id, time + 100));
+      }
+      assert.deepEqual(racingStandings(timeline, 44_000).map(standing => standing.id), order);
+    }
+  }
+});
+
+test('racing camera includes the live leaders and every real opponent before and throughout each story', () => {
+  for (let size = 2; size <= 10; size++) for (let seed = 1; seed <= 20; seed++) {
+    const list = participants.slice(0, size), order = list.map(player => player.id).reverse();
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
+    for (let elapsed = timeline.start; elapsed <= 41_400; elapsed += 100) {
+      const focus = racingFocusIds(timeline, elapsed);
+      assert.equal(new Set(focus).size, focus.length);
+      for (const id of focus) assert.ok(order.includes(id), `unknown focused horse: ${id}`);
+      for (const leader of racingStandings(timeline, elapsed).slice(0, 3)) assert.ok(focus.includes(leader.id), `missing leader at ${elapsed}ms: ${leader.id}`);
+    }
+    for (const incident of timeline.incidents) {
+      const required = [incident.actorId, incident.rivalId, ...racingIncidentStatus(timeline, incident, incident.start).opponentIds];
+      for (const elapsed of [incident.start - 1100, incident.start - 100, incident.start, (incident.start + incident.end) / 2, incident.end + 100, incident.end + 1599]) {
+        const focus = racingFocusIds(timeline, elapsed);
+        for (const id of required) assert.ok(focus.includes(id), `missing story participant: ${size} horses, seed ${seed}, ${elapsed}ms, ${id}`);
+      }
+    }
+  }
+});
+
+test('racing camera preserves each horse identity and continuous motion when ranks or focus change', () => {
+  let rankChanges = 0;
+  for (let size = 2; size <= 10; size++) for (let seed = 1; seed <= 20; seed++) for (const [w, h] of [[960, 540], [320, 180]]) {
+    const list = participants.slice(0, size), order = list.map(player => player.id).reverse();
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed)), camera = createRacingCamera();
+    let previous, previousRanks;
+    for (let elapsed = timeline.start; elapsed <= 41_400; elapsed += 16) {
+      const field = placeRacingField(camera, list, timeline, elapsed, w, h, 16);
+      const focus = racingFocusIds(timeline, elapsed), ranks = racingStandings(timeline, elapsed).map(standing => standing.id).join('|');
+      assert.deepEqual(field.map(horse => horse.id), list.map(player => player.id));
+      if (previousRanks && previousRanks !== ranks) rankChanges++;
+      const active = timeline.incidents.find(incident => elapsed >= incident.start && elapsed <= incident.end);
+      for (const horse of field) {
+        const context = `${size} horses, seed ${seed}, ${w}px, ${elapsed}ms, ${horse.id}`;
+        assert.equal(list[horse.index].id, horse.id, `name and color identity changed: ${context}`);
+        assert.equal(horse.featured, focus.includes(horse.id));
+        assert.equal(horse.distance, readRacingTravel(timeline, horse.id, elapsed));
+        assert.ok([horse.x, horse.y, horse.scale].every(Number.isFinite) && horse.scale > 0, context);
+        assert.ok(Math.abs(horse.x - (w * .5 + (horse.distance - camera.center) / camera.span * w * .65)) < .000001, `position no longer follows actual travel: ${context}`);
+        const bodyRoot = horse.x - 57 * horse.scale;
+        // Labels are separately clamped by the renderer; the whole focused horse must fit the camera.
+        if (active && horse.featured) assert.ok(horse.x <= w && bodyRoot - 52 * horse.scale >= 0, `story horse outside camera: ${context}, nose=${horse.x}, body=${bodyRoot}`);
+        if (previous) {
+          const prior = previous[horse.index];
+          // Wide framing may begin before a story; rank changes must never teleport a persistent horse.
+          assert.ok(Math.abs(horse.x - prior.x) < w * .04, `horizontal cut: ${context}`);
+          assert.ok(Math.abs(horse.y - prior.y) < h * .015, `lane cut: ${context}`);
+          assert.ok(Math.abs(horse.scale - prior.scale) < .025, `scale cut: ${context}`);
+        }
+      }
+      previous = field; previousRanks = ranks;
+    }
+    assert.equal(camera.horses.size, list.length, 'no horse is removed when it leaves the leading group');
+  }
+  assert.ok(rankChanges > 1000, 'the continuity test must exercise actual rank swaps');
+});
+
+test('paused racing camera freezes projection, lanes and scales without losing any horse', () => {
+  for (let size = 2; size <= 10; size++) for (let seed = 1; seed <= 8; seed++) {
+    const list = participants.slice(0, size), order = list.map(player => player.id).reverse();
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
+    for (const incident of timeline.incidents) {
+      const camera = createRacingCamera(), freezeAt = incident.start + 1700;
+      for (let elapsed = timeline.start; elapsed < freezeAt; elapsed += 16) placeRacingField(camera, list, timeline, elapsed, 640, 360, 16);
+      const field = placeRacingField(camera, list, timeline, freezeAt, 640, 360, 16);
+      const frozen = { center: camera.center, span: camera.span, elapsed: camera.elapsed, horses: [...camera.horses].map(([id, pose]) => [id, { ...pose }]) };
+      for (let frame = 0; frame < 120; frame++) assert.deepEqual(placeRacingField(camera, list, timeline, freezeAt, 640, 360, 0), field);
+      assert.deepEqual({ center: camera.center, span: camera.span, elapsed: camera.elapsed, horses: [...camera.horses] }, frozen);
+    }
+  }
+});
+
+test('racing camera crosses the finish at actual arrival and keeps each horse moving beyond it', () => {
+  for (let size = 2; size <= 10; size++) for (let seed = 1; seed <= 20; seed++) {
+    const list = participants.slice(0, size), order = list.map(player => player.id).reverse();
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed)), camera = createRacingCamera();
+    for (let elapsed = timeline.start; elapsed < timeline.finish; elapsed += 16) placeRacingField(camera, list, timeline, elapsed, 960, 540, 16);
+    for (const id of order) {
+      const field = placeRacingField(camera, list, timeline, racerFinishTime(timeline, id), 960, 540, 16);
+      const horse = field.find(item => item.id === id), finishX = 480 + (1 - camera.center) / camera.span * 960 * .65;
+      assert.ok(Math.abs(horse.x - finishX) < .000001, `wrong finish crossing: ${size} horses, seed ${seed}, ${id}`);
+      const later = placeRacingField(camera, list, timeline, racerFinishTime(timeline, id) + 100, 960, 540, 100).find(item => item.id === id);
+      const laterLine = 480 + (1 - camera.center) / camera.span * 960 * .65;
+      assert.ok(later.x > laterLine, `horse froze at the finish line: ${size} horses, seed ${seed}, ${id}`);
     }
   }
 });

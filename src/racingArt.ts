@@ -13,56 +13,125 @@ const path = (ctx: CanvasRenderingContext2D, draw: () => void, fill: string | Ca
   ctx.beginPath(); draw(); ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = .7; ctx.stroke(); }
 };
 
-/** Four independently articulated legs, flexing neck, crouched rider and layered coat shading. */
-export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidate, index: number, x: number, y: number, scale: number, clock: number, speed: number, reduced: boolean, cheer = false, lean = 0) {
-  ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
-  const alpha = ctx.globalAlpha, moving = speed > .15;
-  const cycle = clock / (100 + index % 5 * 7) + index * 1.91;
-  const stride = moving && !reduced ? Math.sin(cycle) : 0;
-  const bounce = moving && !reduced ? -Math.abs(Math.sin(cycle)) * (2.8 + index % 3 * .65) : reduced ? 0 : Math.sin(clock / 900 + index) * .5;
-  const coat = coats[index % coats.length], dark = ['#583928', '#302e35', '#805632', '#a09b90', '#514a41', '#773e28'][index % 6];
-  ctx.fillStyle = '#07162455'; ctx.beginPath(); ctx.ellipse(-2, 3, 39 + bounce, 4.5, 0, 0, Math.PI * 2); ctx.fill();
-  const leg = (hip: number, offset: number, rear: boolean, far: boolean) => {
-    const swing = moving && !reduced ? Math.sin(cycle + offset) * clamp(speed, .8, 1.15) : 0;
-    const folded = moving && !reduced ? Math.max(0, Math.cos(cycle + offset)) : 0;
-    const kneeX = hip + swing * (rear ? 15 : 12), kneeY = -27 + bounce + Math.sqrt(Math.max(25, 225 - swing * swing * 120));
-    const hoofX = kneeX + (rear ? -swing * 13 : swing * 8) - folded * 11, hoofY = kneeY + 12 - folded * 13;
-    ctx.globalAlpha = alpha * (far ? .6 : 1); ctx.lineCap = 'round';
-    ctx.strokeStyle = far ? dark : coat; ctx.lineWidth = 6.2; ctx.beginPath(); ctx.moveTo(hip, -24 + bounce); ctx.lineTo(kneeX, kneeY); ctx.stroke();
-    ctx.lineWidth = 3.7; ctx.beginPath(); ctx.moveTo(kneeX, kneeY); ctx.lineTo(hoofX, hoofY); ctx.stroke();
-    ctx.strokeStyle = index % 3 === 0 ? '#e4ddc8' : dark; ctx.lineWidth = 3.1; ctx.beginPath(); ctx.moveTo(kneeX + (hoofX - kneeX) * .7, kneeY + (hoofY - kneeY) * .7); ctx.lineTo(hoofX, hoofY); ctx.stroke();
-    ctx.strokeStyle = '#17202b'; ctx.lineWidth = 4.2; ctx.beginPath(); ctx.moveTo(hoofX - 1, hoofY); ctx.lineTo(hoofX + 4.5, hoofY - 1); ctx.stroke(); ctx.globalAlpha = alpha;
+export type RaceHorseMotion = { gait?: 'idle' | 'walk' | 'gallop'; phase?: number; settle?: number; victory?: number };
+
+/** A grounded four-beat stride, with the rider's pelvis and boots tied to the saddle. */
+export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidate, index: number, x: number, y: number, scale: number, clock: number, speed: number, reduced: boolean, cheer = false, lean = 0, motion: RaceHorseMotion = {}) {
+  type Point = { x: number; y: number };
+  const mix = (a: number, b: number, p: number) => a + (b - a) * p;
+  const ease = (value: number) => { const p = clamp(value, 0, 1); return p * p * (3 - 2 * p); };
+  const wrap = (value: number) => (value % 1 + 1) % 1;
+  const rotate = (point: Point, angle: number): Point => ({ x: point.x * Math.cos(angle) - point.y * Math.sin(angle), y: point.x * Math.sin(angle) + point.y * Math.cos(angle) });
+  const joint = (a: Point, b: Point, upper: number, lower: number, bend: number): Point => {
+    const dx = b.x - a.x, dy = b.y - a.y, raw = Math.hypot(dx, dy);
+    const distance = clamp(raw, Math.abs(upper - lower) + .01, upper + lower - .01);
+    const along = (upper * upper - lower * lower + distance * distance) / (2 * distance);
+    const height = Math.sqrt(Math.max(0, upper * upper - along * along)), nx = dx / (raw || 1), ny = dy / (raw || 1);
+    return { x: a.x + nx * along + ny * height * bend, y: a.y + ny * along - nx * height * bend };
   };
-  leg(-22, 2.6, true, true); leg(18, .6, false, true);
-  ctx.save(); ctx.translate(0, bounce); ctx.rotate(lean * .018);
-  ctx.strokeStyle = dark; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-32, -30); ctx.bezierCurveTo(-45, -28, -37 - stride * 5, -13, -50, -16 + stride * 6); ctx.stroke();
-  ctx.strokeStyle = '#271f2080'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-34, -30); ctx.bezierCurveTo(-44, -24, -43, -11, -52, -17 + stride * 6); ctx.stroke();
+  const mode = motion.gait ?? (speed > .15 ? 'gallop' : 'idle');
+  const settle = reduced ? 1 : clamp(motion.settle ?? 0, 0, 1);
+  const activity = reduced || mode === 'idle' ? 0 : 1 - ease(settle);
+  const period = mode === 'walk' ? 960 + index % 3 * 34 : 560 + index % 4 * 22;
+  const phase = reduced ? 0 : wrap(motion.phase ?? clock / period + index * .193);
+  const cycle = phase * Math.PI * 2;
+  const effort = mode === 'walk' ? 1 : clamp(speed, .65, 1.4);
+  const strideLength = mode === 'walk' ? 18 : 20 * (.88 + effort * .10);
+  const stance = mode === 'walk' ? .62 : .20;
+  const breath = reduced ? 0 : Math.sin(clock / 960 + index * .83) * .18;
+  const bounce = mix(breath, .15 + Math.cos((phase - .12) * Math.PI * 2) * (mode === 'walk' ? .30 : 1.15), activity);
+  const pitch = (reduced ? 0 : clamp(lean, -8, 8) * .004) + activity * (mode === 'walk' ? 0 : -.008 + Math.sin(cycle) * .012);
+  const bodyPoint = (point: Point): Point => { const p = rotate(point, pitch); return { x: p.x, y: p.y + bounce }; };
+  const coat = coats[index % coats.length], dark = ['#583928', '#302e35', '#805632', '#a09b90', '#514a41', '#773e28'][index % 6];
+  const legData = [
+    { rear: true, far: true, hip: { x: -23, y: -27 }, offset: mode === 'walk' ? .50 : .05, rest: -26 },
+    { rear: false, far: true, hip: { x: 18, y: -30.8 }, offset: mode === 'walk' ? .25 : .40, rest: 20 },
+    { rear: true, far: false, hip: { x: -21, y: -27 }, offset: mode === 'walk' ? 0 : .18, rest: -23 },
+    { rear: false, far: false, hip: { x: 21, y: -30.8 }, offset: mode === 'walk' ? .75 : .54, rest: 24 },
+  ].map(data => {
+    const p = wrap(phase - data.offset), support = p < stance;
+    const swing = clamp((p - stance) / (1 - stance), 0, 1);
+    const fold = Math.sin(swing * Math.PI) ** 2;
+    const center = data.rear ? data.hip.x - 2 : data.hip.x + 2;
+    const travelX = support ? center + strideLength * (.5 - p / stance) : mix(center - strideLength / 2, center + strideLength / 2, ease(swing)) + fold * (data.rear ? 5 : -7);
+    const lift = support ? 0 : fold * (mode === 'walk' ? 3 : data.rear ? 13 : 16);
+    const hoof = { x: mix(data.rest, travelX, activity), y: -2 - lift * activity };
+    const hip = bodyPoint(data.hip);
+    if (data.rear) {
+      const stifle = bodyPoint({ x: data.hip.x + 7, y: data.hip.y + 8 });
+      return { ...data, hip, knee: stifle, ankle: joint(stifle, hoof, 15, 12, -1), hoof };
+    }
+    const ankle = { x: hoof.x - 2, y: hoof.y - 4 };
+    return { ...data, hip, knee: joint(hip, ankle, 16, 13, -1), ankle, hoof };
+  });
+  ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
+  const alpha = ctx.globalAlpha;
+  ctx.fillStyle = '#07162455'; ctx.beginPath(); ctx.ellipse(-2, 2.5, 38 + bounce * .6, 4.1, 0, 0, Math.PI * 2); ctx.fill();
+  const bone = (a: Point, b: Point, width: number, color: string) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  };
+  const leg = (data: typeof legData[number]) => {
+    ctx.globalAlpha = alpha * (data.far ? .68 : 1);
+    bone(data.hip, data.knee, 6.2, data.far ? dark : coat);
+    bone(data.knee, data.ankle, data.rear ? 4.1 : 3.8, data.far ? dark : coat);
+    bone(data.ankle, data.hoof, 2.8, data.far ? dark : coat);
+    if (index % 3 === 0) {
+      const sock = { x: mix(data.ankle.x, data.hoof.x, .58), y: mix(data.ankle.y, data.hoof.y, .58) };
+      bone(sock, data.hoof, 3, '#e4ddc8');
+    }
+    bone({ x: data.hoof.x - 1.5, y: data.hoof.y }, { x: data.hoof.x + 3.7, y: data.hoof.y }, 3.8, '#17202b');
+    ctx.globalAlpha = alpha;
+  };
+  leg(legData[0]); leg(legData[1]);
+  ctx.save(); ctx.translate(0, bounce); ctx.rotate(pitch);
+  const wind = reduced ? 0 : activity * (Math.sin(cycle - .45) * 1.7 + 1.5);
+  ctx.strokeStyle = dark; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-32, -30); ctx.bezierCurveTo(-43, -28, -43 - wind, -18, -50, -21 + wind); ctx.stroke();
+  ctx.strokeStyle = '#271f2080'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-34, -30); ctx.bezierCurveTo(-43, -25, -46, -19, -52, -22 + wind); ctx.stroke();
   const body = ctx.createLinearGradient(0, -43, 0, -14); body.addColorStop(0, coat); body.addColorStop(.48, coat); body.addColorStop(1, dark);
   path(ctx, () => { ctx.moveTo(-35, -29); ctx.bezierCurveTo(-33, -41, -22, -43, -10, -39); ctx.bezierCurveTo(0, -42, 19, -40, 27, -31); ctx.bezierCurveTo(31, -19, 18, -13, 4, -16); ctx.bezierCurveTo(-13, -13, -32, -16, -35, -29); }, body, dark);
-  path(ctx, () => { ctx.moveTo(13, -24); ctx.bezierCurveTo(23, -36, 19, -45, 30, -53 + stride * .6); ctx.lineTo(40, -50); ctx.bezierCurveTo(33, -34, 35, -23, 21, -19); ctx.closePath(); }, coat, dark);
+  const nod = reduced ? 0 : activity * Math.sin(cycle - .18) * .012;
+  ctx.save(); ctx.translate(23, -29); ctx.rotate(nod); ctx.translate(-23, 29);
+  path(ctx, () => { ctx.moveTo(13, -24); ctx.bezierCurveTo(23, -36, 19, -45, 30, -53); ctx.lineTo(40, -50); ctx.bezierCurveTo(33, -34, 35, -23, 21, -19); ctx.closePath(); }, coat, dark);
   ctx.strokeStyle = dark; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(21, -32); ctx.bezierCurveTo(24, -42, 25, -50, 31, -54); ctx.stroke();
   path(ctx, () => { ctx.moveTo(29, -54); ctx.lineTo(30, -63); ctx.lineTo(35, -54); ctx.lineTo(38, -52); ctx.lineTo(41, -60); ctx.lineTo(44, -50); ctx.bezierCurveTo(50, -49, 57, -44, 57, -40); ctx.bezierCurveTo(56, -33, 43, -38, 36, -40); ctx.bezierCurveTo(28, -39, 24, -47, 29, -54); }, coat, dark);
   path(ctx, () => { ctx.moveTo(48, -44); ctx.bezierCurveTo(58, -43, 61, -35, 53, -35); ctx.lineTo(45, -39); ctx.closePath(); }, index % 3 === 0 ? '#e5d6bb' : dark);
   if (index % 2 === 0) path(ctx, () => { ctx.moveTo(36, -52); ctx.lineTo(41, -49); ctx.lineTo(45, -39); ctx.lineTo(40, -40); ctx.closePath(); }, '#f4e7ca');
   ctx.fillStyle = '#090f19'; ctx.beginPath(); ctx.arc(41, -47, 1.4, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(54, -40, 1.4, 1.1);
-  ctx.strokeStyle = '#252027'; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.moveTo(52, -45); ctx.lineTo(48, -35); ctx.lineTo(24, -37); ctx.lineTo(12, -36); ctx.stroke();
-  ctx.strokeStyle = '#efd6ac'; ctx.lineWidth = .8; ctx.beginPath(); ctx.moveTo(49, -36); ctx.lineTo(35, -43); ctx.lineTo(8, -32); ctx.stroke();
-  ctx.strokeStyle = `${coat}88`; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-28, -31); ctx.bezierCurveTo(-18, -39, -9, -36, -7, -25); ctx.moveTo(16, -33); ctx.bezierCurveTo(25, -29, 24, -23, 17, -19); ctx.stroke();
+  ctx.strokeStyle = '#252027'; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.moveTo(52, -45); ctx.lineTo(48, -35); ctx.lineTo(35, -41); ctx.stroke(); ctx.restore();
+  ctx.strokeStyle = coat + '88'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(-28, -31); ctx.bezierCurveTo(-18, -39, -9, -36, -7, -25); ctx.moveTo(16, -33); ctx.bezierCurveTo(25, -29, 24, -23, 17, -19); ctx.stroke();
   raceBox(ctx, -16, -38, 33, 21, 3, candidate.color, '#192434');
-  ctx.fillStyle = '#ffffff77'; ctx.fillRect(-14, -36, 29, 2); raceLabel(ctx, String(index + 1).padStart(2, '0'), 0, -26, 10, '#111e2c', true);
-  const riderBounce = moving && !reduced ? Math.cos(cycle) * 1.5 : 0;
-  ctx.save(); ctx.translate(3, -45 + riderBounce); ctx.rotate(moving ? -.14 - Math.max(0, speed - 1) * .25 + Math.max(0, 1 - speed) * .18 + lean * .015 : .08);
-  ctx.strokeStyle = '#e3e0d8'; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(-5, 0); ctx.lineTo(-12, 10); ctx.lineTo(1, 17); ctx.stroke();
-  ctx.strokeStyle = '#142135'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(-1, 15); ctx.lineTo(4, 17); ctx.stroke();
-  path(ctx, () => { ctx.moveTo(-10, -4); ctx.lineTo(1, -15); ctx.bezierCurveTo(9, -15, 12, -8, 8, -3); ctx.lineTo(-3, 5); ctx.closePath(); }, candidate.color, '#243447');
-  ctx.strokeStyle = '#ffffffbb'; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(-7, -3); ctx.lineTo(4, -12); ctx.stroke();
-  ctx.strokeStyle = candidate.color; ctx.lineWidth = 4.3; ctx.beginPath(); ctx.moveTo(5, -10); ctx.lineTo(cheer ? 12 : 16, cheer ? -26 - (reduced ? 0 : Math.sin(clock / 190) * 3) : -2); ctx.lineTo(cheer ? 22 : 25, cheer ? -29 : -4); ctx.stroke();
-  ctx.fillStyle = '#ecc39e'; ctx.beginPath(); ctx.arc(14, -19, 5.2, 0, Math.PI * 2); ctx.fill();
-  path(ctx, () => { ctx.moveTo(8, -20); ctx.bezierCurveTo(8, -30, 20, -31, 21, -22); ctx.lineTo(24, -21); ctx.lineTo(8, -20); }, candidate.color, '#1b2b3e');
-  ctx.strokeStyle = '#ecf3ee'; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(10, -26); ctx.lineTo(16, -27); ctx.stroke();
-  ctx.fillStyle = '#15273e'; ctx.fillRect(15, -21, 5, 2.4); ctx.restore(); ctx.restore();
-  leg(-22, 3.8, true, false); leg(18, 0, false, false);
-  ctx.restore();
+  ctx.fillStyle = '#ffffff77'; ctx.fillRect(-14, -36, 29, 2); raceLabel(ctx, String(index + 1).padStart(2, '0'), -6, -26, 10, '#111e2c', true);
+  path(ctx, () => { ctx.moveTo(-11, -40); ctx.bezierCurveTo(-5, -44, 4, -43, 8, -39); ctx.lineTo(7, -36); ctx.lineTo(-10, -36); ctx.closePath(); }, '#2b2430', '#d6b985');
+  const pelvis = { x: -3, y: -43 - activity * .55 };
+  const shoulder = { x: mix(-2, 11, activity), y: mix(-59, -53, activity) - activity * Math.sin(cycle + .3) * .35 };
+  const boot = { x: 5, y: -23 }, knee = joint(pelvis, boot, 12.5, 10.5, 1);
+  bone(pelvis, knee, 5.2, '#e3e0d8'); bone(knee, boot, 4.4, '#e3e0d8');
+  ctx.strokeStyle = '#b1a07e'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(-1, -39); ctx.lineTo(6, -23); ctx.stroke();
+  ctx.strokeStyle = '#d3bd8a'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.ellipse(7, -22.5, 4, 1.8, 0, 0, Math.PI * 2); ctx.stroke();
+  bone({ x: boot.x - 2, y: boot.y }, { x: boot.x + 5, y: boot.y }, 3.8, '#142135');
+  const victory = reduced ? (cheer ? 1 : 0) : ease(clamp(motion.victory ?? (cheer ? 1 : 0), 0, 1));
+  const farHand = { x: mix(15, 24, activity), y: mix(-46, -43, activity) };
+  const nearHand = { x: mix(mix(16, 25, activity), 13, victory), y: mix(mix(-45, -43, activity), -78, victory) };
+  const bridle = rotate({ x: 49 - 23, y: -40 + 29 }, nod);
+  ctx.strokeStyle = '#e1c496'; ctx.lineWidth = .9; ctx.beginPath(); ctx.moveTo(bridle.x + 23, bridle.y - 29); ctx.quadraticCurveTo(34, -42, farHand.x, farHand.y); ctx.stroke();
+  const riderArm = (a: Point, hand: Point, far: boolean) => {
+    const distance = Math.hypot(hand.x - a.x, hand.y - a.y), reach = Math.min(1, 24.8 / Math.max(.01, distance));
+    hand = { x: a.x + (hand.x - a.x) * reach, y: a.y + (hand.y - a.y) * reach };
+    const elbow = joint(a, hand, 13, 12, -1);
+    bone(a, elbow, far ? 3.6 : 4.2, candidate.color); bone(elbow, hand, far ? 3.3 : 3.8, candidate.color);
+    ctx.fillStyle = '#ecc39e'; ctx.beginPath(); ctx.arc(hand.x, hand.y, 1.8, 0, Math.PI * 2); ctx.fill();
+  };
+  riderArm({ x: shoulder.x - 2, y: shoulder.y }, farHand, true);
+  path(ctx, () => { ctx.moveTo(pelvis.x - 5, pelvis.y - 2); ctx.lineTo(shoulder.x - 5, shoulder.y - 2); ctx.quadraticCurveTo(shoulder.x + 3, shoulder.y - 4, shoulder.x + 6, shoulder.y + 2); ctx.lineTo(pelvis.x + 5, pelvis.y + 3); ctx.closePath(); }, candidate.color, '#243447');
+  bone({ x: pelvis.x - 2, y: pelvis.y - 3 }, { x: shoulder.x + 1, y: shoulder.y - 1 }, 2, '#ffffffbb');
+  riderArm(shoulder, nearHand, false);
+  const head = { x: shoulder.x + 3, y: shoulder.y - 9 };
+  bone({ x: shoulder.x + 1, y: shoulder.y - 2 }, { x: head.x - 1, y: head.y + 3 }, 3, '#ecc39e');
+  ctx.fillStyle = '#ecc39e'; ctx.beginPath(); ctx.arc(head.x, head.y, 4.7, 0, Math.PI * 2); ctx.fill();
+  path(ctx, () => { ctx.moveTo(head.x - 5.5, head.y - 1); ctx.bezierCurveTo(head.x - 6, head.y - 10, head.x + 5, head.y - 11, head.x + 6, head.y - 2); ctx.lineTo(head.x + 9, head.y - 1); ctx.lineTo(head.x - 5.5, head.y - 1); }, candidate.color, '#1b2b3e');
+  bone({ x: head.x - 3, y: head.y - 7 }, { x: head.x + 2, y: head.y - 8 }, 1.6, '#ecf3ee');
+  ctx.fillStyle = '#15273e'; ctx.fillRect(head.x + .8, head.y - 2, 4.5, 2.2);
+  ctx.restore(); leg(legData[2]); leg(legData[3]); ctx.restore();
 }
 
 export function drawRaceStadium(ctx: CanvasRenderingContext2D, w: number, h: number, clock: number, reduced: boolean, close = false, finish = false) {
@@ -124,9 +193,17 @@ export function drawRaceStadium(ctx: CanvasRenderingContext2D, w: number, h: num
 }
 
 export function drawRaceDust(ctx: CanvasRenderingContext2D, index: number, x: number, y: number, scale: number, clock: number, reduced: boolean, effort = 1) {
-  if (reduced) return;
-  for (let particle = 0; particle < 9; particle++) {
-    const age = (clock + index * 111 + particle * 89) % 750 / 750;
-    ctx.fillStyle = `rgba(211,187,143,${(1 - age) * .23 * effort})`; ctx.beginPath(); ctx.ellipse(x - (30 + age * (48 + effort * 8)) * scale, y + 2 - age * 11, (1.5 + age * 9) * scale, (.7 + age * 4) * scale, -.1, 0, Math.PI * 2); ctx.fill();
+  if (reduced || effort <= .05) return;
+  const period = 560 + index % 4 * 22, strength = clamp(effort, .2, 1.4);
+  const horseClock = clock + index * .193 * period;
+  for (const [leg, contact] of [.05, .18, .40, .54].entries()) {
+    const sinceContact = ((horseClock - contact * period) % period + period) % period;
+    for (let particle = 0; particle < 2; particle++) {
+      const age = (sinceContact + particle * period) / 590;
+      if (age >= 1) continue;
+      const origin = leg < 2 ? -14 : 29, trail = age * (38 + strength * 8);
+      ctx.fillStyle = `rgba(211,187,143,${(1 - age) ** 2 * .24 * strength})`; ctx.beginPath();
+      ctx.ellipse(x + (origin - trail) * scale, y + (1 - Math.sin(age * Math.PI) * 5) * scale, (1.1 + age * 5) * scale, (.55 + age * 2.2) * scale, -.1, 0, Math.PI * 2); ctx.fill();
+    }
   }
 }

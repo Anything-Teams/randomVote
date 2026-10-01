@@ -278,13 +278,10 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   state.clock = clock; state.signature = signature; state.epoch = actor.motionEpoch; state.distance = actor.gaitDistance; state.moving = moving; state.airborne = air; state.pose = pose;
 }
 
-export function drawArenaName(ctx: CanvasRenderingContext2D, actor: ArenaActor, x = actor.x, y = actor.y + 7) {
+export function drawArenaName(ctx: CanvasRenderingContext2D, actor: ArenaActor) {
   const { candidate } = actor;
+  const x = actor.x, y = actor.y + 7;
   ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  if (Math.abs(x - actor.x) > 3 || Math.abs(y - actor.y - 7) > 3) {
-    ctx.strokeStyle = candidate.color; ctx.lineWidth = 1.3; ctx.globalAlpha = .6;
-    ctx.beginPath(); ctx.moveTo(actor.x, actor.y + 4); ctx.lineTo(x, y); ctx.stroke(); ctx.globalAlpha = 1;
-  }
   ctx.font = '800 12px "Malgun Gothic", sans-serif';
   const letters = Array.from(candidate.name);
   let label = candidate.name;

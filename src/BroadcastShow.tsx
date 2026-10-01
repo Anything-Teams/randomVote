@@ -106,7 +106,7 @@ export default function BroadcastShow({ result, frame, drama, phase, topic, elap
   const boardStyle = { '--candidate-count': result.candidates.length, '--compact-count': Math.ceil(result.candidates.length / 2) } as CSSProperties;
 
   return <div className={`show-layout cinematic-layout phase-${phase} ${sealed ? 'box-sealed' : ''} ${event ? `story-active story-${event.kind} story-stage-${cue!.stage}` : ''} ${finalSprint ? 'final-sprint' : ''} ${paused ? 'is-paused' : ''}`} style={boardStyle}>
-    <section className="broadcast-card cinematic-broadcast" aria-label="픽셀 선거 쇼">
+    <section className="broadcast-card cinematic-broadcast" aria-label="픽셀 투표 쇼">
       <div className="broadcast-head"><span className="live-pill"><span />{paused ? 'PAUSED · 잠깐 쉬어가는 중' : finished ? 'ELECTION COMPLETE' : 'LIVE · 특별 개표 방송'}</span><div className="broadcast-tools"><span>PIXEL TV / CH.01</span>{!finished && <button type="button" className="playback-button" onClick={onPause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div></div>
       <div className={`stage-screen ${sealed ? 'suspense' : ''}`}>
         <GameStage phase={phase} candidates={result.candidates} winnerId={result.winnerId} topic={topic} percentages={frame.percentages} finalPercentages={result.percentages} finalVotes={result.votes} progress={frame.progress} totalVotes={result.totalVotes} runId={runId} reducedMotion={reducedMotion} elapsed={elapsed} cheeringId={cheeringId} events={result.events} storyOutcomes={outcomes} paused={paused} />

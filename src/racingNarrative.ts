@@ -11,7 +11,9 @@ export type RacingIncident = {
   waitingOrder: string[];
   afterOrder: string[];
 };
-export type RacingTimeline = { start: number; finish: number; ids: string[]; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[] };
+export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[] };
+export type RacingStanding = { id: string; distance: number; rank: number; finished: boolean; finishTime: number };
+export type RacingIncidentStatus = { stage: 'setup' | 'action' | 'outcome'; beforeRank: number; currentRank: number; afterRank: number; opponentIds: string[]; overtakenIds: string[]; passedByIds: string[]; nextRivalId?: string };
 export const RACING_STORIES: { kind: RacingIncidentKind; title: string; setup: string; action: string; outcome: string }[] = [
   { kind: 'blocked', title: '막힌 길, 열린 틈', setup: '앞말에 길이 막혔습니다. 고삐를 당기며 틈을 기다립니다.', action: '한 박자 기다린 기수가 안쪽 빈 공간으로 파고듭니다.', outcome: '기다린 보람이 있습니다. 안쪽 돌파에 성공했습니다.' },
   { kind: 'inside', title: '짧은 길의 승부', setup: '코너 안쪽에 말 한 마리가 지날 틈이 생겼습니다.', action: '기수가 몸을 낮춥니다. 짧은 코스로 앞말을 따라잡습니다.', outcome: '코너를 짧게 돌아 순위를 끌어올렸습니다.' },
@@ -77,7 +79,8 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   const start = 5500, finish = Math.max(start + 1000, duration - 5000), raceLength = finish - start;
   const offsets = (ranking: string[], final = false) => Object.fromEntries(ids.map(id => {
     const rank = ranking.indexOf(id);
-    return [id, final ? (ids.length - rank) / Math.max(1, ids.length) * .060 : ((ids.length - 1) / 2 - rank) * .011];
+    // At the first finish only the winner reaches one complete lap. Others are still approaching.
+    return [id, final ? -rank * .0018 : ((ids.length - 1) / 2 - rank) * .011];
   }));
   const makeKnot = (at: number, ranking: string[], final = false) => {
     const base = clamp((at - start) / raceLength), values = offsets(ranking, final);
@@ -93,11 +96,19 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   // Let the final incident's outcome breathe before the last straight reshuffles the field.
   knots.push(makeKnot(start + 29_500 * scale, incidents[incidents.length - 1]?.afterOrder ?? firstOrder));
   knots.push(makeKnot(finish, finishOrder, true));
-  return { start, finish, ids, knots: knots.sort((a, b) => a.at - b.at), incidents };
+  const finishStep = Math.min(240 * scale, 2000 / Math.max(1, ids.length - 1));
+  const finishTimes = Object.fromEntries(finishOrder.map((id, rank) => [id, finish + rank * finishStep]));
+  return { start, finish, ids, finishOrder, finishTimes, knots: knots.sort((a, b) => a.at - b.at), incidents };
 }
 
 export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed: number): number {
   if (!timeline.ids.includes(id) || elapsed <= timeline.start) return 0;
+  if (elapsed >= timeline.finish) {
+    const rank = timeline.finishOrder.indexOf(id), finishTime = timeline.finishTimes[id];
+    if (rank <= 0 || elapsed >= finishTime) return 1;
+    const remaining = 1 - rank * .0018;
+    return remaining + (1 - remaining) * clamp((elapsed - timeline.finish) / (finishTime - timeline.finish));
+  }
   const rightIndex = timeline.knots.findIndex(knot => knot.at >= elapsed);
   if (rightIndex < 0) return timeline.knots[timeline.knots.length - 1].distances[id];
   if (rightIndex === 0) return 0;
@@ -106,7 +117,40 @@ export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed
   // Linear base motion plus eased lateral race gaps avoids a stop at each story cut.
   const leftBase = clamp((left.at - timeline.start) / (timeline.finish - timeline.start));
   const rightBase = clamp((right.at - timeline.start) / (timeline.finish - timeline.start));
-  return leftBase + (rightBase - leftBase) * amount + (left.distances[id] - leftBase) + ((right.distances[id] - rightBase) - (left.distances[id] - leftBase)) * smooth(amount);
+  return clamp(leftBase + (rightBase - leftBase) * amount + (left.distances[id] - leftBase) + ((right.distances[id] - rightBase) - (left.distances[id] - leftBase)) * smooth(amount));
+}
+
+export function racerFinishTime(timeline: RacingTimeline, id: string): number {
+  return timeline.finishTimes[id] ?? Infinity;
+}
+
+/** Run-out is separate from lap completion, keeping a moving horse from starting a second lap. */
+export function readRacingTravel(timeline: RacingTimeline, id: string, elapsed: number): number {
+  const finishTime = racerFinishTime(timeline, id);
+  if (!Number.isFinite(finishTime) || elapsed <= finishTime) return readRacingDistance(timeline, id, elapsed);
+  const runner = timeline.finishOrder[1];
+  const interval = runner ? timeline.finishTimes[runner] - timeline.finish : 240;
+  const speed = .0018 / Math.max(1, interval);
+  const age = Math.max(0, elapsed - finishTime);
+  return 1 + speed * 1100 * (1 - Math.exp(-age / 1100));
+}
+
+/** Finished horses retain their actual arrival order even though all lap distances become one. */
+export function racingStandings(timeline: RacingTimeline, elapsed: number): RacingStanding[] {
+  return timeline.ids.map(id => ({ id, distance: readRacingDistance(timeline, id, elapsed), rank: 0, finished: elapsed >= racerFinishTime(timeline, id), finishTime: racerFinishTime(timeline, id) }))
+    .sort((a, b) => a.finished && b.finished ? a.finishTime - b.finishTime : b.distance - a.distance || timeline.ids.indexOf(a.id) - timeline.ids.indexOf(b.id))
+    .map((standing, index) => ({ ...standing, rank: index + 1 }));
+}
+
+export function racingIncidentStatus(timeline: RacingTimeline, incident: RacingIncident, elapsed: number): RacingIncidentStatus {
+  const standings = racingStandings(timeline, elapsed), currentOrder = standings.map(standing => standing.id);
+  const before = incident.beforeOrder.indexOf(incident.actorId), after = incident.afterOrder.indexOf(incident.actorId), current = currentOrder.indexOf(incident.actorId);
+  const losing = after > before;
+  const opponentIds = losing ? incident.beforeOrder.slice(before + 1, after + 1) : incident.beforeOrder.slice(after, before).reverse();
+  const overtakenIds = losing ? [] : opponentIds.filter(id => currentOrder.indexOf(id) > current);
+  const passedByIds = losing ? opponentIds.filter(id => currentOrder.indexOf(id) < current) : [];
+  const crossed = new Set(losing ? passedByIds : overtakenIds);
+  return { stage: racingIncidentStage(incident, elapsed), beforeRank: before + 1, currentRank: current + 1, afterRank: after + 1, opponentIds, overtakenIds, passedByIds, nextRivalId: opponentIds.find(id => !crossed.has(id)) };
 }
 
 export function activeRacingIncident(timeline: RacingTimeline, elapsed: number) { return timeline.incidents.find(incident => elapsed >= incident.start && elapsed < incident.end); }

@@ -74,5 +74,5 @@ export default function GameStage({ phase, candidates, winnerId, topic, percenta
   }, [runId]);
 
   const sceneName = phase === 'declaration' ? '신문 속보와 출마 선언' : phase === 'voting' ? '시민들의 투표' : phase === 'counting' ? '초접전 개표 방송' : '당선 세리머니';
-  return <div className="game-canvas" ref={host} role="img" aria-label={`픽셀 선거 ${sceneName} 장면`} />;
+  return <div className="game-canvas" ref={host} role="img" aria-label={`픽셀 투표 ${sceneName} 장면`} />;
 }

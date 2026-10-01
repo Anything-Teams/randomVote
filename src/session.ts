@@ -4,7 +4,7 @@ const SESSION_KEY = 'pixel-election:session:v1';
 const DEFAULT_TOPIC = '오늘 커피 쏠 사람은?';
 
 export function readSession(): DrawSession {
-  const empty = { entries: [{ id: 1, name: '' }, { id: 2, name: '' }], topic: DEFAULT_TOPIC };
+  const empty = { entries: [{ id: 1, name: '' }, { id: 2, name: '' }], topic: DEFAULT_TOPIC, mode: 'arena' as const };
   try {
     const saved: unknown = JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? 'null');
     if (!saved || typeof saved !== 'object') return empty;
@@ -14,7 +14,7 @@ export function readSession(): DrawSession {
     return {
       entries: value.entries.map((entry, index) => ({ id: index + 1, name: entry.name.slice(0, 16) })),
       topic: typeof value.topic === 'string' ? value.topic.slice(0, 60) : DEFAULT_TOPIC,
-      mode: value.mode === 'racing' || value.mode === 'arena' ? value.mode : 'election',
+      mode: value.mode === 'racing' || value.mode === 'arena' || value.mode === 'election' ? value.mode : 'arena',
     };
   } catch { return empty; }
 }

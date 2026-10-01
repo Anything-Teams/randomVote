@@ -4,6 +4,10 @@
 .racing-stage-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex: 0 0 32px; padding: 0 13px; color: #9babbb; font: 800 9px monospace; letter-spacing: 1px; background: linear-gradient(110deg, #132b3e, #091827); border-bottom: 1px solid #5f695342; }
 .racing-stage-top > span:first-child { color: #ebd39c; }
 .racing-stage-top i { display: inline-block; width: 5px; height: 5px; margin-right: 8px; border-radius: 50%; background: #edb371; box-shadow: 0 0 8px #edb37188; }
+.racing-view-switch { display: flex; flex: none; gap: 2px; padding: 2px; border: 1px solid #556774; border-radius: 4px; }
+.racing-view-switch button { border: 0; border-radius: 2px; padding: 2px 8px; color: #b6c5cc; background: transparent; font: 800 9px "Malgun Gothic", sans-serif; cursor: pointer; }
+.racing-view-switch button[aria-pressed="true"] { color: #263743; background: #dec796; }
+.racing-view-switch button:focus-visible { outline: 2px solid #fff1c6; outline-offset: 2px; }
 .racing-canvas-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 .racing-canvas { display: block; width: 100%; height: 100%; }
 .racing-phase-badge { position: absolute; top: 8px; left: 9px; max-width: 68%; pointer-events: none; padding: 4px 8px; border-left: 2px solid #dbc795; border-radius: 2px; background: #0c1c2bdf; color: #f3dfaf; font: 800 10px monospace; letter-spacing: .4px; }
@@ -11,6 +15,7 @@
 .racing-story-kicker { color: #c8ac73; font: 800 8px monospace; letter-spacing: 1.5px; margin-bottom: 5px; }
 .racing-commentary strong { display: block; font-size: clamp(13px, 1.5vw, 19px); line-height: 1.25; overflow-wrap: anywhere; color: #f6e8c7; }
 .racing-commentary p { margin: 5px 0 0; font-size: 11px; line-height: 1.35; color: #a2b4c1; }
+.racing-commentary p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .racing-distance-meter { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: #071722; }
 .racing-distance-meter span { display: block; width: var(--racing-progress); height: 100%; background: linear-gradient(90deg, #8f794a, #e9cd88); transition: width 700ms linear; }
 .racing-board { display: flex; flex-direction: column; gap: 10px; padding: 15px; background: linear-gradient(140deg, #1a2d3e, #0d1c2b); box-shadow: inset 0 1px 0 #d8dfcc12; }
@@ -31,7 +36,7 @@
 .racing-phase-winner .racing-commentary { background: linear-gradient(110deg, #383a2e, #152534); }
 .racing-jump-cut .racing-horse-row, .racing-jump-cut .racing-distance-meter span, .racing-paused .racing-horse-row, .racing-paused .racing-distance-meter span { transition: none; }
 @media (max-width: 760px) and (min-height: 501px) {
-  .racing-show { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1.1fr) minmax(0, 1fr); gap: 8px; }
+  .racing-show { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, min(42%, calc(38px + var(--racing-compact-count) * 30px))); gap: 8px; }
   .racing-stage-top { flex-basis: 24px; padding: 0 9px; font-size: 8px; }
   .racing-commentary { padding: 7px 9px; }
   .racing-commentary strong { font-size: 13px; }
@@ -68,7 +73,7 @@
   .racing-board-note { font-size: 7px; }
 }
 @media (max-height: 500px) and (max-width: 599px) {
-  .racing-show { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, .95fr) minmax(0, 1.05fr); gap: 6px; }
+  .racing-show { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, min(42%, calc(32px + var(--racing-compact-count) * 26px))); gap: 6px; }
   .racing-stage-top { flex-basis: 20px; padding: 0 7px; font-size: 7px; letter-spacing: .3px; }
   .racing-phase-badge { top: 5px; left: 6px; font-size: 8px; padding: 3px 5px; }
   .racing-commentary { padding: 5px 7px; }
@@ -86,6 +91,9 @@
   .racing-horse-name { font-size: 9px; }
   .racing-horse-state { font-size: 7px; }
   .racing-board-note { font-size: 6px; }
+}
+@media (max-width: 760px) {
+  .racing-phase-preview .racing-phase-badge, .racing-phase-paddock .racing-phase-badge, .racing-phase-countdown .racing-phase-badge { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .racing-horse-row, .racing-distance-meter span { transition: none; }

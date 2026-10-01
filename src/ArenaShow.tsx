@@ -7,7 +7,7 @@ import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
 import './arena.css';
 
-type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number; motorX?: number; motorY?: number; animation?: ArenaFighterAnimation; nameOffset?: ArenaPoint };
+type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number; motorX?: number; motorY?: number; animation?: ArenaFighterAnimation };
 type Contact = { center: ArenaPoint; side: number };
 type Exit = { round: ArenaRound; origin: ArenaPoint; landing: ArenaPoint; side: number; bench: ArenaPoint; lift: number; angle: number };
 type Simulation = { key: string; elapsed: number; epoch: number; bodies: Map<string, Body>; contacts: Map<string, Contact>; exits: Map<string, Exit> };
@@ -321,27 +321,9 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     body.animation ??= createArenaFighterAnimation();
     actor.animation = body.animation;
   }
+  // Every name is fixed below its owner and sits behind every fighter.
+  for (const actor of actors.values()) drawArenaName(ctx, actor);
   [...actors.values()].sort((a, b) => a.y - b.y).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
-  // Names stay readable in front of the scene without covering another fighter's face.
-  const tags: { x: number; y: number }[] = [];
-  const players = [...actors.values()].sort((a, b) => a.index - b.index);
-  for (const actor of players) {
-    let placement = { x: actor.x, y: actor.y + 7 };
-    findSpace: for (const row of [0, 22, 44]) for (const offset of [0, -52, 52, -104, 104]) {
-      const x = clamp(actor.x + offset, 26, 974), y = actor.y + 7 + row;
-      const coversBody = players.some(other => other !== actor && x + 24 > other.x - 25 && x - 24 < other.x + 25 && y + 20 > other.y - 120 && y < other.y + 4);
-      const coversName = tags.some(other => Math.abs(x - other.x) < 51 && Math.abs(y - other.y) < 23);
-      if (!coversBody && !coversName) { placement = { x, y }; break findSpace; }
-    }
-    tags.push(placement);
-    const body = sim.bodies.get(actor.candidate.id)!;
-    const target = { x: placement.x - actor.x, y: placement.y - actor.y };
-    body.nameOffset ??= target;
-    const blend = reset || reduced ? 1 : 1 - Math.exp(-seconds / .12);
-    body.nameOffset.x += (target.x - body.nameOffset.x) * blend;
-    body.nameOffset.y += (target.y - body.nameOffset.y) * blend;
-    drawArenaName(ctx, actor, actor.x + body.nameOffset.x, actor.y + body.nameOffset.y);
-  }
   if (exchange && !won) relationship(ctx, exchange, elapsed, actors, true);
 }
 
