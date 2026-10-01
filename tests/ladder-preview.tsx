@@ -28,7 +28,7 @@ function Preview() {
   const [inputOrderArrival, setInputOrderArrival] = useState(false);
   const [targetLane, setTargetLane] = useState(0), [elapsed, setElapsed] = useState(0);
   const [playing, setPlaying] = useState(false), [preview, setPreview] = useState(true);
-  const [reduced, setReduced] = useState(false), [runId, setRunId] = useState(0);
+  const [reduced, setReduced] = useState(false), [runId, setRunId] = useState(0), [storySeed, setStorySeed] = useState(1);
   const clock = useRef({ began: 0, age: 0 });
   useEffect(() => {
     if (!playing) return;
@@ -66,6 +66,7 @@ function Preview() {
         setInputOrderArrival(event.target.checked); setPlaying(false); setPreview(true); setElapsed(0); setRunId(id => id + 1);
       }} />입력 순서 도착 검증</label>
       <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}><input type="checkbox" checked={reduced} onChange={event => { forceReduced = event.target.checked; setReduced(event.target.checked); setPlaying(false); }} />모션 줄이기</label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>장면 시드<input aria-label="사다리 장면 시드" type="number" min={0} max={999} value={storySeed} onChange={event => { setStorySeed(Number(event.target.value)); setPlaying(false); setPreview(true); setElapsed(0); setRunId(id => id + 1); }} style={{ width: 42 }} /></label>
       <button type="button" onClick={() => { setPlaying(false); setPreview(true); setElapsed(0); setRunId(id => id + 1); }}>문 고르기</button>
       {[0, 5, 12, 20, 28, 36, 40, 44].map(second => <button type="button" key={second} onClick={() => seek(second * 1000)}>{second}초</button>)}
       <button type="button" onClick={togglePlay}>{playing ? '정지' : '재생'}</button>
@@ -77,7 +78,7 @@ function Preview() {
       <span>{targetLane + 1}번 문 · 당첨 지점</span>
     </label>
     <div className="sports-body" key={`${count}-${runId}-${reduced}`} style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
-      <LadderShow candidates={candidates} order={order} elapsed={elapsed} duration={DURATION} paused={!playing} preview={preview} targetLane={targetLane} onTargetChange={selectTarget} />
+      <LadderShow candidates={candidates} order={order} elapsed={elapsed} duration={DURATION} paused={!playing} preview={preview} targetLane={targetLane} onTargetChange={selectTarget} storySeed={storySeed} />
     </div>
   </main>;
 }

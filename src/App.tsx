@@ -16,7 +16,7 @@ const games = {
   election: { label: '투표', noun: '후보', title: '오늘의 당선자를 뽑아볼까요?', detail: '60가지 사건이 판세를 뒤흔드는 픽셀 투표 쇼.', action: '투표 시작', instruction: '몸싸움과 돌발 사건을 지나, 마지막 한 표의 주인공을 지켜보세요.' },
   racing: { label: '경마', noun: '말', title: '결승선까지, 순위는 모릅니다.', detail: '출발 게이트부터 마지막 직선까지, 순위를 뒤집는 픽셀 경마.', action: '경주 시작', instruction: '코너 추월부터 마지막 질주와 사진 판정까지, 모든 말의 순위를 지켜보세요.' },
   arena: { label: '난투', noun: '선수', title: '모래판의 마지막 한 사람은?', detail: '전원이 동시에 맞붙는 모래판. 끝까지 버티는 픽셀 장외 난투.', action: '난투 시작', instruction: '모두 한꺼번에 싸웁니다. 모래판 밖으로 밀려난 순서대로 순위가 확정됩니다.' },
-  ladder: { label: '사다리', noun: '참가자', title: '행운의 문에는 누가 들어갈까요?', detail: '그네와 회전 발판, 옆 사다리로 이어지는 함정을 통과하는 픽셀 모험.', action: '사다리 오르기 시작', instruction: '당첨 문을 고르세요. 함정마다 길이 뒤바뀌고, 그 문에 들어온 사람이 당첨됩니다.' },
+  ladder: { label: '사다리', noun: '참가자', title: '행운의 문에는 누가 들어갈까요?', detail: '줄을 타고, 뛰어 건너고, 떨어져 붙잡는 아슬아슬한 사다리 모험.', action: '사다리 오르기 시작', instruction: '당첨 문을 고르세요. 서로 다른 옆길을 건너 그 문에 들어온 사람이 당첨됩니다.' },
 } as const;
 const gameOrder = ['arena', 'racing', 'election', 'ladder'] as const;
 
