@@ -2,10 +2,10 @@ import type { Candidate } from '../election';
 
 export type ArenaPose = 'idle' | 'guard' | 'walk' | 'run' | 'grapple' | 'brace' | 'push' | 'dodge' | 'lift' | 'throw' | 'airborne' | 'land' | 'recover' | 'cheer' | 'clap' | 'bow';
 type Point = { x: number; y: number };
-type Motion = { crouch: number; lean: number; hipX: number; head: number; mouth: number; backX: number; backY: number; frontX: number; frontY: number; spread: number; contact: number; shoulderLift: number };
+type Motion = { crouch: number; lean: number; hipX: number; head: number; mouth: number; backX: number; backY: number; frontX: number; frontY: number; spread: number; contact: number; shoulderLift: number; clapTurn: number; cheerTurn: number };
 type FootMemory = { anchor: Point; from: Point; to: Point; ground: Point; lift: number; swinging: boolean; settleAt: number; settleFrom: Point; settleTo: Point; settleLift: number };
 export type ArenaFighterAnimation = { clock: number | null; signature: string; epoch?: number | string; motion: Motion | null; gait: number; distance: number; moving: boolean; airborne: boolean; feet: [FootMemory, FootMemory] | null; localFeet: [Point, Point] | null; grip?: Point; secondaryGrip?: Point; pose?: ArenaPose };
-export type ArenaActor = { candidate: Candidate; index: number; x: number; y: number; scale: number; facing: number; pose: ArenaPose; angle: number; alpha: number; velocityX: number; velocityY: number; gaitDistance: number; phase: number; power?: number; rank?: number; nameVisible?: boolean; gripTarget?: Point; secondaryGripTarget?: Point; animation?: ArenaFighterAnimation; motionEpoch?: number | string; motionImmediate?: boolean };
+export type ArenaActor = { candidate: Candidate; index: number; x: number; y: number; scale: number; facing: number; pose: ArenaPose; angle: number; alpha: number; velocityX: number; velocityY: number; gaitDistance: number; phase: number; power?: number; gripTarget?: Point; secondaryGripTarget?: Point; animation?: ArenaFighterAnimation; motionEpoch?: number | string; motionImmediate?: boolean };
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const ease = (value: number) => { const p = clamp(value); return p * p * (3 - 2 * p); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * p;
@@ -39,8 +39,9 @@ function segment(ctx: CanvasRenderingContext2D, a: Point, b: Point, width: numbe
   ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(Math.atan2(b.y - a.y, b.x - a.x));
   const length = Math.hypot(b.x - a.x, b.y - a.y);
   ctx.fillStyle = palette.base; ctx.fillRect(-1, -width / 2, length + 2, width);
-  ctx.fillStyle = palette.shade; ctx.fillRect(-1, width / 2 - 1, length + 2, 1);
-  ctx.fillStyle = palette.light; ctx.fillRect(1, -width / 2, Math.max(0, length - 2), .7);
+  // Small planes describe the muscle without a continuous glossy edge down every limb.
+  ctx.fillStyle = palette.shade; ctx.fillRect(length * .54, width / 2 - 1.5, Math.min(4, length * .34), 1.5);
+  ctx.fillStyle = palette.light; ctx.fillRect(length * .18, -width * .28, Math.min(3.3, length * .3), 1.2);
   ctx.restore();
 }
 function makeFoot(point: Point): FootMemory {
@@ -105,11 +106,11 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const moving = speed > 6 && !air, backward = actor.velocityX * facing < -5;
   const state = actor.animation ?? createArenaFighterAnimation();
   const signature = candidate.id + ':' + index + ':' + candidate.color;
-  const reset = !state.motion || state.signature !== signature || state.epoch !== actor.motionEpoch || actor.motionImmediate || clock < (state.clock ?? clock) || actor.gaitDistance < state.distance - 1;
+  const reset = !state.motion || !Number.isFinite(state.motion.clapTurn) || !Number.isFinite(state.motion.cheerTurn) || state.signature !== signature || state.epoch !== actor.motionEpoch || actor.motionImmediate || clock < (state.clock ?? clock) || actor.gaitDistance < state.distance - 1;
   const delta = reset ? 0 : Math.max(0, Math.min(50, clock - (state.clock ?? clock)));
   if (reset) { state.feet = null; state.localFeet = null; state.gait = .42 + personality * .015; state.moving = false; state.airborne = false; }
   const gait = state.gait * Math.PI * 2, power = clamp(actor.power ?? .6);
-  const target: Motion = { crouch: .2 + breath * .2, lean: breath * .7, hipX: breath * .12, head: breath * 1.1, mouth: 1.2, backX: -9, backY: 0, frontX: 10, frontY: 0, spread: 1 + personality * .035, contact: actor.gripTarget ? 1 : 0, shoulderLift: actor.gripTarget ? clamp((y - actor.gripTarget.y - 66) / (scale * 14)) * 3 : 0 };
+  const target: Motion = { crouch: .2 + breath * .2, lean: breath * .7, hipX: breath * .12, head: breath * 1.1, mouth: 1.2, backX: -9, backY: 0, frontX: 10, frontY: 0, spread: 1 + personality * .035, contact: actor.gripTarget ? 1 : 0, shoulderLift: actor.gripTarget ? clamp((y - actor.gripTarget.y - 66) / (scale * 14)) * 3 : 0, clapTurn: 0, cheerTurn: 0 };
   if (pose === 'guard' || pose === 'grapple') { target.crouch = 1.2 + personality * .25; target.lean = 2 + personality * .4; target.backX = -5; target.backY = -12; target.frontX = 15; target.frontY = -15; target.head = -target.lean * .3; }
   if (pose === 'brace') { target.crouch = 4.2; target.hipX = -1.2; target.lean = -4.5; target.backX = -1; target.backY = -12; target.frontX = 16; target.frontY = -14; target.spread += .22; target.mouth = .9; }
   if (pose === 'push') { target.crouch = 2.7; target.hipX = 1.2; target.lean = 4 + power * 5; target.backX = 7; target.backY = -14; target.frontX = 22; target.frontY = -16; target.mouth = 1.8; }
@@ -118,9 +119,29 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   if (pose === 'airborne') { target.crouch = 3; target.backX = -18; target.backY = -26; target.frontX = 20; target.frontY = -29; target.mouth = 3; target.head = -3; }
   if (pose === 'land') { target.crouch = 6 * Math.sin(clamp(phase) * Math.PI); target.lean = 9; target.backX = -5; target.backY = -1; target.frontX = 15; target.frontY = 1; target.mouth = 2.5; }
   if (pose === 'recover') { const p = ease(phase); target.crouch = mix(6.5, .4, p); target.lean = mix(12, 0, p); target.backX = mix(-2, -9, p); target.backY = mix(0, -1, p); target.frontX = mix(15, 10, p); target.frontY = mix(1, 0, p); }
-  if (pose === 'cheer') { target.crouch = -Math.max(0, Math.sin((clock + index * 400) / (430 + personality * 23))) * 1.6; target.backX = -14; target.backY = -32; target.frontX = 19; target.frontY = -34; target.mouth = 2.6; target.head = -2; }
-  if (pose === 'clap') { const clap = (Math.sin((clock + index * 273) / (160 + personality * 12)) + 1) / 2; target.backX = mix(-9, 3, clap); target.backY = -14; target.frontX = mix(16, 3, clap); target.frontY = -14; target.mouth = 1.8; target.head = -1 + breath; }
-  if (pose === 'bow') { target.lean = 6 + breath * 2; target.head = 5; target.backX = -8; target.frontX = 9; target.mouth = .9; }
+  if (pose === 'cheer') {
+    const wave = Math.sin((clock + index * 400) / (430 + personality * 23));
+    target.crouch = .7 + (wave + 1) * .55; target.hipX = wave * .3;
+    target.backX = -13 - wave * 1.6; target.backY = -31 - wave * 2.1;
+    target.frontX = 17 + wave * 1.2; target.frontY = -33 + wave * 1.3;
+    target.mouth = 2.6; target.head = -1.5 + breath * .4; target.cheerTurn = 1;
+  }
+  if (pose === 'clap') {
+    const cycle = ((clock + index * 273) % (1040 + personality * 80)) / (1040 + personality * 80);
+    const clap = cycle < .22 ? ease(cycle / .22) : cycle < .46 ? 1 : 1 - ease((cycle - .46) / .32);
+    // A short contact hold lets the palms meet before they separate again.
+    target.backX = mix(-6, 1, clap); target.backY = -14;
+    target.frontX = mix(14, 5.4, clap); target.frontY = -14;
+    target.crouch = .8 + breath * .12; target.lean = breath * .35;
+    target.mouth = 1.8; target.head = -.4 + breath * .3; target.clapTurn = 1;
+  }
+  if (pose === 'bow') {
+    const cycle = ((clock + index * 617) % 2400) / 2400;
+    const dip = cycle < .48 ? ease(cycle / .32) : 1 - ease((cycle - .48) / .40);
+    target.lean = (8 + personality * .4) * dip; target.head = 3 * dip;
+    target.crouch = .4 + dip * .8; target.hipX = -dip * .3;
+    target.backX = -10; target.frontX = 11; target.backY = -1; target.frontY = -1; target.mouth = .9;
+  }
   if (moving) {
     target.crouch = Math.max(target.crouch, pose === 'run' ? 3.2 : 2.2) + Math.abs(Math.sin(gait)) * .65;
     target.hipX += Math.sin(gait) * .45;
@@ -133,8 +154,12 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   }
   if (reset) state.motion = { ...target };
   else {
-    const amount = 1 - Math.exp(-delta / (air ? 55 : 95));
-    (Object.keys(target) as (keyof Motion)[]).forEach(key => { state.motion![key] = mix(state.motion![key], target[key], amount); });
+    (Object.keys(target) as (keyof Motion)[]).forEach(key => {
+      const hand = key === 'backX' || key === 'backY' || key === 'frontX' || key === 'frontY';
+      const turn = key === 'clapTurn' || key === 'cheerTurn';
+      const amount = 1 - Math.exp(-delta / (air ? 55 : turn ? 180 : pose === 'clap' && hand && state.motion!.clapTurn > .9 ? 45 : 95));
+      state.motion![key] = mix(state.motion![key], target[key], amount);
+    });
   }
   const motion = state.motion!, hip = { x: motion.hipX, y: -20 + motion.crouch }, lean = motion.lean * Math.PI / 180;
   let feet: [Point, Point];
@@ -164,7 +189,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     hands = [pointMix(hands[0], localHand(state.secondaryGrip), motion.contact), pointMix(hands[1], localHand(state.grip), motion.contact)];
   }
   hands = hands.map((hand, arm) => reachable(shoulders[arm], hand, 21.3));
-  const elbows = hands.map((hand, arm) => knee(shoulders[arm], hand, 11, 10.5, -1));
+  // Keep applause in front of the chest and raised victory arms outside the head.
+  const elbows = hands.map((hand, arm) => knee(shoulders[arm], hand, 11, 10.5, -Math.cos(Math.PI * (arm === 1 ? motion.clapTurn : motion.cheerTurn))));
   const bodyPoint = (point: Point): Point => { const p = rotate(point, lean); return { x: hip.x + p.x, y: hip.y + p.y }; };
   const headWidth = [14, 15, 14, 16][personality], headY = -33 - index % 2;
   ctx.save(); ctx.globalAlpha = actor.alpha;
@@ -203,25 +229,37 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     const index = back ? 0 : 1, ankle = feet[index], joint = knees[index], origin = hips[index];
     segment(ctx, origin, joint, 6.5, palette); segment(ctx, joint, ankle, 5.5, palette);
     rect(joint.x - 2.8, joint.y - 2.8, 5.6, 5.6, palette.base);
+    rect(joint.x - 1.5, joint.y - 1.8, 2.2, 1.2, palette.light); rect(joint.x + 1, joint.y + .8, 1.4, 1.4, palette.shade);
     const hem = reachable(origin, joint, 4.5);
     ctx.save(); ctx.translate(origin.x, origin.y); ctx.rotate(Math.atan2(hem.y - origin.y, hem.x - origin.x)); ctx.fillStyle = candidate.color; ctx.fillRect(-1, -3.8, Math.hypot(hem.x - origin.x, hem.y - origin.y) + 1, 7.6); ctx.restore();
-    rect(ankle.x - 3, ankle.y - 1, 9, 3, palette.base); rect(ankle.x - 2, ankle.y, 6, .7, palette.light); rect(ankle.x - 3, ankle.y + 1.3, 9, .7, palette.shade);
+    rect(ankle.x - 3, ankle.y - 1, 9, 3, palette.base); rect(ankle.x - 1.8, ankle.y - .5, 2.8, 1, palette.light); rect(ankle.x - 3, ankle.y + 1.3, 9, .7, palette.shade);
   };
   leg(true);
   ctx.save(); ctx.translate(hip.x, hip.y); ctx.rotate(lean);
-  const arm = (back: boolean) => {
+  const arm = (back: boolean, lowerOnly = false) => {
     const index = back ? 0 : 1, shoulder = shoulders[index], elbow = elbows[index], hand = hands[index];
-    segment(ctx, shoulder, elbow, 5.5, palette); segment(ctx, elbow, hand, 4.9, palette);
-    rect(shoulder.x - 2.8, shoulder.y - 2.8, 5.6, 5.6, palette.base); rect(elbow.x - 2.4, elbow.y - 2.4, 4.8, 4.8, palette.base);
-    rect(hand.x - 2.5, hand.y - 1.7, 5, 4, palette.base); rect(hand.x + 1.2, hand.y - .6, .8, 2.2, palette.shade);
+    if (!lowerOnly) {
+      segment(ctx, shoulder, elbow, 5.5, palette);
+      rect(shoulder.x - 2.8, shoulder.y - 2.8, 5.6, 5.6, palette.base); rect(shoulder.x - 1.7, shoulder.y - 1.8, 2.4, 1.2, palette.light);
+    }
+    segment(ctx, elbow, hand, 4.9, palette);
+    rect(elbow.x - 2.4, elbow.y - 2.4, 4.8, 4.8, palette.base); rect(elbow.x + .5, elbow.y + 1, 1.4, 1.1, palette.shade);
+    rect(hand.x - 2.5, hand.y - 1.7, 5, 4, palette.base); rect(hand.x - 1.1, hand.y - 1.1, 2.2, .8, palette.light); rect(hand.x + 1.1, hand.y + 1, 1.1, .9, palette.shade);
   };
   arm(true);
-  rect(-bodyWidth / 2, -23, bodyWidth, 23, palette.base); rect(bodyWidth / 2 - 3, -21, 3, 20, palette.shade); rect(-bodyWidth / 2 + 1, -22, 1.5, 13, palette.light);
+  rect(-bodyWidth / 2, -23, bodyWidth, 23, palette.base);
+  rect(-bodyWidth / 2 + 2, -21, 5, 2, palette.light); rect(-bodyWidth / 2 + 3, -15, 3, 2, palette.light);
+  rect(bodyWidth / 2 - 3, -20, 3, 5, palette.shade); rect(bodyWidth / 2 - 4, -10, 4, 4, palette.shade);
+  rect(-3, -14, 6, 1, palette.shade);
   rect(-bodyWidth / 2 - 1, -5, bodyWidth + 2, 5, candidate.color); rect(-bodyWidth / 2, 0, bodyWidth, 5, candidate.color); rect(-1.5, -5, 3, 10, '#fff0cf');
-  rect(-2.7, -28, 5.4, 7, palette.base); rect(1.7, -27, 1, 6, palette.shade);
+  rect(-2.7, -28, 5.4, 7, palette.base); rect(-1.5, -27.5, 4.2, 1.5, palette.shade); rect(.6, -24.5, 2.1, 2, palette.shade);
   ctx.save(); ctx.translate(0, headY); ctx.rotate(motion.head * Math.PI / 180);
-  rect(-headWidth / 2, -8, headWidth, 16, palette.base); rect(headWidth / 2 - 2, -6, 2, 13, palette.shade); rect(-headWidth / 2 + 1, -7, 1, 10, palette.light);
+  rect(-headWidth / 2, -8, headWidth, 16, palette.base);
+  rect(-headWidth / 2 + 2, -6, headWidth - 6, 2, palette.light); rect(-headWidth / 2 + 1, 2, 2, 2, palette.light);
+  rect(headWidth / 2 - 3, -5, 3, 3, palette.shade); rect(headWidth / 2 - 3, 2, 3, 3, palette.shade); rect(-headWidth / 2 + 2, 6, headWidth - 4, 2, palette.shade);
+  rect(.5, 1, 1.4, 2, palette.light); rect(1.3, 2, 1.4, 1, palette.shade);
   rect(-headWidth / 2 - 1.5, -3, 1.5, 5, palette.base); rect(headWidth / 2, -3, 1.5, 5, palette.base);
+  rect(-headWidth / 2 - 1, -1, .6, 2, palette.shade); rect(headWidth / 2 + .3, -1, .6, 2, palette.shade);
   rect(-headWidth / 2 - 1, -10, headWidth + 2, 4 + personality % 2, hair);
   rect(-headWidth / 2 - 1, -6, 2, personality === 2 ? 6 : 4, hair); rect(headWidth / 2 - 1, -6, 2, personality === 1 ? 6 : 3, hair);
   if (personality === 0) rect(-2, -11, 6, 2, hair);
@@ -234,12 +272,29 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   rect(-4.5, intense ? -3 : -3.5, 3, .8, hair); rect(2.5, intense ? -3.5 : -3, 3, .8, hair);
   rect(-1, 4, 2.7, motion.mouth, palette.deep);
   if (pose === 'cheer' || pose === 'clap') { rect(-2, 3.3, .8, 1.8, palette.deep); rect(1.8, 3.3, .8, 1.8, palette.deep); }
-  ctx.restore(); arm(false); ctx.restore(); leg(false); ctx.restore();
-  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  const label = actor.rank ? actor.rank + '위' : actor.nameVisible === false ? String(index + 1) : candidate.name;
-  ctx.font = '800 ' + (actor.rank ? 13 : actor.nameVisible === false ? 12 : 14) + 'px "Malgun Gothic", sans-serif';
-  ctx.fillStyle = actor.rank ? '#f7d697' : '#fff1d6';
-  if (actor.nameVisible === false) { ctx.fillStyle = '#18343de0'; ctx.fillRect(x - 11, y + 7, 22, 18); ctx.fillStyle = candidate.color; }
-  ctx.fillText(label, x, y + 9, actor.rank ? 110 : actor.nameVisible === false ? 20 : 148); ctx.restore();
+  ctx.restore();
+  if (pose === 'clap') arm(true, true);
+  arm(false); ctx.restore(); leg(false); ctx.restore();
   state.clock = clock; state.signature = signature; state.epoch = actor.motionEpoch; state.distance = actor.gaitDistance; state.moving = moving; state.airborne = air; state.pose = pose;
+}
+
+export function drawArenaName(ctx: CanvasRenderingContext2D, actor: ArenaActor, x = actor.x, y = actor.y + 7) {
+  const { candidate } = actor;
+  ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  if (Math.abs(x - actor.x) > 3 || Math.abs(y - actor.y - 7) > 3) {
+    ctx.strokeStyle = candidate.color; ctx.lineWidth = 1.3; ctx.globalAlpha = .6;
+    ctx.beginPath(); ctx.moveTo(actor.x, actor.y + 4); ctx.lineTo(x, y); ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  ctx.font = '800 12px "Malgun Gothic", sans-serif';
+  const letters = Array.from(candidate.name);
+  let label = candidate.name;
+  for (let shown = letters.length - 1; ctx.measureText(label).width > 38 && shown >= 2; shown--) {
+    const prefix = Math.ceil(shown / 2), suffix = Math.floor(shown / 2);
+    label = letters.slice(0, prefix).join('') + '…' + letters.slice(-suffix).join('');
+  }
+  const width = Math.min(48, Math.ceil(ctx.measureText(label).width) + 10);
+  ctx.fillStyle = '#18343deb'; ctx.fillRect(x - width / 2, y, width, 20);
+  ctx.fillStyle = candidate.color; ctx.fillRect(x - width / 2, y + 18, width, 2);
+  ctx.fillStyle = '#fff1d6'; ctx.fillText(label, x, y + 3);
+  ctx.restore();
 }

@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import type { Candidate } from './election';
 import type { SportsStageProps } from './sports';
 import { arenaBeat, arenaExchange, arenaNarration, arenaRanks, arenaRounds, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaRound } from './arenaLogic';
-import { createArenaFighterAnimation, drawArenaFighter, type ArenaActor, type ArenaFighterAnimation, type ArenaPose } from './game/ArenaFighter';
+import { createArenaFighterAnimation, drawArenaFighter, drawArenaName, type ArenaActor, type ArenaFighterAnimation, type ArenaPose } from './game/ArenaFighter';
 import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
 import './arena.css';
 
-type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number; motorX?: number; motorY?: number; animation?: ArenaFighterAnimation };
+type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number; motorX?: number; motorY?: number; animation?: ArenaFighterAnimation; nameOffset?: ArenaPoint };
 type Contact = { center: ArenaPoint; side: number };
 type Exit = { round: ArenaRound; origin: ArenaPoint; landing: ArenaPoint; side: number; bench: ArenaPoint; lift: number; angle: number };
 type Simulation = { key: string; elapsed: number; epoch: number; bodies: Map<string, Body>; contacts: Map<string, Contact>; exits: Map<string, Exit> };
@@ -157,7 +157,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     if (touching) body.facing = neighbor.x > body.x ? 1 : -1;
     const pose: ArenaPose = props.preview ? 'guard' : distance > 12 ? 'walk' : !touching || cycle < 1400 ? 'guard' : cycle < 2650 ? index % 2 ? 'brace' : 'grapple' : cycle < 3650 ? index % 2 ? 'brace' : 'push' : cycle < 4700 ? 'dodge' : 'guard';
     const candidateIndex = props.candidates.findIndex(candidate => candidate.id === id);
-    actors.set(id, { candidate: props.candidates[candidateIndex], index: candidateIndex, x: body.x, y: body.y, scale: 2.04, facing: body.facing, pose, angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: body.gait, phase: cycle / 5600, power: .7, nameVisible: false, gripTarget: touching && neighbor && ['grapple', 'push', 'brace'].includes(pose) ? { x: neighbor.x - body.facing * 17, y: neighbor.y - 62 } : undefined });
+    actors.set(id, { candidate: props.candidates[candidateIndex], index: candidateIndex, x: body.x, y: body.y, scale: 2.04, facing: body.facing, pose, angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: body.gait, phase: cycle / 5600, power: .7, gripTarget: touching && neighbor && ['grapple', 'push', 'brace'].includes(pose) ? { x: neighbor.x - body.facing * 17, y: neighbor.y - 62 } : undefined });
     if (!reduced && !props.preview && touching && cycle > 2700 && cycle < 3150) dust(ctx, body.x + body.facing * 24, body.y, cycle - 2700, .3);
   });
   // Future participants approach while the preceding throw is still resolving.
@@ -267,7 +267,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     const flight = arenaThrow(age, exit.origin, exit.landing, exit.side, unit, { lift: exit.lift, angle: exit.angle });
     const index = props.candidates.findIndex(candidate => candidate.id === id);
     let pose: ArenaPose = flight.stage === 'flight' || flight.stage === 'roll' || flight.stage === 'hold' && exit.lift > 3 ? 'airborne' : flight.stage === 'land' ? 'land' : flight.stage === 'recover' ? 'recover' : flight.stage === 'hold' ? 'brace' : 'walk';
-    const toCelebration = won && (id === order[1] || id === order.at(-1)) && elapsed - rounds.at(-1)!.resolve >= 2100 * unit;
+    const toCelebration = won && (id === order[1] || id === order.at(-1)) && (id === order[1] ? flight.stage === 'walk' : elapsed - rounds.at(-1)!.resolve >= 2100 * unit);
     if (flight.stage === 'walk') {
       if (!toCelebration) move(body, exit.bench, seconds, 94);
       if (Math.hypot(exit.bench.x - body.x, exit.bench.y - body.y) < 4) {
@@ -276,7 +276,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       }
     }
     else { body.x = flight.x; body.y = reduced && flight.stage === 'flight' ? flight.groundY - flight.height * .28 : flight.y; }
-    const actor: ArenaActor = { candidate: props.candidates[index], index, x: body.x, y: body.y, scale: 2.04, facing: body.facing, pose, angle: reduced ? 0 : flight.stage === 'walk' ? 0 : flight.angle, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: body.gait, phase: flight.phase, rank: ranks[id], nameVisible: false };
+    const actor: ArenaActor = { candidate: props.candidates[index], index, x: body.x, y: body.y, scale: 2.04, facing: body.facing, pose, angle: reduced ? 0 : flight.stage === 'walk' ? 0 : flight.angle, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: body.gait, phase: flight.phase };
     actors.set(id, actor);
     if (flight.stage === 'flight') { ctx.fillStyle = '#27332e40'; ctx.beginPath(); ctx.ellipse(flight.groundX, flight.groundY + 4, 32, 7, 0, 0, Math.PI * 2); ctx.fill(); }
     if (!reduced) dust(ctx, exit.landing.x, exit.landing.y, age / unit - 880, 1.5);
@@ -287,13 +287,15 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     if (reset || reduced) { winner.x = 500; winner.y = 443; }
     else move(winner, { x: 500, y: 443 }, seconds, 126);
     const actor = actors.get(winnerId)!;
-    actor.x = winner.x; actor.y = winner.y; actor.facing = winner.facing; actor.pose = Math.hypot(winner.x - 500, winner.y - 443) > 8 ? 'walk' : 'cheer'; actor.nameVisible = true;
+    actor.x = winner.x; actor.y = winner.y; actor.facing = winner.facing; actor.pose = Math.hypot(winner.x - 500, winner.y - 443) > 8 ? 'walk' : 'cheer';
     const supporters = [order[1], order.at(-1)].filter((id, index, list): id is string => !!id && list.indexOf(id) === index);
     supporters.forEach((id, index) => {
       const body = sim.bodies.get(id), actor = actors.get(id);
-      if (!body || !actor || !reduced && age < 2100 * unit) return;
-      const x = supporters.length === 1 ? 565 : index ? 565 : 435;
-      if (reduced) { body.x = x; body.y = 470; }
+      const exit = sim.exits.get(id);
+      const ready = id === order[1] ? exit && elapsed - exit.round.impact >= 2100 * unit : age >= 2100 * unit;
+      if (!body || !actor || !exit || !reduced && !ready) return;
+      const x = exit.side < 0 ? 435 : 565;
+      if (reset || reduced) { body.x = x; body.y = 470; }
       else move(body, { x, y: 470 }, seconds, 190);
       const distance = Math.hypot(body.x - x, body.y - 470);
       if (distance < 8) body.facing = x < 500 ? 1 : -1;
@@ -320,6 +322,26 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     actor.animation = body.animation;
   }
   [...actors.values()].sort((a, b) => a.y - b.y).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
+  // Names stay readable in front of the scene without covering another fighter's face.
+  const tags: { x: number; y: number }[] = [];
+  const players = [...actors.values()].sort((a, b) => a.index - b.index);
+  for (const actor of players) {
+    let placement = { x: actor.x, y: actor.y + 7 };
+    findSpace: for (const row of [0, 22, 44]) for (const offset of [0, -52, 52, -104, 104]) {
+      const x = clamp(actor.x + offset, 26, 974), y = actor.y + 7 + row;
+      const coversBody = players.some(other => other !== actor && x + 24 > other.x - 25 && x - 24 < other.x + 25 && y + 20 > other.y - 120 && y < other.y + 4);
+      const coversName = tags.some(other => Math.abs(x - other.x) < 51 && Math.abs(y - other.y) < 23);
+      if (!coversBody && !coversName) { placement = { x, y }; break findSpace; }
+    }
+    tags.push(placement);
+    const body = sim.bodies.get(actor.candidate.id)!;
+    const target = { x: placement.x - actor.x, y: placement.y - actor.y };
+    body.nameOffset ??= target;
+    const blend = reset || reduced ? 1 : 1 - Math.exp(-seconds / .12);
+    body.nameOffset.x += (target.x - body.nameOffset.x) * blend;
+    body.nameOffset.y += (target.y - body.nameOffset.y) * blend;
+    drawArenaName(ctx, actor, actor.x + body.nameOffset.x, actor.y + body.nameOffset.y);
+  }
   if (exchange && !won) relationship(ctx, exchange, elapsed, actors, true);
 }
 
