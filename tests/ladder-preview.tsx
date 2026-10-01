@@ -25,6 +25,7 @@ window.matchMedia = media => {
 
 function Preview() {
   const [count, setCount] = useState(10), [longNames, setLongNames] = useState(true);
+  const [inputOrderArrival, setInputOrderArrival] = useState(false);
   const [targetLane, setTargetLane] = useState(0), [elapsed, setElapsed] = useState(0);
   const [playing, setPlaying] = useState(false), [preview, setPreview] = useState(true);
   const [reduced, setReduced] = useState(false), [runId, setRunId] = useState(0);
@@ -40,7 +41,7 @@ function Preview() {
     id: String(index + 1), color,
     name: longNames ? index === 0 ? '가나다라마바사아자차카타파하다라' : index === 6 ? 'WWWWWWWWWWWWWWWW' : `이름이아주긴참가자${String(index + 1).padStart(2, '0')}번` : `참가자 ${index + 1}`,
   })), [count, longNames]);
-  const order = useMemo(() => doorOrder.filter(id => Number(id) <= count), [count]);
+  const order = useMemo(() => inputOrderArrival ? candidates.map(candidate => candidate.id) : doorOrder.filter(id => Number(id) <= count), [count, candidates, inputOrderArrival]);
   const selectTarget = (lane: number) => {
     setTargetLane(Math.max(0, Math.min(count - 1, lane))); setPlaying(false); setPreview(true); setElapsed(0); setRunId(id => id + 1);
   };
@@ -61,6 +62,9 @@ function Preview() {
         </select>
       </label>
       <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}><input type="checkbox" checked={longNames} onChange={event => setLongNames(event.target.checked)} />긴 이름</label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}><input type="checkbox" checked={inputOrderArrival} onChange={event => {
+        setInputOrderArrival(event.target.checked); setPlaying(false); setPreview(true); setElapsed(0); setRunId(id => id + 1);
+      }} />입력 순서 도착 검증</label>
       <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}><input type="checkbox" checked={reduced} onChange={event => { forceReduced = event.target.checked; setReduced(event.target.checked); setPlaying(false); }} />모션 줄이기</label>
       <button type="button" onClick={() => { setPlaying(false); setPreview(true); setElapsed(0); setRunId(id => id + 1); }}>문 고르기</button>
       {[0, 5, 12, 20, 28, 36, 40, 44].map(second => <button type="button" key={second} onClick={() => seek(second * 1000)}>{second}초</button>)}
