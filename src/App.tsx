@@ -6,7 +6,8 @@ import ArenaShow from './ArenaShow';
 import { CANDIDATE_COLORS, MAX_CANDIDATES, createDrama, createElection, frameAt, type Candidate, type DramaFrame, type ElectionResult } from './election';
 import { countProgress, phaseFor, SHOW_DURATION } from './show';
 import { readSession, saveSession, type Entry } from './session';
-import { createSportsOrder, SPORT_DURATION, type GameMode } from './sports';
+import { createSportsOrder, type GameMode } from './sports';
+import { basePlaybackDuration, createPlaybackDuration } from './playbackTiming';
 
 type Status = 'setup' | 'running' | 'finished';
 const templates = ['오늘 커피 쏠 사람은?', '점심값 낼 사람은?', '벌칙 받을 사람은?', '청소 담당은?', '발표할 사람은?'];
@@ -27,11 +28,12 @@ export default function App() {
   const [result, setResult] = useState<ElectionResult | null>(null);
   const [drama, setDrama] = useState<DramaFrame[]>([]);
   const [elapsed, setElapsed] = useState(0);
+  const [runDuration, setRunDuration] = useState(SHOW_DURATION);
   const [paused, setPaused] = useState(false);
   const [runId, setRunId] = useState(0);
   const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const timer = useRef<number | null>(null);
-  const playback = useRef({ elapsed: 0, startedAt: 0, paused: false });
+  const playback = useRef({ elapsed: 0, startedAt: 0, paused: false, duration: SHOW_DURATION });
   const nextId = useRef(saved.entries.length + 1);
 
   useEffect(() => () => { if (timer.current !== null) window.clearInterval(timer.current); }, []);
@@ -39,7 +41,7 @@ export default function App() {
 
   const candidates: Candidate[] = useMemo(() => entries.map((entry, index) => ({ id: String(entry.id), name: entry.name.trim(), color: CANDIDATE_COLORS[index] })).filter(candidate => candidate.name), [entries]);
   const game = games[mode];
-  const duration = mode === 'election' ? SHOW_DURATION : SPORT_DURATION;
+  const duration = status === 'setup' ? basePlaybackDuration(mode) : runDuration;
   const phase = status === 'setup' ? 'declaration' : phaseFor(elapsed);
   const progress = countProgress(elapsed);
   const snapshot = result && drama.length ? frameAt(drama, progress) : null;
@@ -62,6 +64,8 @@ export default function App() {
     if (new Set(names.map(name => name.toLocaleLowerCase('ko-KR'))).size !== names.length) {
       setError('같은 이름이 있어요. 이름을 다르게 입력해 주세요.'); return;
     }
+    const nextDuration = createPlaybackDuration(mode);
+    setRunDuration(nextDuration);
     if (mode === 'election') {
       const election = createElection(candidates);
       setResult(election);
@@ -76,20 +80,22 @@ export default function App() {
     setRunId(previous => previous + 1);
     setError('');
     window.scrollTo(0, 0);
+    if (timer.current !== null) window.clearInterval(timer.current);
+    timer.current = null;
+    playback.current = { elapsed: 0, startedAt: performance.now(), paused: false, duration: nextDuration };
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setElapsed(duration);
+      playback.current.elapsed = nextDuration;
+      setElapsed(nextDuration);
       setStatus('finished');
       return;
     }
     setStatus('running');
-    playback.current = { elapsed: 0, startedAt: performance.now(), paused: false };
-    if (timer.current !== null) window.clearInterval(timer.current);
     timer.current = window.setInterval(() => {
       const clock = playback.current;
       if (clock.paused) return;
-      const next = Math.min(duration, clock.elapsed + performance.now() - clock.startedAt);
+      const next = Math.min(nextDuration, clock.elapsed + performance.now() - clock.startedAt);
       setElapsed(next);
-      if (next >= duration) {
+      if (next >= nextDuration) {
         if (timer.current !== null) window.clearInterval(timer.current);
         timer.current = null;
         setStatus('finished');
@@ -100,7 +106,8 @@ export default function App() {
   function finishNow() {
     if (timer.current !== null) window.clearInterval(timer.current);
     timer.current = null;
-    setElapsed(duration);
+    setElapsed(playback.current.duration);
+    playback.current.elapsed = playback.current.duration;
     setPaused(false);
     playback.current.paused = false;
     setStatus('finished');
@@ -126,8 +133,8 @@ export default function App() {
       clock.startedAt = performance.now();
       clock.paused = false;
     } else {
-      clock.elapsed = Math.min(duration, clock.elapsed + performance.now() - clock.startedAt);
-      if (clock.elapsed >= duration) { finishNow(); return; }
+      clock.elapsed = Math.min(clock.duration, clock.elapsed + performance.now() - clock.startedAt);
+      if (clock.elapsed >= clock.duration) { finishNow(); return; }
       clock.paused = true;
       setElapsed(clock.elapsed);
     }
@@ -141,7 +148,7 @@ export default function App() {
     setMode(next);
   }
 
-  const sportsProps = { candidates, order, elapsed, duration: SPORT_DURATION, paused, preview: status === 'setup' };
+  const sportsProps = { candidates, order, elapsed, duration, paused, preview: status === 'setup' };
 
   return (
     <div className={`site-shell ${status !== 'setup' ? 'show-mode' : ''}`}>
@@ -202,7 +209,7 @@ export default function App() {
           </div>
         ) : (
           mode === 'election' ? result && snapshot && <BroadcastShow result={result} frame={snapshot} drama={drama} phase={phase} topic={topic} elapsed={elapsed} finished={status === 'finished'} runId={runId} reducedMotion={reducedMotion} paused={paused} onPause={togglePause} onSkip={finishNow} onReplay={start} onReset={reset} /> : <section className={`sports-shell ${paused ? 'is-paused' : ''}`} aria-label={`${game.label} 경기`}>
-            <div className="sports-toolbar"><span><b>{game.label}</b> {status === 'finished' ? '최종 순위 확정' : paused ? '일시정지' : `결과까지 ${Math.ceil((duration - elapsed) / 1000)}초`}</span>{status !== 'finished' && <button type="button" className="playback-button" onClick={togglePause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div>
+            <div className="sports-toolbar"><span><b>{game.label}</b> {status === 'finished' ? '최종 순위 확정' : paused ? '일시정지' : '경기 중계 중'}</span>{status !== 'finished' && <button type="button" className="playback-button" onClick={togglePause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div>
             <div className="sports-body" key={`${mode}-${runId}`}>{mode === 'racing' ? <RacingShow {...sportsProps} /> : <ArenaShow {...sportsProps} />}</div>
             <div className="sports-actions">{status === 'finished' ? <><button type="button" className="start-button" onClick={start}>같은 명단으로 다시 뽑기 <span aria-hidden="true">▶</span></button><button type="button" className="secondary-button" onClick={reset}>명단 수정하기</button></> : <button type="button" className="secondary-button" onClick={finishNow}>연출 건너뛰고 순위 보기</button>}</div>
           </section>

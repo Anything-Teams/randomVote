@@ -3,11 +3,34 @@ import type { Candidate } from './election';
 export type ArenaTactic = 'team' | 'bait' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final';
 export type ArenaRound = { id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
 export type ArenaPoint = { x: number; y: number };
+export type ArenaBeatStage = 'approach' | 'hold' | 'turn' | 'impact' | 'result';
+export type ArenaBeat = { stage: ArenaBeatStage; progress: number; weightProgress: number; liftProgress: number };
 export type ArenaThrowFrame = ArenaPoint & { groundX: number; groundY: number; height: number; angle: number; phase: number; stage: 'hold' | 'flight' | 'land' | 'roll' | 'recover' | 'walk' };
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 const ease = (n: number) => { const t = clamp(n); return t * t * (3 - 2 * t); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
 const tactics: ArenaTactic[] = ['team', 'bait', 'counter', 'betrayal', 'brace', 'lift'];
+
+/** Shared by the actors and commentary, so a label describes the visible action. */
+export function arenaBeat(round: ArenaRound, elapsed: number): ArenaBeat {
+  const progress = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
+  const stage: ArenaBeatStage = elapsed >= round.impact ? round.exchange || elapsed >= round.resolve ? 'result' : 'impact' : progress < .30 ? 'approach' : progress < .52 ? 'hold' : 'turn';
+  return { stage, progress, weightProgress: ease((progress - .52) / .20), liftProgress: ease((progress - .72) / .28) };
+}
+
+/** Even field coverage without left/right starting teams. The ellipse stays inside the sand. */
+export function arenaStartingPoint(index: number, count: number): ArenaPoint {
+  const total = Math.max(1, Math.floor(count));
+  const layouts: Record<number, number[][]> = {
+    1: [[500, 425]], 2: [[350, 425], [650, 425]],
+    3: [[500, 345], [310, 470], [690, 470]],
+    4: [[315, 365], [685, 365], [315, 480], [685, 480]],
+  };
+  const distributed = [[300, 348], [750, 430], [420, 510], [565, 348], [250, 430], [580, 510], [700, 348], [390, 430], [435, 348], [610, 430]];
+  const points = layouts[total] ?? distributed;
+  const point = points[Math.max(0, Math.min(points.length - 1, index))];
+  return { x: point[0], y: point[1] };
+}
 
 /** Ranking is supplied by the uniform draw; choreography never redraws a result. */
 export function arenaRounds(order: string[], duration = 44_000): ArenaRound[] {
@@ -60,15 +83,15 @@ export function arenaExchange(order: string[], elapsed: number, duration = 44_00
 }
 
 /** The first 120 ms holds the contact. Flight and ground recovery remain separate. */
-export function arenaThrow(age: number, origin: ArenaPoint, landing: ArenaPoint, direction = 1, unit = 1): ArenaThrowFrame {
+export function arenaThrow(age: number, origin: ArenaPoint, landing: ArenaPoint, direction = 1, unit = 1, preparation: { lift: number; angle: number } = { lift: 0, angle: 0 }): ArenaThrowFrame {
   const ms = age / Math.max(0.001, unit);
-  if (ms < 120) return { ...origin, groundX: origin.x, groundY: origin.y, height: 0, angle: 0, phase: clamp(ms / 120), stage: 'hold' };
+  if (ms < 120) return { x: origin.x, y: origin.y - preparation.lift, groundX: origin.x, groundY: origin.y, height: preparation.lift, angle: preparation.angle, phase: clamp(ms / 120), stage: 'hold' };
   if (ms < 880) {
     const p = clamp((ms - 120) / 760);
     const groundX = mix(origin.x, landing.x, p);
     const groundY = mix(origin.y, landing.y, p);
-    const height = 132 * 4 * p * (1 - p);
-    return { x: groundX, y: groundY - height, groundX, groundY, height, angle: direction * -Math.PI * 0.83 * ease(p), phase: p, stage: 'flight' };
+    const height = 132 * 4 * p * (1 - p) + preparation.lift * (1 - ease(p));
+    return { x: groundX, y: groundY - height, groundX, groundY, height, angle: mix(preparation.angle, direction * -Math.PI * 0.83, ease(p)), phase: p, stage: 'flight' };
   }
   if (ms < 1100) {
     const p = (ms - 880) / 220;
@@ -92,7 +115,7 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
   if (!round) return { title: '여러 무리가 동시에 힘겨루기', detail: '접근하고 샅바를 잡고, 상대의 힘을 버티며 다음 빈틈을 엿봅니다.' };
   const a = actor(round.aggressor), v = actor(round.victim), h = actor(round.helper);
   if (round.exchange && elapsed >= round.impact) return { title: '버텼다! 다시 빈틈을 살핍니다', detail: `${a} · ${v}, 모두 모래판을 지켰습니다. 손을 풀고 다음 빈틈을 봅니다.` };
-  if (elapsed >= round.resolve) return { title: round.final ? `${a}, 오늘의 장사!` : `장외! ${v} · ${order.indexOf(round.victim) + 1}위 확정`, detail: round.final ? '버티던 마지막 상대를 뒤집었습니다. 함께 우승자를 들어 올립니다.' : `${v}, 모래판 밖에 착지했습니다. 나머지 선수들의 난투는 계속됩니다.` };
+  if (elapsed >= round.resolve) return { title: round.final ? `${a}, 오늘의 장사!` : `장외! ${v} · ${order.indexOf(round.victim) + 1}위 확정`, detail: round.final ? '버티던 마지막 상대를 뒤집었습니다. 탈락한 선수들도 돌아와 박수를 보냅니다.' : `${v}, 모래판 밖에 착지했습니다. 나머지 선수들의 난투는 계속됩니다.` };
   const titles: Record<ArenaTactic, string> = { team: '협공 · 한 명은 길을 막고, 한 명은 민다', bait: '미끼 · 돌진을 기다렸다가 옆으로 피한다', counter: '역습 · 밀리던 쪽이 중심을 낮춘다', betrayal: '배신 · 등을 맡긴 순간 방향을 바꾼다', brace: '버티기 · 발을 박고 힘을 되돌린다', lift: '들배지기 · 체중을 싣고 들어 올린다', final: '마지막 두 명 · 최후의 버티기' };
   const details: Record<ArenaTactic, string> = {
     team: `${h}, ${v}의 퇴로를 막습니다. ${a}, 앞에서 함께 밀어냅니다.`,

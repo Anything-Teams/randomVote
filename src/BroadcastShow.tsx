@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import GameStage from './GameStage';
 import type { DramaFrame, ElectionEvent, ElectionResult } from './election';
-import { countBeat, COUNT_START, finalResultGap, newsBeat, resolvedEvents, SHOW_DURATION, STORY_RESOLVE_AT, storyBeat, storyOutcome, tallyVotes, winnerPromise, type ShowPhase, type StoryActorOutcome } from './show';
+import { countBeat, COUNT_START, finalResultGap, newsBeat, resolvedEvents, STORY_RESOLVE_AT, storyBeat, storyOutcome, tallyVotes, winnerPromise, type ShowPhase, type StoryActorOutcome } from './show';
 
 type Props = {
   result: ElectionResult;
@@ -95,7 +95,6 @@ export default function BroadcastShow({ result, frame, drama, phase, topic, elap
   const { winner, gapVotes: finalGap } = finalResultGap(result);
   const cheering = result.candidates.find(candidate => candidate.id === cheeringId);
   const cheeringRank = sorted.findIndex(candidate => candidate.id === cheeringId) + 1;
-  const remaining = Math.max(0, Math.ceil((SHOW_DURATION - elapsed) / 1000));
   const voteFraction = Math.max(0, Math.min(1, (elapsed - 5000) / (COUNT_START - 5000)));
   const sealed = phase === 'counting' && boxBeat.state === 'sealed';
   const finalSprint = phase === 'counting' && frame.progress >= 90;
@@ -111,7 +110,7 @@ export default function BroadcastShow({ result, frame, drama, phase, topic, elap
       <div className="broadcast-head"><span className="live-pill"><span />{paused ? 'PAUSED · 잠깐 쉬어가는 중' : finished ? 'ELECTION COMPLETE' : 'LIVE · 특별 개표 방송'}</span><div className="broadcast-tools"><span>PIXEL TV / CH.01</span>{!finished && <button type="button" className="playback-button" onClick={onPause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div></div>
       <div className={`stage-screen ${sealed ? 'suspense' : ''}`}>
         <GameStage phase={phase} candidates={result.candidates} winnerId={result.winnerId} topic={topic} percentages={frame.percentages} finalPercentages={result.percentages} finalVotes={result.votes} progress={frame.progress} totalVotes={result.totalVotes} runId={runId} reducedMotion={reducedMotion} elapsed={elapsed} cheeringId={cheeringId} events={result.events} storyOutcomes={outcomes} paused={paused} />
-        <div className="cinema-hud" aria-hidden="true"><span>{cue ? `사건 ${String(cue.index).padStart(2, '0')} · ${stageLabels[stageIndex]}` : phase === 'counting' ? finalSprint ? '막판 접전 · 마지막 표' : '실시간 개표' : ['출마 특별판', '전국 투표 현장', '개표 특보', '당선 세리머니'][phases.indexOf(phase)]}</span><span>{paused ? '일시정지' : finished ? 'COMPLETE' : `결과까지 00:${String(remaining).padStart(2, '0')}`}</span></div>
+        <div className="cinema-hud" aria-hidden="true"><span>{cue ? `사건 ${String(cue.index).padStart(2, '0')} · ${stageLabels[stageIndex]}` : phase === 'counting' ? finalSprint ? '막판 접전 · 마지막 표' : '실시간 개표' : ['출마 특별판', '전국 투표 현장', '개표 특보', '당선 세리머니'][phases.indexOf(phase)]}</span><span>{paused ? '일시정지' : finished ? '확정' : 'LIVE'}</span></div>
         <div key={beat.id} className={`news-lower-third ${beat.urgent ? 'urgent' : ''}`}><span className="news-tag">{beat.tag}</span><div><strong>{beat.title}</strong><span>{phase === 'winner' ? winnerPromise(topic) : beat.detail}</span></div></div>
         {phase !== 'winner' && <div key={`${runId}-${phase}`} className="scene-wipe" aria-hidden="true" />}
         {sealed && <div className="suspense-vignette" aria-hidden="true" />}
@@ -122,7 +121,6 @@ export default function BroadcastShow({ result, frame, drama, phase, topic, elap
         const current = cue ? stageIndex : phases.indexOf(phase);
         return <div key={item} className={`timeline-item ${current >= index ? 'reached' : ''} ${current === index ? 'current' : ''}`}><span className="timeline-dot" />{item}</div>;
       })}</div>
-      <div className="show-time-track" aria-hidden="true"><span style={{ width: `${elapsed / SHOW_DURATION * 100}%` }} /></div>
     </section>
 
     <aside className="results-card live-desk" aria-live={finished ? 'polite' : 'off'}>

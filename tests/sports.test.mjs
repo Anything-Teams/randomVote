@@ -5,10 +5,27 @@ import { build } from 'esbuild';
 const compiled = await build({ entryPoints: ['src/sports.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createSportsOrder } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const arenaCompiled = await build({ entryPoints: ['src/arenaLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { arenaRounds, arenaRanks, arenaThrow, arenaExchange } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
+const { arenaRounds, arenaRanks, arenaThrow, arenaExchange, arenaBeat, arenaStartingPoint } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
+const storyCompiled = await build({ entryPoints: ['src/arenaStoryLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { arenaStoryState } = await import(`data:text/javascript;base64,${Buffer.from(storyCompiled.outputFiles[0].text).toString('base64')}`);
+const timingCompiled = await build({ entryPoints: ['src/playbackTiming.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { createPlaybackDuration, basePlaybackDuration, PLAYBACK_SECONDS } = await import(`data:text/javascript;base64,${Buffer.from(timingCompiled.outputFiles[0].text).toString('base64')}`);
 const racingCompiled = await build({ entryPoints: ['src/racingNarrative.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createRacingIncidents, buildRacingTimeline, readRacingDistance, racingLaneShift, RACING_STORIES } = await import(`data:text/javascript;base64,${Buffer.from(racingCompiled.outputFiles[0].text).toString('base64')}`);
 const participants = Array.from({ length: 10 }, (_, index) => ({ id: `player-${index}`, name: `선수 ${index}`, color: '#f9d56e' }));
+
+test('only arena draws a variable runtime, while election and racing keep their existing length', () => {
+  const unused = () => { throw new Error('Fixed modes must not draw a duration'); };
+  assert.equal(createPlaybackDuration('election', unused), 58_000);
+  assert.equal(createPlaybackDuration('racing', unused), 44_000);
+  assert.equal(basePlaybackDuration('arena'), 44_000);
+  const range = PLAYBACK_SECONDS.arena, choices = range.max - range.min + 1;
+  const durations = Array.from({ length: choices }, (_, offset) => createPlaybackDuration('arena', limit => { assert.equal(limit, choices); return offset; }));
+  assert.equal(new Set(durations).size, choices);
+  assert.equal(Math.min(...durations), 40_000);
+  assert.equal(Math.max(...durations), 62_000);
+  assert.throws(() => createPlaybackDuration('arena', () => choices), RangeError);
+});
 
 test('every possible draw path gives a distinct ranking with equal chances at each position', () => {
   const results = [];
@@ -54,18 +71,18 @@ test('the production shuffle rejects the extra random range instead of favoring 
 });
 
 test('arena tactics use living, distinct participants and preserve every drawn rank for 2–10 players', () => {
-  for (let size = 2; size <= 10; size++) {
+  for (const duration of [40_000, 44_000, 62_000]) for (let size = 2; size <= 10; size++) {
     for (let rotation = 0; rotation < size; rotation++) {
       const ids = participants.slice(0, size).map(player => player.id);
       const order = [...ids.slice(rotation), ...ids.slice(0, rotation)];
-      const rounds = arenaRounds(order);
+      const rounds = arenaRounds(order, duration);
       const alive = new Set(order);
       assert.equal(rounds.length, size - 1);
       let previousEnd = 0;
       for (const round of rounds) {
         assert.ok(round.start + 0.000001 >= previousEnd, `overlapping rounds for ${size} players: ${round.start} < ${previousEnd}`);
         assert.ok(round.start < round.impact && round.impact < round.resolve && round.resolve <= round.end);
-        assert.ok(round.end <= 44_000);
+        assert.ok(round.end <= duration);
         assert.ok(alive.has(round.victim) && alive.has(round.aggressor));
         assert.notEqual(round.victim, round.aggressor);
         if (round.helper) {
@@ -73,27 +90,43 @@ test('arena tactics use living, distinct participants and preserve every drawn r
           assert.notEqual(round.helper, round.victim);
           assert.notEqual(round.helper, round.aggressor);
         }
-        const before = arenaRanks(order, round.resolve - 0.01);
-        const after = arenaRanks(order, round.resolve);
+        const before = arenaRanks(order, round.resolve - 0.01, duration);
+        const after = arenaRanks(order, round.resolve, duration);
         assert.equal(before[round.victim], undefined);
         assert.equal(after[round.victim], order.indexOf(round.victim) + 1);
         assert.equal(after[order[0]], round.final ? 1 : undefined);
         alive.delete(round.victim);
         previousEnd = round.end;
       }
-      assert.deepEqual(arenaRanks(order, 44_000), Object.fromEntries(order.map((id, rank) => [id, rank + 1])));
+      assert.deepEqual(arenaRanks(order, duration, duration), Object.fromEntries(order.map((id, rank) => [id, rank + 1])));
       assert.deepEqual([...alive], [order[0]]);
     }
   }
 });
 
+test('arena starts spread across the sand with room between participants for 2–10 players', () => {
+  for (let count = 2; count <= 10; count++) {
+    const points = Array.from({ length: count }, (_, index) => arenaStartingPoint(index, count));
+    for (let index = 0; index < count; index++) {
+      const point = points[index];
+      assert.ok((point.x - 500) ** 2 / 302 ** 2 + (point.y - 406) ** 2 / 133 ** 2 < 1, `starting outside the boundary: ${count}/${index}`);
+      for (let other = index + 1; other < count; other++) assert.ok(Math.hypot(point.x - points[other].x, point.y - points[other].y) >= 80, `crowded starting positions: ${count}/${index}/${other}`);
+    }
+    assert.ok(points.some(point => point.x < 400) && points.some(point => point.x > 600));
+    if (count >= 3) assert.ok(Math.max(...points.map(point => point.y)) - Math.min(...points.map(point => point.y)) >= 100);
+  }
+});
+
 test('arena elimination leaves the ground, lands before ranking, and recovers without teleporting', () => {
-  for (const direction of [-1, 1]) {
+  for (const direction of [-1, 1]) for (const lift of [0, 52]) {
     const origin = { x: 500, y: 415 }, landing = { x: direction > 0 ? 904 : 96, y: 465 };
+    const preparation = { lift, angle: lift ? -.22 : 0 };
+    assert.equal(arenaThrow(0, origin, landing, direction, 1, preparation).y, origin.y - lift);
+    assert.equal(arenaThrow(0, origin, landing, direction, 1, preparation).angle, preparation.angle);
     const stages = new Set();
     let previous;
     for (let age = 0; age <= 2200; age++) {
-      const frame = arenaThrow(age, origin, landing, direction);
+      const frame = arenaThrow(age, origin, landing, direction, 1, preparation);
       stages.add(frame.stage);
       assert.ok(Object.values(frame).filter(value => typeof value === 'number').every(Number.isFinite));
       assert.ok(frame.height >= 0);
@@ -103,8 +136,8 @@ test('arena elimination leaves the ground, lands before ranking, and recovers wi
       previous = frame;
     }
     assert.deepEqual([...stages], ['hold', 'flight', 'land', 'roll', 'recover', 'walk']);
-    assert.equal(arenaThrow(1100, origin, landing, direction).height, 0);
-    assert.equal(arenaThrow(2200, origin, landing, direction).x, landing.x);
+    assert.equal(arenaThrow(1100, origin, landing, direction, 1, preparation).height, 0);
+    assert.equal(arenaThrow(2200, origin, landing, direction, 1, preparation).x, landing.x);
   }
 });
 
@@ -122,6 +155,32 @@ test('non-eliminating arena exchanges keep small games active and never reuse el
       if (size === 2) assert.equal(exchange.helper, undefined);
     }
   }
+});
+
+test('arena cooperation and betrayal labels follow contact beats and identify the correct participants', () => {
+  const base = { id: 'story', index: 0, aggressor: 'attacker', helper: 'helper', victim: 'target', start: 1000, impact: 5000, resolve: 6100, end: 6600, final: false };
+  const team = { ...base, tactic: 'team' };
+  const betrayal = { ...base, tactic: 'betrayal' };
+  assert.deepEqual(arenaStoryState(team, 2600).left, ['attacker', 'helper']);
+  assert.deepEqual(arenaStoryState(team, 2600).right, ['target']);
+  const alliance = arenaStoryState(betrayal, 2600);
+  assert.deepEqual(alliance.left, ['helper']);
+  assert.deepEqual(alliance.right, ['target']);
+  assert.equal(alliance.relation, '↔');
+  assert.match(alliance.relationLabel, /임시 동맹/);
+  assert.equal(arenaBeat(betrayal, 2600).stage, 'hold');
+  const broken = arenaStoryState(betrayal, 3800);
+  assert.equal(broken.relation, '×');
+  assert.equal(broken.leftLabel, '배신한 선수');
+  assert.equal(broken.rightLabel, '버려진 선수');
+  assert.match(broken.action, /손을 놓습니다/);
+  assert.equal(arenaBeat(betrayal, 3800).stage, 'turn');
+  assert.equal(arenaBeat(team, 5000).stage, 'impact');
+  assert.equal(arenaBeat(team, 6100).stage, 'result');
+  assert.match(arenaStoryState(team, 6100).action, /장외에 착지/);
+  const survived = arenaStoryState({ ...team, exchange: true, resolve: Infinity }, 5100);
+  assert.match(survived.action, /서로 손을 풀고/);
+  assert.doesNotMatch(survived.action, /장외|우승/);
 });
 
 test('racing incidents describe the displayed rank changes and retain all participants', () => {

@@ -5,6 +5,28 @@
 .arena-callout strong { color: #ffdf96; font-size: clamp(12px, 1.45vw, 20px); line-height: 1.15; }
 .arena-callout span { color: #dae6df; font-size: clamp(10px, 1.05vw, 15px); line-height: 1.25; overflow-wrap: anywhere; }
 .arena-callout-winner { border-color: #f6d477; background: #463d2ded; }
+.arena-story-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.arena-story-heading > strong { flex: 0 0 auto; font-size: clamp(12px, 1.25vw, 18px); }
+.arena-story-steps { display: flex; align-items: center; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.arena-story-steps li { display: flex; align-items: center; gap: 4px; color: #96aba5; font-size: clamp(8px, .8vw, 11px); white-space: nowrap; }
+.arena-story-steps li::before { content: ''; width: 5px; height: 5px; border: 1px solid #8caaa3; border-radius: 50%; }
+.arena-story-steps .is-current { color: #ffe0a0; font-weight: 850; }
+.arena-story-steps .is-current::before { background: #ffe0a0; border-color: #ffe0a0; box-shadow: 0 0 6px #ffd27866; }
+.arena-story-steps .is-done::before { background: #80b4a6; border-color: #80b4a6; }
+.arena-story-relationship { display: grid; grid-template-columns: minmax(0, 1fr) minmax(95px, .8fr) minmax(0, 1fr); align-items: center; gap: 6px; min-width: 0; }
+.arena-story-side { display: flex; justify-content: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.arena-story-person { display: flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; padding: 3px 6px 3px 3px; border: 1px solid color-mix(in srgb, var(--person-color) 60%, #34554f); border-radius: 5px; background: #233d40; }
+.arena-story-person b { display: grid; place-items: center; flex: 0 0 17px; height: 17px; border-radius: 3px; background: var(--person-color); color: #152b32; font-size: 10px; font-weight: 900; }
+.arena-callout .arena-story-person > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: clamp(9px, .9vw, 12px); line-height: 1.1; }
+.arena-story-link { display: flex; align-items: center; justify-content: center; gap: 5px; }
+.arena-story-link b { color: #9ed9bb; font-size: 20px; line-height: 1; }
+.arena-callout .arena-story-link span { color: #b2dfca; font-weight: 800; font-size: clamp(8px, .8vw, 11px); line-height: 1.15; }
+.arena-story-betrayal .arena-story-link b, .arena-story-betrayal .arena-story-link span { color: #ffb1a0; }
+.arena-story-betrayal .arena-story-side { flex-direction: column; align-items: center; gap: 2px; }
+.arena-story-side small { font-size: 9px; line-height: 1.1; color: #e8b4a0; }
+.arena-story-intruder { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; }
+.arena-callout .arena-story-intruder > span { color: #ddbf95; font-size: 10px; white-space: nowrap; }
+.arena-story-action { margin: 0; color: #e4e8d9; font-size: clamp(9px, .95vw, 13px); line-height: 1.22; overflow-wrap: anywhere; }
 .arena-paused { position: absolute; bottom: 8px; right: 10px; padding: 5px 8px; background: #10232ace; border: 1px solid #96b1a866; border-radius: 5px; color: #e7dac1; font-weight: 800; font-size: 10px; }
 .arena-board { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 10px; border: 1px solid #d8bc8366; border-radius: 16px; background: #172b34; overflow: hidden; }
 .arena-board-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; flex: 0 0 auto; margin-bottom: 8px; font-size: 13px; }
@@ -30,6 +52,24 @@
   .arena-callout { top: 4px; left: 5px; right: 5px; padding: 5px 6px; gap: 3px; }
   .arena-callout strong { font-size: 11px; }
   .arena-callout span { font-size: 9px; line-height: 1.12; }
+  .arena-story-heading { gap: 4px; }
+  .arena-story-heading > strong { font-size: 11px; }
+  .arena-story-steps { gap: 5px; }
+  .arena-story-steps li { font-size: 7px; gap: 2px; }
+  .arena-story-steps li::before { width: 3px; height: 3px; }
+  .arena-story-relationship { grid-template-columns: minmax(0, 1fr) 73px minmax(0, 1fr); gap: 3px; }
+  .arena-story-side { gap: 2px; }
+  .arena-story-person { gap: 3px; padding: 2px 3px 2px 2px; }
+  .arena-story-person b { flex-basis: 12px; height: 12px; font-size: 8px; }
+  .arena-callout .arena-story-person > span { font-size: 8px; }
+  .arena-story-link { gap: 2px; }
+  .arena-story-link b { font-size: 15px; }
+  .arena-callout .arena-story-link span { font-size: 7px; }
+  .arena-callout .arena-story-intruder > span { font-size: 8px; }
+  .arena-story-action { font-size: 8px; line-height: 1.15; }
+  .arena-story-side small { font-size: 7px; }
+  .arena-story-betrayal .arena-story-relationship { grid-template-columns: minmax(0, 1fr) 52px minmax(0, 1fr) minmax(0, 1fr); }
+  .arena-story-betrayal .arena-story-intruder { grid-column: auto; flex-direction: column; gap: 2px; }
 }
 @media (max-height: 430px) {
   .arena-show { grid-template-columns: minmax(0, 1fr) 151px; gap: 6px; }
@@ -44,5 +84,18 @@
   .arena-callout { top: 4px; left: 5px; right: 5px; padding: 4px 6px; gap: 2px; }
   .arena-callout strong { font-size: 10px; }
   .arena-callout span { font-size: 8px; line-height: 1.13; }
+  .arena-story-heading > strong { font-size: 10px; }
+  .arena-story-steps { gap: 5px; }
+  .arena-story-steps li { font-size: 7px; }
+  .arena-story-relationship { grid-template-columns: minmax(0, 1fr) 85px minmax(0, 1fr); gap: 3px; }
+  .arena-story-person { padding: 1px 3px 1px 2px; gap: 3px; }
+  .arena-story-person b { flex-basis: 12px; height: 12px; font-size: 8px; }
+  .arena-callout .arena-story-person > span { font-size: 8px; }
+  .arena-story-link b { font-size: 14px; }
+  .arena-callout .arena-story-link span, .arena-callout .arena-story-intruder > span { font-size: 7px; }
+  .arena-story-action { font-size: 8px; line-height: 1.1; }
+  .arena-story-side small { font-size: 7px; }
+  .arena-story-betrayal .arena-story-relationship { grid-template-columns: minmax(0, 1fr) 65px minmax(0, 1fr) minmax(0, 1fr); }
+  .arena-story-betrayal .arena-story-intruder { grid-column: auto; flex-direction: column; gap: 2px; }
 }
 @media (prefers-reduced-motion: reduce) { .arena-entry { transition: none; } }
