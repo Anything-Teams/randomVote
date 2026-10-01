@@ -44,19 +44,19 @@ export function racingIncidentMotion(incident: RacingIncident | undefined, id: s
 /** Both opponents converge smoothly, guard the line, then separate as the pass completes. */
 export function placeRacingDuel<T extends RacingEffectPlacement>(incident: RacingIncident | undefined, placements: T[], obstacles: RacingObstacle[], elapsed: number): T[] {
   if (!incident || incident.kind === 'hay-jump' || incident.kind === 'puddle' || elapsed < incident.start || elapsed > incident.end) return placements;
+  if (obstacles.some(item => [incident.actorId, incident.rivalId].includes(item.actorId) && item.encounter - 1600 < incident.end && item.recovered > incident.start)) return placements;
   const actor = placements.find(item => item.id === incident.actorId), rival = placements.find(item => item.id === incident.rivalId);
   if (!actor || !rival) return placements;
   const p = phaseAt(incident, elapsed), sign = actor.y >= rival.y ? 1 : -1, scale = Math.min(actor.scale, rival.scale);
   const center = (actor.y + rival.y) / 2, separation = 12 * scale;
   const sidestep = smooth((p - .36) / .26), defence = smooth((p - .4) / .28);
-  let join = smooth(p / .20) * (1 - smooth((p - .78) / .22));
-  // Give the pair space for a physical course jump instead of pulling the horse across it.
-  const courseClearance = Math.max(0, ...obstacles.flatMap(obstacle => [actor, rival].filter(item => item.id === obstacle.actorId).map(item => 1 - smooth((Math.abs(obstacle.x - item.x) / Math.max(.05, item.scale) - 90) / 150))));
-  join *= 1 - courseClearance;
+  const join = smooth(p / .20) * (1 - smooth((p - .78) / .22));
   return placements.map(item => {
     const target = item.id === actor.id ? center + sign * (separation + sidestep * 25 * scale)
       : item.id === rival.id ? center - sign * separation + sign * defence * 8 * scale : item.y;
-    return item.id === actor.id || item.id === rival.id ? { ...item, y: item.y + (target - item.y) * join } : item;
+    // Guard only a nearby strip of the existing row; an approaching object cannot relocate either horse.
+    const step = Math.max(-18 * scale, Math.min(18 * scale, target - item.y));
+    return item.id === actor.id || item.id === rival.id ? { ...item, y: item.y + step * join } : item;
   });
 }
 

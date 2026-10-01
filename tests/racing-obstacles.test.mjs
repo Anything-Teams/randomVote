@@ -11,6 +11,7 @@ const { createRacingCamera, placeRacingField } = await source('src/racingCamera.
 const { racingObstacleDistance, racingCourseObstacles, placeRacingObstacles, racingObstacleJump, racingObstacleMotion, racingObstacleStatus, placeRacingFalls } = await source('src/racingObstacles.ts');
 const { racingTopLegPose, racingGateWalk, racingGateLegPose, drawRacingCourse } = await source('src/racingCourse.ts');
 const { racingGroundMarks, raceHorseAttachments } = await source('src/racingArt.ts');
+const { placeRacingDuel } = await source('src/racingEffects.ts');
 const players = Array.from({ length: 10 }, (_, index) => ({ id: String(index), name: `선수 ${index}`, color: '#abcdef' }));
 
 test('race course draws safely through temporarily tiny canvas sizes during layout changes', () => {
@@ -43,7 +44,7 @@ test('course obstacles enter from the right, travel left with the ground, and pe
       covered.add(incident.kind);
       const camera = createRacingCamera(), expected = racingObstacleDistance(timeline, incident);
       let previous, previousJump = 0, visibleBefore = false, leftAfter = false, beforeStory = false, seenFromRight = false;
-      for (let at = timeline.start; at <= incident.end + 2000; at += 16) {
+      for (let at = timeline.start; at <= expected.recovered + 4000; at += 16) {
         const field = placeRacingField(camera, list, timeline, at, width, height, 16);
         const obstacle = placeRacingObstacles(timeline, camera, field, width).find(item => item.actorId === incident.actorId);
         assert.equal(obstacle.distance, expected.distance, 'the object must stay fixed on the course');
@@ -61,7 +62,7 @@ test('course obstacles enter from the right, travel left with the ground, and pe
         previousJump = jump;
         previous = obstacle.x;
       }
-      assert.ok(seenFromRight && visibleBefore && beforeStory && leftAfter, 'the complete approach and departure exist outside the story interval');
+      assert.ok(seenFromRight && visibleBefore && beforeStory && leftAfter, 'the complete approach and departure follow the fixed course, including a delayed fall recovery');
       const field = placeRacingField(createRacingCamera(), list, timeline, expected.encounter, width, height, 0, true);
       const obstacle = placeRacingObstacles(timeline, { center: (Math.max(...field.map(item => item.distance)) + Math.min(...field.map(item => item.distance))) / 2, span: Math.max(.067, (Math.max(...field.map(item => item.distance)) - Math.min(...field.map(item => item.distance))) * 1.35 + .016) }, field, width).find(item => item.actorId === incident.actorId);
       const actor = field.find(item => item.id === incident.actorId);
@@ -160,18 +161,21 @@ test('course mistakes lose real speed and ranks, then recover without moving the
   let lostPositions = 0;
   for (const count of [2, 6, 10]) for (let seed = 0; seed < 30; seed++) {
     const list = players.slice(0, count), order = list.map(player => player.id).reverse();
-    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed)), noCourse = { ...timeline, obstacles: [] };
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
     for (const obstacle of timeline.obstacles) {
       outcomes.add(obstacle.outcome);
       assert.equal(readRacingDistance(timeline, obstacle.actorId, obstacle.encounter), obstacle.distance, 'the horse actually reaches the fixed obstacle at the encounter');
       if (obstacle.outcome === 'clear') { assert.equal(racingObstacleLoss(obstacle, obstacle.lowest), 0); continue; }
-      const at = (obstacle.impact + obstacle.lowest) / 2, recoveryAt = (obstacle.lowest + obstacle.recovered) / 2;
+      const noCourse = { ...timeline, obstacles: timeline.obstacles.filter(item => item !== obstacle) };
+      const at = (obstacle.impact + obstacle.lowest) / 2, recoveryAt = (obstacle.catchupStart + obstacle.catchupEnd) / 2;
       const speed = (plan, time) => (readRacingDistance(plan, obstacle.actorId, time + 8) - readRacingDistance(plan, obstacle.actorId, time - 8)) / 16;
       assert.ok(speed(timeline, at) < speed(noCourse, at) * .55, 'the checked horse loses forward speed');
       assert.ok(speed(timeline, recoveryAt) > speed(noCourse, recoveryAt), 'recovery earns back the lost ground through acceleration');
-      assert.ok(Math.abs(readRacingDistance(noCourse, obstacle.actorId, obstacle.lowest) - readRacingDistance(timeline, obstacle.actorId, obstacle.lowest) - obstacle.loss) < 1e-9);
+      assert.ok(Math.abs(readRacingDistance(noCourse, obstacle.actorId, obstacle.lowest) - readRacingDistance(timeline, obstacle.actorId, obstacle.lowest) - racingObstacleLoss(obstacle, obstacle.lowest)) < 1e-9);
       const before = racingStandings(timeline, obstacle.impact).find(item => item.id === obstacle.actorId).rank;
       const peak = racingStandings(timeline, obstacle.lowest).find(item => item.id === obstacle.actorId).rank;
+      assert.equal(peak, count, 'every fallen horse loses actual forward distance until the entire field has passed');
+      assert.equal(racingStandings(timeline, obstacle.catchupStart).find(item => item.id === obstacle.actorId).rank, count, 'standing up cannot restore the previous rank');
       if (peak > before) lostPositions++;
       let previous = readRacingDistance(timeline, obstacle.actorId, obstacle.impact), priorMotion = {};
       for (let elapsed = obstacle.impact; elapsed <= obstacle.recovered + 16; elapsed += 16) {
@@ -183,7 +187,8 @@ test('course mistakes lose real speed and ranks, then recover without moving the
         assert.deepEqual(racingObstacleMotion(obstacle, elapsed, true), {});
         priorMotion = motion; previous = distance;
       }
-      assert.equal(racingObstacleLoss(obstacle, obstacle.recovered), 0);
+      assert.equal(racingObstacleLoss(obstacle, obstacle.recovered), obstacle.loss, 'the lost ground persists after standing up');
+      assert.equal(racingObstacleLoss(obstacle, obstacle.catchupEnd), 0, 'the lost distance is recovered gradually during the remaining race');
       assert.deepEqual(racingObstacleMotion(obstacle, obstacle.recovered), {});
     }
     assert.deepEqual(racingStandings(timeline, 44_000).map(item => item.id), order);
@@ -223,21 +228,25 @@ test('failed course jumps visibly collapse the horse and displace the rider befo
 });
 
 
-test('a collapsed horse slides into view and returns continuously while preserving progress and the fixed obstacle lane', () => {
+test('approaching an obstacle and falling cannot move a horse to the bottom row or move the object', () => {
   for (const count of [2, 10]) for (let seed = 0; seed < 12; seed++) {
     const list = players.slice(0, count), order = list.map(player => player.id).reverse(), timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
     for (const obstacle of timeline.obstacles.filter(item => item.outcome !== 'clear')) {
       let previous;
       for (let elapsed = obstacle.impact - 16; elapsed <= obstacle.recovered + 16; elapsed += 16) {
-        const original = placeRacingField(createRacingCamera(), list, timeline, elapsed, 960, 540, 0, true), moved = placeRacingFalls(original, timeline, elapsed, 540);
+        const original = placeRacingField(createRacingCamera(), list, timeline, elapsed, 960, 540, 0, true);
+        const objects = placeRacingObstacles(timeline, { center: .5, span: .067 }, original, 960), incident = timeline.incidents.find(item => elapsed >= item.start && elapsed <= item.end);
+        const moved = placeRacingFalls(placeRacingDuel(incident, original, objects, elapsed), timeline, elapsed, 540);
         assert.deepEqual(placeRacingFalls(original, timeline, elapsed, 540, true), original);
         for (let i = 0; i < moved.length; i++) {
           assert.equal(moved[i].x, original[i].x); assert.equal(moved[i].distance, original[i].distance);
+          assert.ok(Math.abs(moved[i].y - original[i].y) <= 18 * moved[i].scale + 1e-9, 'guarding a lane cannot send a central horse to a distant foreground row');
           assert.ok(moved[i].y <= 540 - moved[i].scale * 8);
           if (previous) assert.ok(Math.abs(moved[i].y - previous[i].y) < 4, 'fall and standing recovery do not snap between rows');
         }
         const fixed = placeRacingObstacles(timeline, { center: .5, span: .067 }, original, 960).find(item => item.id === obstacle.id);
         assert.equal(fixed.y, original.find(item => item.id === obstacle.actorId).y, 'the obstacle remains on the original course row as the horse skids away');
+        assert.deepEqual(placeRacingDuel(incident, original, objects.map(item => ({ ...item, x: -1000 })), elapsed), placeRacingDuel(incident, original, objects.map(item => ({ ...item, x: 1000 })), elapsed), 'obstacle approach cannot change the lane choreography');
         previous = moved;
       }
     }

@@ -74,7 +74,8 @@ function render(ctx: CanvasRenderingContext2D, props: LadderShowProps, timeline:
     const crossing = timeline.paths[bridge.actorIds[0]].segments.find(segment => segment.bridgeId === bridge.id);
     const actionAt = crossing ? crossing.start + (crossing.end - crossing.start) * .14 : undefined;
     const revealAt = bridge.eventId ? timeline.events.find(event => event.id === bridge.eventId)?.action ?? actionAt : actionAt;
-    return { ...bridge, state: (props.preview || !crossing || elapsed < (revealAt ?? crossing.start) ? 'future' : elapsed < crossing.end ? 'active' : 'past') as 'future' | 'active' | 'past' };
+    const event = timeline.events.find(event => event.id === bridge.eventId);
+    return { ...bridge, fromLane: event?.fromLane ?? bridge.leftLane, state: (props.preview || !crossing || elapsed < (revealAt ?? crossing.start) ? 'future' : elapsed < crossing.end ? 'active' : 'past') as 'future' | 'active' | 'past' };
   }) ?? [];
   drawLadderAdventure(ctx, geometry, bridges, targetLane, clock, reduced, occupants);
   if (!props.preview && frame?.winnerId) drawLadderTreasureReveal(ctx, geometry, targetLane, clock - (timeline?.paths[frame.winnerId].arrivalAt ?? elapsed), reduced);

@@ -22,30 +22,26 @@ export function racingObstacleStatus(timeline: RacingTimeline, obstacle: RacingC
   const currentRank = racingStandings(timeline, elapsed).find(item => item.id === obstacle.actorId)?.rank ?? 1;
   const scale = (timeline.finish - timeline.start) / 33_500;
   const stage = elapsed < obstacle.encounter ? 'approach' : elapsed < obstacle.impact ? 'jump' : obstacle.outcome === 'clear' ? 'clear'
-    : elapsed < obstacle.impact + 750 * scale ? 'impact' : elapsed < obstacle.lowest + 200 * scale ? 'recover' : elapsed < obstacle.recovered ? 'chase' : 'clear';
+    : elapsed < obstacle.impact + 750 * scale ? 'impact' : elapsed < obstacle.recovered ? 'recover' : elapsed < (obstacle.catchupEnd ?? obstacle.recovered) ? 'chase' : 'clear';
   return { stage, beforeRank, currentRank, lost: racingObstacleLoss(obstacle, elapsed) };
 }
 
 /** Failed landings gather the legs, check the reins, regain balance, then chase the lost ground. */
 export function racingObstacleMotion(obstacle: RacingCourseChallenge, elapsed: number, reduced = false): RaceHorseMotion {
   if (reduced || obstacle.outcome === 'clear' || elapsed < obstacle.impact || elapsed >= obstacle.recovered) return {};
-  const impactTime = obstacle.lowest - obstacle.impact, age = (elapsed - obstacle.impact) / impactTime;
+  const scale = (obstacle.recovered - obstacle.lowest) / 1500, age = (elapsed - obstacle.impact) / (1100 * scale);
   const ease = (value: number) => { const p = Math.max(0, Math.min(1, value)); return p * p * (3 - 2 * p); };
   const stagger = age < .95 ? Math.sin(Math.PI * ease(age / .95)) : age < 1.6 ? -.38 * Math.sin(Math.PI * ease((age - .95) / .65)) : 0;
-  const check = Math.sin(Math.PI * ease(Math.min(1, age / 1.3))) * .95;
   const recovery = ease((elapsed - obstacle.lowest) / Math.max(1, obstacle.recovered - obstacle.lowest));
   const missedStep = Math.sin(Math.PI * ease(Math.min(1, age / 1.1)));
-  const fall = ease(age / .38) * (1 - ease((age - .95) / .85));
+  const fall = ease(age / .38) * (1 - ease((elapsed - obstacle.lowest) / (1100 * scale)));
+  const check = Math.max(Math.sin(Math.PI * ease(Math.min(1, age / 1.3))) * .95, fall * .58);
   return { fall, spill: fall, stumble: stagger * .28, check, trip: obstacle.outcome === 'clip' ? missedStep : 0, slip: obstacle.outcome === 'slip' ? missedStep : 0, crouch: Math.sin(Math.PI * recovery) * .9 };
 }
 
-/** A failed landing skids toward the open foreground, keeping the collapsed body readable. */
-export function placeRacingFalls<T extends RacingEffectPlacement>(placements: T[], timeline: RacingTimeline, elapsed: number, height: number, reduced = false): T[] {
-  if (reduced) return placements;
-  return placements.map(item => {
-    const fall = Math.max(0, ...timeline.obstacles.filter(obstacle => obstacle.actorId === item.id).map(obstacle => racingObstacleMotion(obstacle, elapsed).fall ?? 0));
-    return fall ? { ...item, y: Math.min(height - item.scale * 8, item.y + fall * item.scale * (placements.length > 3 ? 43 : 7)) } : item;
-  });
+/** The collapsed body stays on its course row while passing horses gain real forward distance. */
+export function placeRacingFalls<T extends RacingEffectPlacement>(placements: T[], _timeline: RacingTimeline, _elapsed: number, _height: number, _reduced = false): T[] {
+  return placements;
 }
 
 export function placeRacingObstacles(timeline: RacingTimeline, camera: Pick<RacingCamera, 'center' | 'span'>, placements: RacingEffectPlacement[], width: number): RacingObstacle[] {

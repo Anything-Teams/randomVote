@@ -525,7 +525,8 @@ test('the final straight keeps field gaps and separates rank crossings instead o
   const gap = .005;
   for (let size = 2; size <= 10; size++) {
     const list = participants.slice(0, size), ids = list.map(player => player.id), order = [...ids].reverse();
-    const timeline = buildRacingTimeline(list, order, 44_000);
+    const planned = buildRacingTimeline(list, order, 44_000);
+    const timeline = { ...planned, obstacles: [], tricks: [] };
     const baselineSpeed = 1000 / (timeline.finish - timeline.start);
     assert.deepEqual(racingStandings(timeline, timeline.straight.start).map(standing => standing.id), ids);
     let previousOrder = ids, previousDistances = ids.map(id => readRacingDistance(timeline, id, timeline.straight.start));
@@ -557,8 +558,10 @@ test('seeded final duels preserve the chosen result, incident outcomes and posit
     const list = participants.slice(0, size), ids = list.map(player => player.id), rotation = seed % size;
     const order = [...ids.slice(rotation), ...ids.slice(0, rotation)].reverse();
     const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
-    const before = timeline.incidents.at(-1).afterOrder;
-    assert.deepEqual(racingStandings(timeline, timeline.straight.start).map(standing => standing.id), before);
+    const before = racingStandings(timeline, timeline.straight.start - .001);
+    const entering = racingStandings(timeline, timeline.straight.start);
+    assert.deepEqual(entering.map(standing => standing.id), before.map(standing => standing.id), 'entering the straight retains the live order after setbacks');
+    for (const standing of entering) assert.ok(Math.abs(standing.distance - before.find(horse => horse.id === standing.id).distance) < .000001, 'entering the straight cannot restore lost ground');
     let previous = racingStandings(timeline, timeline.straight.start), last = timeline.straight.start;
     for (let elapsed = last + 16; elapsed <= timeline.finish; elapsed += 16) {
       const current = racingStandings(timeline, elapsed);

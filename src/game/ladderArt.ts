@@ -5,7 +5,7 @@ export type LadderPose = 'idle' | 'climb' | 'run' | 'bridge' | 'balance' | 'fall
 type TransferMotion = 'slide' | 'swing' | 'launch' | 'drop' | 'rotate' | 'conveyor' | 'portal' | 'pounce';
 type Point = { x: number; y: number };
 export type LadderArtActor = { id: string; index: number; lane: number; height: number; rungProgress: number; pose: LadderPose; phase: number; fromLane?: number; toLane?: number; fromRow?: number; toRow?: number; supportRow?: number; gripRow?: number; gripLane?: number; footRow?: number; fallDepth?: number; tilt?: number; eventStage?: string; eventKind?: string; floating?: boolean; motionType?: TransferMotion; motionPhase?: number; actionProgress?: number; transferStage?: 'takeoff' | 'flight' | 'catch' | 'pull'; catchRow?: number; transferProgress?: number; transferRole?: 'primary' | 'partner'; landingRow?: number; pivotLane?: number; pivotRow?: number; depthOffset?: number; interaction?: LadderInteraction; contactTargets?: [Point, Point]; arrived: boolean; doorLane?: number; candidate: Candidate; transition?: { from: LadderArtActor; progress: number; shift: Point; clock: number }; };
-export type LadderArtBridge = { id: string; row: number; leftLane: number; rightLane: number; fromRow?: number; toRow?: number; landingRow?: number; pivotLane?: number; pivotRow?: number; motionType?: TransferMotion; state?: 'future' | 'active' | 'past' };
+export type LadderArtBridge = { id: string; row: number; leftLane: number; rightLane: number; fromLane?: number; fromRow?: number; partnerFromRow?: number; toRow?: number; landingRow?: number; pivotLane?: number; pivotRow?: number; motionType?: TransferMotion; state?: 'future' | 'active' | 'past' };
 export type LadderArtEvent = { id: string; kind: string; actorId: string; row: number; lane: number; toLane?: number; fromRow?: number; landingRow?: number; motionType?: TransferMotion; pivotLane?: number; pivotRow?: number; phase: number; stage: 'setup' | 'action' | 'recovery'; };
 export type LadderGeometry = { width: number; height: number; laneCount: number; rungCount: number; left: number; right: number; top: number; bottom: number; laneGap: number; rungGap: number; scale: number; subdivisions: number; laneX: (lane: number) => number; rowY: (row: number) => number; };
 export type LadderRig = { hip: Point; legRoots: [Point, Point]; shoulders: [Point, Point]; elbows: [Point, Point]; hands: [Point, Point]; knees: [Point, Point]; feet: [Point, Point]; head: Point; angle: number; facing: number; scale: number; handContact: [boolean, boolean]; footContact: [boolean, boolean]; };
@@ -86,11 +86,12 @@ export function createLadderGeometry(width: number, height: number, laneCount: n
 export function ladderSuspension(actor: LadderArtActor, geometry: LadderGeometry) {
   const s = geometry.scale, p = clamp(actor.transferProgress ?? actor.phase);
   const from = { x: geometry.laneX(actor.fromLane ?? actor.lane), y: geometry.rowY(actor.fromRow ?? actor.rungProgress) };
-  const to = { x: geometry.laneX(actor.toLane ?? actor.lane), y: geometry.rowY((actor.landingRow ?? actor.fromRow ?? actor.rungProgress) - .8) };
+  const to = { x: geometry.laneX(actor.toLane ?? actor.lane), y: geometry.rowY(Math.max(0, (actor.landingRow ?? actor.fromRow ?? actor.rungProgress) - .8)) };
   const dx = to.x - from.x, dy = to.y - from.y, length = Math.max(1, Math.hypot(dx, dy));
   const normal = { x: -dy / length * Math.sign(dx || 1), y: Math.abs(dx) / length };
   const cable = actor.eventKind === 'zipline' || length > geometry.rungGap * 12;
-  const sag = cable ? geometry.rungGap * .55 : Math.min(length * .24, geometry.rungGap * 2.4);
+  const groundClearance = Math.max(.12, Math.min(actor.fromRow ?? actor.rungProgress, Math.max(0, (actor.landingRow ?? actor.rungProgress) - .8)) * .7) * geometry.rungGap;
+  const sag = Math.min(cable ? geometry.rungGap * .55 : Math.min(length * .4, geometry.rungGap * 2.4), groundClearance);
   const radius = length * length / (8 * sag) + sag / 2;
   const arc = cable ? sag * Math.sin(p * Math.PI) : Math.sqrt(Math.max(0, radius * radius - ((p - .5) * length) ** 2)) - (radius - sag);
   const floor = { x: mix(from.x, to.x, p) + normal.x * arc, y: mix(from.y, to.y, p) + normal.y * arc };
@@ -105,7 +106,8 @@ export function ladderArtActors(timeline: LadderTimeline, frame: LadderFrame, ca
   const adapt = (actor: LadderActorFrame): LadderArtActor => {
     const event = timeline.events.find(item => item.id === actor.eventId);
     const footRow = actor.pose === 'balance' ? actor.eventStage === 'resolve' ? actor.landingRow : actor.fromRow ?? event?.row : undefined;
-    const art: LadderArtActor = { ...actor, candidate: candidates[actor.index], gripRow: actor.gripRow ?? actor.supportRow, footRow, eventKind: event?.kind };
+    const quantize = (row: number | undefined) => row === undefined ? undefined : Math.min(geometry.rungCount, Math.ceil(row * geometry.subdivisions) / geometry.subdivisions);
+    const art: LadderArtActor = { ...actor, candidate: candidates[actor.index], catchRow: quantize(actor.catchRow), gripRow: quantize(actor.gripRow ?? actor.supportRow), footRow, eventKind: event?.kind };
     if (art.eventStage === 'setup') { art.pose = 'climb'; art.tilt = 0; }
     if (art.motionType === 'swing' && art.eventStage === 'action') {
       const { floor } = ladderSuspension(art, geometry);
@@ -163,6 +165,8 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
   let anchorAmount: [number, number] = [0, 0];
   let contactAmount = 0;
   const catchY = geometry.rowY(actor.catchRow ?? actor.gripRow ?? (actor.landingRow ?? actor.rungProgress) + 2);
+  const plantedRow = Math.round((actor.interaction?.role === 'victim' ? actor.fromRow ?? actor.rungProgress : actor.landingRow ?? actor.rungProgress) * geometry.subdivisions) / geometry.subdivisions;
+  const plantedY = (geometry.rowY(plantedRow) - (actor.interaction?.role === 'victim' ? geometry.rowY(actor.fromRow ?? actor.rungProgress) : base.y)) / scale;
   const catchLane = actor.toLane ?? actor.gripLane ?? actor.lane;
   const catchHands: [Point, Point] = [0, 1].map(side => ({ x: geometry.laneX(catchLane) + (side ? 1 : -1) * facing * 6 * scale, y: catchY })) as [Point, Point];
   const motor = reduced ? 0 : step;
@@ -170,7 +174,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
     const p = actor.interaction.phase, ready = ease((p - .18) / .14), lift = ease((p - .32) / .28);
     hip = { x: 7 * ready, y: -13 }; angle = 0;
     hands = [{ x: mix(-8, 16, ready), y: mix(-16, -23, ready) }, { x: mix(8, 0, ready), y: mix(-16, -19, ready) }];
-    feet = [{ x: mix(-3.8, 1, ready), y: -lift * 4 }, { x: mix(3.8, 6, ready), y: -lift * 7 }];
+    feet = [{ x: mix(-3.8, 1, ready), y: plantedY - lift * 4 }, { x: mix(3.8, 6, ready), y: plantedY - lift * 7 }];
     footContact = [p <= .32, p <= .32];
   } else if (actor.interaction?.role === 'thrower' && actor.eventStage !== 'setup') {
     const p = actor.interaction.phase;
@@ -183,7 +187,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
       const flight = clamp(actor.transferProgress ?? p / .32), takeoff = ease(flight / .18), reach = ease((flight - .72) / .28);
       hip = { x: mix(-.8 * (1 - takeoff), 7, reach), y: mix(-15 + (1 - takeoff) * 2.4, -11.8, reach) }; angle = -.18 * Math.sin(flight * Math.PI) * (1 - reach);
       hands = [{ x: mix(-12, 4, reach), y: mix(-25, -22, reach) }, { x: mix(14, 8, reach), y: mix(-28, -17, reach) }];
-      feet = [{ x: mix(-4, 1, reach), y: -Math.sin(flight * Math.PI) * 5 }, { x: mix(8, 6, reach), y: -Math.sin(flight * Math.PI) * 7 }];
+      feet = [{ x: mix(-4, 1, reach), y: mix(-Math.sin(flight * Math.PI) * 5, plantedY, reach) }, { x: mix(8, 6, reach), y: mix(-Math.sin(flight * Math.PI) * 7, plantedY, reach) }];
       footContact = [false, false];
     } else {
       const lifting = ease((p - .32) / .28), release = ease((p - .6) / .07), settle = ease((p - .67) / .33);
@@ -193,7 +197,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
       const extension = ease((p - .54) / .06) * .65;
       hip = { x: mix(7 - 1.1 * ease((p - .32) / .06), targetHip.x, settle), y: mix(-11.8 - lifting * 1.5 - extension, targetHip.y, settle) }; angle = climb.angle * settle;
       hands = [{ x: mix(4, 11, release), y: mix(-22, -23, release) }, { x: mix(8, 13, release), y: mix(-17, -24, release) }];
-      feet = [{ x: 1, y: 0 }, { x: 6, y: 0 }];
+      feet = [{ x: 1, y: plantedY }, { x: 6, y: plantedY }];
       hands = hands.map((point, side) => ({ x: mix(point.x, local(climb.hands[side]).x, settle), y: mix(point.y, local(climb.hands[side]).y, settle) })) as [Point, Point];
       feet = feet.map((point, side) => ({ x: mix(point.x, local(climb.feet[side]).x, settle), y: mix(point.y, local(climb.feet[side]).y, settle) })) as [Point, Point];
       contactAmount = ease((p - .32) / .06) * (1 - release);
@@ -292,7 +296,8 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
         const release = ease((actor.interaction.phase - .6) / .12);
         hip.x = mix(7, hip.x, release); angle *= release;
         hands = hands.map((point, side) => ({ x: mix(side ? 0 : 16, point.x, release), y: mix(side ? -19 : -23, point.y, release) })) as [Point, Point];
-        feet = feet.map((point, side) => ({ x: mix(side ? 6 : 1, point.x, release), y: mix(side ? -7 : -4, point.y, release) })) as [Point, Point];
+        const sourceFloor = (geometry.rowY(Math.round((actor.fromRow ?? actor.rungProgress) * geometry.subdivisions) / geometry.subdivisions) - geometry.rowY(actor.fromRow ?? actor.rungProgress)) / scale;
+        feet = feet.map((point, side) => ({ x: mix(side ? 6 : 1, point.x, release), y: mix(sourceFloor + (side ? -7 : -4), point.y, release) })) as [Point, Point];
       }
     } else if (actor.motionType === 'rotate') {
       hip = { x: Math.sin(p * Math.PI * 2) * .45, y: -15 }; angle = -.04 * Math.sin(p * Math.PI * 2);
@@ -348,14 +353,14 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
     }
   } else if (actor.pose === 'run') {
     const distance = Math.abs(actor.lane - (actor.fromLane ?? actor.lane)) * geometry.laneGap / scale;
-    const stride = 30, motorDistance = reduced ? 0 : distance;
+    const stride = 24, motorDistance = reduced ? 0 : distance;
     feet = [0, 1].map(side => {
       const cycle = wrap(motorDistance / stride + side * .5), swing = clamp((cycle - .42) / .58);
       footContact[side] = cycle < .42;
       return { x: cycle < .42 ? stride * (.21 - cycle) : mix(-stride * .21, stride * .21, ease(swing)), y: -Math.sin(swing * Math.PI) * 4.2 };
     }) as [Point, Point];
     const drive = Math.sin(motorDistance / stride * Math.PI * 2), effort = Math.sin(actor.phase * Math.PI);
-    hip = { x: .8 * effort, y: -12 + Math.abs(drive) * .4 };
+    hip = { x: .65 * effort, y: -11.3 + Math.abs(drive) * .25 };
     hands = [{ x: -7 + drive * 3.2, y: -19 - drive }, { x: 7 - drive * 3.2, y: -19 + drive }];
     angle = .07 * effort * facing;
   } else if (actor.pose === 'bridge') {

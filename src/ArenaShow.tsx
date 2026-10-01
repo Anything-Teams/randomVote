@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Candidate } from './election';
 import type { SportsStageProps } from './sports';
-import { arenaAction, arenaApproachSpeed, arenaCatchTargets, arenaChargeFall, arenaChargeTargets, arenaContactRound, arenaLocalContact, arenaEdgeFall, arenaEdgeTargets, arenaExitDirection, arenaFocusRound, arenaGuardTarget, arenaMiniExchanges, arenaMove as move, arenaNarration, arenaNearbyResponse, arenaPodium, arenaRanks, arenaReleaseTarget, arenaRoamingTarget, arenaRounds, arenaShoveTargets, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
+import { arenaAction, arenaApproachSpeed, arenaCatchTargets, arenaChargeFall, arenaChargeTargets, arenaContactRound, arenaLocalContact, arenaEdgeFall, arenaEdgeTargets, arenaExitDirection, arenaFocusRound, arenaGuardTarget, arenaMiniExchanges, arenaMove as move, arenaNarration, arenaNearbyResponse, arenaPodium, arenaRanks, arenaReleaseTarget, arenaRoamingTarget, arenaRounds, arenaShoveTargets, arenaSpinTargets, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
 import { arenaDrawOrder, createArenaFighterAnimation, drawArenaFighter, drawArenaName, type ArenaActor, type ArenaFighterAnimation, type ArenaPose } from './game/ArenaFighter';
 import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
@@ -199,8 +199,9 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         const charge = upcoming.tactic === 'bait' ? arenaChargeTargets(upcoming, upcoming.start, contact.center) : undefined;
         const edge = upcoming.tactic === 'edge' ? arenaEdgeTargets(upcoming, upcoming.start, contact.center) : undefined;
         const caught = upcoming.tactic === 'catch' ? arenaCatchTargets(upcoming, upcoming.start, contact.center) : undefined;
+        const spin = upcoming.tactic === 'spin' ? arenaSpinTargets(upcoming, upcoming.start, contact.center) : undefined;
         const shove = upcoming.tactic === 'shove' ? arenaShoveTargets(upcoming, upcoming.start, contact.center) : undefined;
-        const target = arenaGuardTarget(charge ? id === upcoming.victim ? charge.charger : charge.target : caught ? id === upcoming.victim ? caught.charger : caught.receiver : shove ? id === upcoming.victim ? shove.victim : id === upcoming.helper ? shove.helper : shove.aggressor : edge ? id === upcoming.victim ? edge.victim : edge.aggressor : { x: contact.center.x + (plan?.offset.x ?? 0), y: contact.center.y + (plan?.offset.y ?? 0) }, actor.index, elapsed);
+        const target = arenaGuardTarget(charge ? id === upcoming.victim ? charge.charger : charge.target : caught ? id === upcoming.victim ? caught.charger : caught.receiver : spin ? id === upcoming.victim ? spin.attacker : spin.defender : shove ? id === upcoming.victim ? shove.victim : id === upcoming.helper ? shove.helper : shove.aggressor : edge ? id === upcoming.victim ? edge.victim : edge.aggressor : { x: contact.center.x + (plan?.offset.x ?? 0), y: contact.center.y + (plan?.offset.y ?? 0) }, actor.index, elapsed);
         const approachDistance = Math.hypot(target.x - body.x, target.y - body.y);
         if (Math.abs(target.x - body.x) > 8 && Math.hypot(body.motorX ?? 0, body.motorY ?? 0) < 18) body.facing = target.x < body.x ? -1 : 1;
         move(body, target, seconds, arenaApproachSpeed(approachDistance));
@@ -222,6 +223,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       const charge = exchange.tactic === 'bait' ? arenaChargeTargets(exchange, elapsed, center) : undefined;
       const edge = exchange.tactic === 'edge' ? arenaEdgeTargets(exchange, elapsed, center) : undefined;
       const caught = exchange.tactic === 'catch' ? arenaCatchTargets(exchange, elapsed, center) : undefined;
+      const spin = exchange.tactic === 'spin' ? arenaSpinTargets(exchange, elapsed, center) : undefined;
       const shove = exchange.tactic === 'shove' ? arenaShoveTargets(exchange, elapsed, center) : undefined;
       const ids = action.actors.map(part => part.id);
       if (action.stage === 'release' && !contact.releases) {
@@ -236,7 +238,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       action.actors.forEach(part => {
         const body = sim.bodies.get(part.id), actor = actors.get(part.id);
         if (!body || !actor || sim.exits.has(part.id)) return;
-        let target = charge ? part.id === exchange.victim ? charge.charger : charge.target : caught ? part.id === exchange.victim ? caught.charger : caught.receiver : shove ? part.id === exchange.victim ? shove.victim : part.id === exchange.helper ? shove.helper : shove.aggressor : edge ? part.id === exchange.victim ? edge.victim : edge.aggressor : { x: center.x + part.offset.x, y: center.y + part.offset.y };
+        let target = charge ? part.id === exchange.victim ? charge.charger : charge.target : caught ? part.id === exchange.victim ? caught.charger : caught.receiver : spin ? part.id === exchange.victim ? spin.attacker : spin.defender : shove ? part.id === exchange.victim ? shove.victim : part.id === exchange.helper ? shove.helper : shove.aggressor : edge ? part.id === exchange.victim ? edge.victim : edge.aggressor : { x: center.x + part.offset.x, y: center.y + part.offset.y };
         if (action.stage === 'approach') target = arenaGuardTarget(target, actor.index, elapsed);
         if (action.stage === 'release') {
           const origin = contact.releases!.get(part.id) ?? body;
@@ -245,15 +247,18 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         // Snapshot seeks can reconstruct the current contact. Live actors have
         // the same bounded acceleration and speed as everyone elsewhere.
         if (reset && elapsed > 300 * unit) { body.x = target.x; body.y = target.y; body.motorX = 0; body.motorY = 0; }
-        else move(body, target, seconds, part.pose === 'run' ? 165 : action.stage === 'approach' ? arenaApproachSpeed(Math.hypot(target.x - body.x, target.y - body.y)) : 118);
+        else move(body, target, seconds, part.pose === 'run' || spin && spin.turn > 0 ? 165 : action.stage === 'approach' ? arenaApproachSpeed(Math.hypot(target.x - body.x, target.y - body.y)) : 118);
         const opponent = part.gripId ? sim.bodies.get(part.gripId) : undefined;
         const remaining = Math.hypot(target.x - body.x, target.y - body.y);
         const contactDistance = opponent ? Math.hypot(opponent.x - body.x, opponent.y - body.y) : 0;
-        if (opponent && remaining < 18) body.facing = opponent.x > body.x ? 1 : -1;
+        if (opponent && remaining < 18 && !spin) body.facing = opponent.x > body.x ? 1 : -1;
+        if (spin && remaining < 18) body.facing = part.id === exchange.victim ? -spin.side : spin.side;
         if (charge && (remaining < 18 || charge.stage !== 'prepare')) body.facing = part.id === exchange.victim ? charge.side : -charge.side;
         if (caught && (remaining < 18 || caught.stage !== 'prepare')) body.facing = part.id === exchange.victim ? caught.side : -caught.side;
         if (shove && remaining < 18) body.facing = part.id === exchange.victim ? -shove.side : shove.side;
         actor.x = body.x; actor.y = body.y; actor.facing = body.facing;
+        actor.yaw = reduced ? 0 : part.turn;
+        actor.pivotTurn = !reduced && spin && part.id === exchange.aggressor && spin.turn > 0 ? spin.angle : undefined;
         const establishedGrip = opponent && contactDistance < 86 && action.stage !== 'approach';
         actor.pose = part.pose === 'run' ? 'run' : part.pose === 'dodge' && (charge || shove) ? 'dodge' : establishedGrip ? part.pose : remaining > 9 || opponent && contactDistance > 84 ? 'walk' : part.pose;
         actor.phase = part.phase; actor.power = action.stage === 'joint-attack' || action.stage === 'counter' || action.stage === 'lift' ? .85 : .55;

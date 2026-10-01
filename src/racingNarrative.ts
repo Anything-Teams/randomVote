@@ -13,7 +13,7 @@ export type RacingIncident = {
 };
 export type RacingStraightSwap = { aheadId: string; behindId: string; start: number; end: number };
 export type RacingStraightWave = { start: number; end: number; beforeOrder: string[]; swaps: RacingStraightSwap[] };
-export type RacingCourseChallenge = { id: string; kind: 'hay-jump' | 'puddle'; actorId: string; distance: number; encounter: number; outcome: 'clear' | 'clip' | 'slip'; impact: number; lowest: number; recovered: number; loss: number };
+export type RacingCourseChallenge = { id: string; kind: 'hay-jump' | 'puddle'; actorId: string; distance: number; encounter: number; outcome: 'clear' | 'clip' | 'slip'; impact: number; lowest: number; recovered: number; loss: number; lossCurve?: { at: number; lost: number }[]; catchupStart?: number; catchupEnd?: number };
 export type RacingTrick = { id: string; kind: 'rear-kick' | 'beanbag'; actorId: string; targetId: string; start: number; release: number; impact: number; lowest: number; recovered: number; loss: number };
 export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[]; obstacles: RacingCourseChallenge[]; tricks: RacingTrick[]; straight: { start: number; waves: RacingStraightWave[] } };
 export type RacingStanding = { id: string; distance: number; rank: number; finished: boolean; finishTime: number };
@@ -128,8 +128,11 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   const finishTimes = Object.fromEntries(finishOrder.map((id, rank) => [id, finish + rank * finishStep]));
   const timeline: RacingTimeline = { start, finish, ids, finishOrder, finishTimes, knots: knots.sort((a, b) => a.at - b.at), incidents, obstacles: [], tricks: [], straight: { start: straightStart, waves } };
   planCourseChallenges(timeline);
+  reconcileCourseChallenges(timeline);
+  planFallRecoveries(timeline);
   planRacingTricks(timeline);
   reconcileCourseChallenges(timeline);
+  planFallRecoveries(timeline);
   return timeline;
 }
 
@@ -175,15 +178,48 @@ export function racingIncidentSetback(incident: RacingIncident, id: string, elap
 }
 
 export function racingObstacleLoss(obstacle: RacingCourseChallenge, elapsed: number) {
+  if (obstacle.lossCurve) {
+    if (elapsed <= obstacle.impact || elapsed >= obstacle.catchupEnd!) return 0;
+    if (elapsed >= obstacle.recovered) return obstacle.loss * (1 - smooth((elapsed - obstacle.catchupStart!) / (obstacle.catchupEnd! - obstacle.catchupStart!)));
+    const index = Math.min(obstacle.lossCurve.length - 2, Math.max(0, Math.floor((elapsed - obstacle.impact) / (obstacle.lossCurve[1].at - obstacle.impact))));
+    const left = obstacle.lossCurve[index], right = obstacle.lossCurve[index + 1];
+    return left.lost + (right.lost - left.lost) * clamp((elapsed - left.at) / (right.at - left.at));
+  }
   return setbackLoss(elapsed, obstacle.impact, obstacle.lowest, obstacle.recovered, obstacle.loss);
 }
 
 export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed: number): number {
-  if (elapsed >= timeline.straight.start) return plannedDistance(timeline, id, elapsed);
   const lost = timeline.incidents.reduce((sum, incident) => sum + racingIncidentSetback(incident, id, elapsed), 0)
     + timeline.obstacles.filter(obstacle => obstacle.actorId === id).reduce((sum, obstacle) => sum + racingObstacleLoss(obstacle, elapsed), 0)
     + (timeline.tricks ?? []).filter(trick => trick.targetId === id).reduce((sum, trick) => sum + racingTrickLoss(trick, elapsed), 0);
   return clamp(plannedDistance(timeline, id, elapsed) - lost);
+}
+
+/** A fall stops actual forward travel. Standing up does not restore the ground already lost. */
+function planFallRecoveries(timeline: RacingTimeline) {
+  const scale = (timeline.finish - timeline.start) / 33_500;
+  for (const obstacle of timeline.obstacles.filter(item => item.outcome !== 'clear')) {
+    const without = { ...timeline, obstacles: timeline.obstacles.filter(item => item !== obstacle) };
+    const step = 16 * scale;
+    let lost = 0, standingUp = false;
+    obstacle.lowest = obstacle.impact + 4500 * scale;
+    obstacle.recovered = obstacle.lowest + 1500 * scale;
+    obstacle.lossCurve = [{ at: obstacle.impact, lost: 0 }];
+    for (let previous = obstacle.impact; previous < obstacle.recovered; ) {
+      const at = Math.min(previous + step, obstacle.recovered), middle = (previous + at) / 2;
+      const slowdown = .985 * smooth((middle - obstacle.impact) / (300 * scale)) * (1 - smooth((middle - obstacle.lowest) / (obstacle.recovered - obstacle.lowest)));
+      lost += Math.max(0, readRacingDistance(without, obstacle.actorId, at) - readRacingDistance(without, obstacle.actorId, previous)) * slowdown;
+      obstacle.lossCurve.push({ at, lost });
+      const lastOpponent = Math.min(...timeline.ids.filter(id => id !== obstacle.actorId).map(id => readRacingDistance(without, id, at)));
+      if (!standingUp && at >= obstacle.impact + 1200 * scale && readRacingDistance(without, obstacle.actorId, at) - lost < lastOpponent - .006) {
+        obstacle.lowest = at; obstacle.recovered = at + 1500 * scale; standingUp = true;
+      }
+      previous = at;
+    }
+    obstacle.loss = lost;
+    obstacle.catchupStart = obstacle.recovered + 500 * scale;
+    obstacle.catchupEnd = obstacle === timeline.obstacles[0] ? Math.min(timeline.finish - 800 * scale, timeline.obstacles[1].encounter + 3500 * scale) : timeline.finish - 800 * scale;
+  }
 }
 
 
@@ -196,7 +232,7 @@ function planRacingTricks(timeline: RacingTimeline) {
   if (timeline.ids.length < 2) return;
   const scale = (timeline.finish - timeline.start) / 33_500;
   for (const [index, kind] of (['rear-kick', 'beanbag'] as const).entries()) {
-    const start = index === 0 ? timeline.start + 1400 * scale : (timeline.obstacles[0]?.recovered ?? timeline.start + 12_000 * scale) + 120 * scale;
+    const start = index === 0 ? timeline.start + 1400 * scale : timeline.ids.length === 2 ? timeline.start + 6770 * scale : (timeline.obstacles[0]?.recovered ?? timeline.start + 12_000 * scale) + 120 * scale;
     const release = start + (index === 0 ? 950 : 450) * scale;
     const impact = start + (index === 0 ? 1850 : 1050) * scale;
     const lowest = impact + (index === 0 ? 1350 : 1050) * scale, recovered = impact + (index === 0 ? 3400 : 2150) * scale;
@@ -227,9 +263,9 @@ function reconcileCourseChallenges(timeline: RacingTimeline) {
       if (readRacingDistance(without, obstacle.actorId, middle) < obstacle.distance + span * .0718) left = middle; else right = middle;
     }
     obstacle.impact = (left + right) / 2;
-    obstacle.lowest = obstacle.impact + (obstacle.outcome === 'clear' ? 350 : 1100) * scale;
-    obstacle.recovered = obstacle.outcome === 'clear' ? obstacle.impact + 1000 * scale : Math.min(timeline.straight.start, obstacle.impact + 3500 * scale);
-    if (obstacle.loss) {
+    obstacle.lowest = obstacle.impact + (obstacle.outcome === 'clear' ? 350 : 3300) * scale;
+    obstacle.recovered = obstacle.impact + (obstacle.outcome === 'clear' ? 1000 : 5000) * scale;
+    if (obstacle.loss && !obstacle.lossCurve) {
       let minimumSpeed = Infinity;
       for (let at = obstacle.impact; at < obstacle.lowest; at += 16 * scale) minimumSpeed = Math.min(minimumSpeed, (readRacingDistance(without, obstacle.actorId, at + 8 * scale) - readRacingDistance(without, obstacle.actorId, at - 8 * scale)) / (16 * scale));
       obstacle.loss = Math.min(obstacle.loss, Math.max(0, minimumSpeed) * (obstacle.lowest - obstacle.impact) / 1.5 * .82);
@@ -253,9 +289,9 @@ function planCourseChallenges(timeline: RacingTimeline) {
   if (!timeline.ids.length) return;
   const hash = timeline.incidents.map(item => item.kind + item.actorId).join('|').split('').reduce((value, letter) => (value * 31 + letter.charCodeAt(0)) >>> 0, 7);
   const scale = (timeline.finish - timeline.start) / 33_500, first = timeline.incidents[0];
-  const firstIsObstacle = first?.kind === 'hay-jump' || first?.kind === 'puddle', small = timeline.ids.length <= 3;
-  const encounters = [first ? small && !firstIsObstacle ? first.end + 350 * scale : first.start + (first.end - first.start) * .6 : timeline.start + 7750 * scale,
-    small && timeline.incidents[1] ? timeline.incidents[1].end + 350 * scale : timeline.start + 16_500 * scale,
+  const firstIsObstacle = first?.kind === 'hay-jump' || first?.kind === 'puddle';
+  const encounters = [timeline.ids.length === 2 ? timeline.start + 10_850 * scale : first ? first.start + (first.end - first.start) * .6 : timeline.start + 7750 * scale,
+    timeline.start + 18_500 * scale,
     timeline.start + 25_300 * scale];
   const firstKind: RacingCourseChallenge['kind'] = first?.kind === 'hay-jump' || first?.kind === 'puddle' ? first.kind : hash % 2 ? 'puddle' : 'hay-jump';
   let previousActor = '';
@@ -276,8 +312,8 @@ function planCourseChallenges(timeline: RacingTimeline) {
       const span = Math.max(.067, (Math.max(...field) - Math.min(...field)) * 1.35 + .016);
       if (readRacingDistance(timeline, actorId, middle) < distance + span * .0718) left = middle; else right = middle;
     }
-    const impact = (left + right) / 2, lowest = impact + (failed ? 1100 : 350) * scale;
-    const recovered = failed ? Math.min(timeline.straight.start, impact + 3500 * scale) : impact + 1000 * scale;
+    const impact = (left + right) / 2, lowest = impact + (failed ? 3300 : 350) * scale;
+    const recovered = impact + (failed ? 5000 : 1000) * scale;
     timeline.obstacles.push({ id: actorId + ':' + encounter, kind, actorId, distance, encounter, outcome, impact, lowest, recovered, loss: failed ? kind === 'hay-jump' ? .014 : .0125 : 0 });
     previousActor = actorId;
   }

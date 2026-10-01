@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { randomInt } from './election';
 import type { SportsStageProps } from './sports';
-import { activeRacingIncident, activeRacingTrick, racingTrickStatus, buildRacingTimeline, createRacingIncidents, racingIncidentStatus, racingIncidentSetback, racingLaneShift, racingStandings, readRacingTravel, RACING_STORIES, type RacingTimeline, type RacingStanding } from './racingNarrative';
+import { activeRacingIncident, activeRacingTrick, racingTrickStatus, buildRacingTimeline, createRacingIncidents, racingIncidentStatus, racingIncidentSetback, racingStandings, readRacingTravel, RACING_STORIES, type RacingTimeline, type RacingStanding } from './racingNarrative';
 import { drawRaceDust, drawRaceHorse, raceHorseAttachments, drawRaceStadium, raceBox, raceLabel, type RaceHorseMotion } from './racingArt';
 import { drawRacingCourse, drawRacingStartingGate, drawRacingTopView } from './racingCourse';
 import { createRacingCamera, placeRacingField, racingFocusIds, type RacingCamera } from './racingCamera';
@@ -24,7 +24,8 @@ function phaseAt(elapsed: number, duration: number, preview: boolean): RacePhase
   return 'winner';
 }
 function displayedIncident(timeline: RacingTimeline, elapsed: number) {
-  return activeRacingIncident(timeline, elapsed) ?? timeline.incidents.find(incident => elapsed >= incident.end && elapsed < incident.end + 1600);
+  const incident = activeRacingIncident(timeline, elapsed) ?? timeline.incidents.find(incident => elapsed >= incident.end && elapsed < incident.end + 1600);
+  return incident?.kind === 'hay-jump' || incident?.kind === 'puddle' ? undefined : incident;
 }
 function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: number): RaceView {
   const phase = phaseAt(elapsed, props.duration, props.preview), standings = racingStandings(timeline, elapsed);
@@ -40,6 +41,11 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
     winner: [(leader?.name ?? '오늘의 말') + ' · 우승 확정', '전원 한 바퀴 완주. 말은 천천히 멈추고 기수가 한 손을 들어 인사합니다.', 'WINNER’S CIRCLE'],
   };
   let [headline, detail, badge] = names[phase];
+  if ((phase === 'race' || phase === 'straight') && standings.length > 1) {
+    const runner = props.candidates.find(candidate => candidate.id === standings[1].id), gap = Math.max(0, (standings[0].distance - standings[1].distance) * 1600);
+    headline = (leader?.name ?? '선두') + (gap < 3 ? ' · 코끝으로 앞섭니다' : ' · ' + gap.toFixed(1) + 'M 앞서갑니다');
+    detail = (runner?.name ?? '2위') + '가 바로 뒤에서 추격합니다. 선두와 ' + gap.toFixed(1) + 'M 차이. ' + (phase === 'straight' ? '결승선까지 보폭을 늘리며 끝까지 맞붙습니다.' : '말의 코끝이 실제로 앞서는 순간 순위가 바뀝니다.');
+  }
   if (incident && template && actor) {
     const status = racingIncidentStatus(timeline, incident, elapsed);
     const next = props.candidates.find(candidate => candidate.id === status.nextRivalId);
@@ -62,19 +68,20 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
       badge = '응수 · 실제 재추격';
     }
   }
-  const challenge = phase === 'race' ? timeline.obstacles.find(obstacle => elapsed >= obstacle.encounter - 1450 && elapsed < (obstacle.outcome === 'clear' ? obstacle.impact + 1000 : obstacle.recovered + 450)) : undefined;
+  const challenge = phase === 'race' || phase === 'straight' ? timeline.obstacles.find(obstacle => elapsed >= obstacle.encounter - 1450 && elapsed < (obstacle.outcome === 'clear' ? obstacle.impact + 1000 : obstacle.recovered + 450))
+    ?? (!incident ? timeline.obstacles.find(obstacle => obstacle.outcome !== 'clear' && elapsed >= obstacle.recovered && elapsed < (obstacle.catchupEnd ?? obstacle.recovered)) : undefined) : undefined;
   let focusId = incident?.actorId;
   if (challenge) {
     const subject = props.candidates.find(candidate => candidate.id === challenge.actorId), status = racingObstacleStatus(timeline, challenge, elapsed);
     const name = subject?.name ?? '경주마', object = challenge.kind === 'hay-jump' ? '건초 장벽' : '물웅덩이';
     const ahead = props.candidates.find(candidate => candidate.id === standings[status.currentRank - 2]?.id);
     const change = status.currentRank > status.beforeRank ? ' · ' + (status.currentRank - status.beforeRank) + '계단 밀렸습니다.' : '';
-    headline = name + ' · ' + (status.stage === 'approach' ? object + ' 접근' : status.stage === 'jump' ? '도약!' : status.stage === 'impact' ? challenge.outcome === 'clip' ? '발이 걸려 앞으로 넘어졌습니다' : '미끄러져 주저앉았습니다' : status.stage === 'recover' ? '균형을 되찾는 중' : status.stage === 'chase' ? '다시 추격합니다' : '코스 통과');
+    headline = name + ' · ' + (status.stage === 'approach' ? object + ' 접근' : status.stage === 'jump' ? '도약!' : status.stage === 'impact' ? challenge.outcome === 'clip' ? '발이 걸려 앞으로 넘어졌습니다' : '미끄러져 주저앉았습니다' : status.stage === 'recover' ? '넘어진 몸을 다시 일으킵니다' : status.stage === 'chase' ? status.currentRank === standings.length ? '꼴등에서 다시 추격합니다' : '한 마리씩 다시 따라잡습니다' : '코스 통과');
     detail = '현재 ' + status.currentRank + '위. ' + (status.stage === 'approach' ? '오른쪽에서 ' + object + '이 가까워집니다. 기수가 도약할 보폭을 맞춥니다.'
       : status.stage === 'jump' ? '앞다리를 모아 넘습니다. 착지까지 보폭을 지켜보세요.'
       : status.stage === 'impact' ? (challenge.outcome === 'clip' ? '앞발이 건초에 걸려 무릎을 꿇고 가슴이 땅으로 내려갑니다. 기수도 안장에서 뒤로 미끄러집니다.' : '앞발이 젖은 지면에서 길게 밀립니다. 말이 주저앉고 기수가 몸을 젖혀 버팁니다.') + change
-      : status.stage === 'recover' ? '앞발부터 다시 딛고 몸을 일으킵니다. 기수도 안장으로 돌아옵니다. 그 사이 상대 말이 지나갑니다.' + change
-      : status.stage === 'chase' ? '고삐를 풀고 보폭을 되찾습니다. ' + (ahead ? ahead.name + '의 뒤에서 잃은 거리를 좁힙니다.' : '다시 선두 경합에 합류합니다.')
+      : status.stage === 'recover' ? (elapsed < challenge.lowest ? '속도가 거의 멈췄습니다. 뒤의 말들이 지나가고 기수가 고삐를 모아 일어날 준비를 합니다.' : '앞발부터 다시 딛고 몸을 일으킵니다. 기수도 안장으로 돌아옵니다.') + change
+      : status.stage === 'chase' ? '잃어버린 거리는 그대로입니다. 고삐를 풀고 보폭을 늘립니다. ' + (ahead ? ahead.name + '와 ' + Math.max(0, (standings[status.currentRank - 2].distance - standings[status.currentRank - 1].distance) * 1600).toFixed(1) + 'M 차이를 좁힙니다.' : '실제 추월 끝에 선두 경합에 합류합니다.')
       : challenge.outcome === 'clear' ? '장애물을 넘으며 착지로 이어집니다. 네 발의 달리는 리듬을 지킵니다.' : '흔들림을 수습하고 달리는 리듬을 되찾았습니다. 실제 간격만큼 추격이 이어집니다.');
     badge = status.stage === 'impact' || status.stage === 'recover' ? '실제 감속 · 역전 기회' : status.stage === 'chase' ? '회복 · 재추격' : '코스 장애물';
     focusId = challenge.actorId;
@@ -113,7 +120,7 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
   const placements = placeRacingField(scene.camera, props.candidates, timeline, elapsed, w, h, props.paused || reduced ? 0 : delta, reset || reduced);
   drawRaceStadium(ctx, w, h, clock, reduced, true, false, { center: scene.camera.center, pixelsPerLap: w * .65 / scene.camera.span });
   // Distance follows the nose; individual sprite scales must not change the finish crossing.
-  const baseLocations = placements.map(item => ({ ...item, x: item.x - 57 * item.scale, y: item.y + racingLaneShift(incident, item.id, elapsed) * h * .035 }));
+  const baseLocations = placements.map(item => ({ ...item, x: item.x - 57 * item.scale }));
   const obstacles = placeRacingObstacles(timeline, scene.camera, placements, w);
   const trick = phase === 'race' ? activeRacingTrick(timeline, elapsed) : undefined;
   const locations = placeRacingFalls(placeRacingTrick(trick, placeRacingDuel(incident, baseLocations, obstacles, elapsed), elapsed), timeline, elapsed, h, reduced).sort((a, b) => a.y - b.y);

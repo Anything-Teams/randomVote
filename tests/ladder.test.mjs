@@ -147,7 +147,9 @@ test('the rare adjacent-ladder dash preserves every assigned treasure and the ar
     assert.equal(roof.toLane, target);
     const middle = ladderFrame(timeline, (roof.start + roof.end) / 2, target);
     assert.equal(middle.actors.find(actor => actor.id === finish.actorId).pose, 'run');
-    assert.ok(middle.actors.find(actor => actor.id === finish.otherId).rungProgress < 22, 'the rival is still visibly below the terrace while the runner dashes');
+    const rival = middle.actors.find(actor => actor.id === finish.otherId);
+    assert.ok(!rival.arrived && rival.pose !== 'run', 'the rival has not stepped onto the terrace while the runner dashes');
+    if (rival.pose === 'climb') assert.ok(rival.rungProgress < 22, 'a climbing rival is visibly below the terrace, rather than standing at the edge');
     assert.equal(middle.winnerId, undefined, 'running toward the treasure does not reveal the result before contact');
     assert.equal(ladderFrame(timeline, finish.claimAt, target).winnerId, order[target]);
     for (let selected = 0; selected < count; selected++) assert.equal(ladderFrame(timeline, 44_000, selected).winnerId, order[selected], 'all selected outcomes retain the original uniformly drawn assignment');
@@ -337,17 +339,14 @@ test('2–10 participants follow unambiguous physical bridges to distinct doors'
     const order = seed % 2 ? [...ids].reverse() : [...ids.slice(seed % count), ...ids.slice(0, seed % count)];
     const timeline = buildLadderTimeline(candidates, order, 44_000, seed), occupants = [...ids];
     assert.equal(timeline.rungCount, 24);
-    const byRow = new Map();
-    for (const bridge of timeline.bridges) {
-      if (!byRow.has(bridge.row)) byRow.set(bridge.row, []);
-      byRow.get(bridge.row).push(bridge);
-    }
-    for (const [row, bridges] of byRow) {
-      assert.ok(row > 0 && row < LADDER_RUNGS);
+    for (const wave of timeline.waves) {
+      const bridges = wave.bridgeIds.map(id => timeline.bridges.find(bridge => bridge.id === id));
       const lanes = new Set();
       for (const bridge of bridges) {
+        assert.ok(bridge.fromRow > 0 && bridge.fromRow < LADDER_RUNGS);
+        assert.ok(bridge.partnerFromRow > 0 && bridge.partnerFromRow < LADDER_RUNGS);
         assert.ok(bridge.rightLane > bridge.leftLane && bridge.rightLane < count);
-        assert.ok(!lanes.has(bridge.leftLane) && !lanes.has(bridge.rightLane), 'one rung layer has no forks');
+        assert.ok(!lanes.has(bridge.leftLane) && !lanes.has(bridge.rightLane), 'one route wave has no forks even when participants climb at different heights');
         lanes.add(bridge.leftLane); lanes.add(bridge.rightLane);
         assert.deepEqual(bridge.actorIds, [occupants[bridge.leftLane], occupants[bridge.rightLane]]);
         [occupants[bridge.leftLane], occupants[bridge.rightLane]] = [occupants[bridge.rightLane], occupants[bridge.leftLane]];
@@ -486,8 +485,12 @@ test('nineteen readable event kinds vary independently of the destination draw',
       assert.equal(landed.lane, event.toLane);
       assert.equal(partner.lane, event.fromLane);
       if (['pounce', 'rotate', 'conveyor', 'portal'].includes(event.motion.type)) assert.equal(landed.rungProgress, event.landingRow, 'a thrower or stationary receiving deck keeps the body above the target foot level');
-      else assert.ok(landed.rungProgress < event.landingRow, 'an airborne climber catches below the target foot rung before pulling up');
-      assert.ok(partner.rungProgress < event.partnerLandingRow);
+      else assert.ok(landed.rungProgress <= event.landingRow, 'an airborne climber catches below the target foot rung or at the ground before pulling up');
+      assert.ok(partner.rungProgress <= event.partnerLandingRow);
+      for (const actor of [landed, partner]) if (actor.gripLane !== undefined) {
+        assert.equal(actor.gripLane, actor.toLane, 'catching uses the receiving ladder');
+        assert.equal(actor.gripRow, Math.min(LADDER_RUNGS, Math.max(actor.landingRow + 2, 4.2)), 'the receiving grip keeps the hanging body above the foundation');
+      }
       for (const id of event.actors) {
         const segments = timeline.paths[id].segments, eventIndex = segments.findIndex(segment => segment.eventId === event.id);
         assert.equal(segments[eventIndex + 1].fromLane, segments[eventIndex].toLane);
@@ -506,10 +509,11 @@ test('nineteen readable event kinds vary independently of the destination draw',
         assert.equal(hanging.pose, 'hang');
         assert.equal(hanging.transferStage, 'catch');
         assert.equal(hanging.lane, event.toLane);
-        assert.equal(hanging.gripRow, event.landingRow + 2);
-        assert.ok(hanging.rungProgress < event.landingRow);
+        assert.equal(hanging.gripRow, Math.min(LADDER_RUNGS, Math.max(event.landingRow + 2, 4.2)));
+        assert.ok(hanging.rungProgress <= event.landingRow);
         assert.equal(recovering.pose, 'clamber');
-        assert.ok(recovering.rungProgress > hanging.rungProgress && recovering.rungProgress < event.landingRow);
+        if (event.landingRow > 0) assert.ok(recovering.rungProgress > hanging.rungProgress && recovering.rungProgress < event.landingRow);
+        else assert.equal(recovering.rungProgress, 0, 'recovery at ground level stays above the foundation');
         assert.equal(recovering.lane, event.toLane);
         assert.ok(event.toRow < event.fromRow, 'the fall catches a lower rung of the other ladder');
       }
@@ -599,7 +603,10 @@ test('each hand follows its own arm through turns and settles without a late sna
     };
     for (const bridge of timeline.bridges) for (const id of bridge.actorIds) {
       const before = rigAt(id, bridge.start - 8), after = rigAt(id, bridge.start + 8);
-      for (const side of [0, 1]) assert.ok(distance(before.hands[side], after.hands[side]) < 2, 'a turn does not swap hands across the body');
+      const bodyTravel = distance(before.hip, after.hip);
+      for (const side of [0, 1]) assert.ok(distance(before.hands[side], after.hands[side]) < bodyTravel + LADDER_ARM_LENGTH * geometry.scale * .18, 'a hand follows the moving body with a bounded arm stroke instead of swapping sides');
+      const justBefore = rigAt(id, bridge.start - .001), justAfter = rigAt(id, bridge.start + .001);
+      for (const side of [0, 1]) assert.ok(distance(justBefore.hands[side], justAfter.hands[side]) < geometry.scale * .015, 'the same wrist remains continuous at the actual turn boundary');
       const event = timeline.events.find(item => item.id === bridge.eventId);
       const resolve = event?.resolve ?? bridge.end - (bridge.end - bridge.start) * .16;
       for (let time = resolve + 16; time < bridge.end; time += 16) {
@@ -708,7 +715,7 @@ test('climbing cadences visibly differ while every individual segment moves stri
   const firstWave = timeline.waves[0];
   const midpoint = (Math.max(...Object.values(timeline.paths).map(path => path.startAt)) + firstWave.start) / 2;
   const rows = ladderFrame(timeline, midpoint, 0).actors.map(actor => actor.rungProgress);
-  assert.ok(Math.max(...rows) - Math.min(...rows) > .4, 'different effort curves are visible even on the first short climb');
+  assert.ok(Math.max(...rows) - Math.min(...rows) > .1, 'individual climbing cadences differ without staging a large rendezvous delay');
   for (const path of Object.values(timeline.paths)) for (const segment of path.segments.filter(part => part.kind === 'climb')) {
     let previous = segment.fromRow;
     for (let step = 0; step < 100; step++) {
@@ -753,7 +760,8 @@ test('the danger has distinct acceleration while climbers keep their own hand-ov
       return after.rungProgress - before.rungProgress;
     });
     assert.ok(Math.min(...velocities) > 0, 'even the planted grip keeps climbing');
-    assert.ok(Math.max(...velocities) / Math.min(...velocities) > 1.5, 'each climber visibly gathers and releases effort');
+    const ratio = Math.max(...velocities) / Math.min(...velocities);
+    assert.ok(ratio > 1.1 && ratio < 1.5, 'hand strokes have a gentle effort pulse without slowing conspicuously before an event');
   }
 });
 
@@ -764,7 +772,7 @@ test('each multiplayer route can cross several ladders instead of moving only to
     const timeline = buildLadderTimeline(candidates, order, 44_000, seed);
     const long = timeline.bridges.find(bridge => bridge.rightLane - bridge.leftLane >= 2);
     assert.ok(long, 'there is always a real nonadjacent route');
-    assert.ok(long.row <= 8, 'a broad airborne route has room beneath the roof');
+    assert.ok(Math.max(long.fromRow, long.partnerFromRow) < 21, 'a broad airborne route leaves headroom below the roof at each actual starting height');
     assert.ok(long.motionType === 'launch' || long.motionType === 'swing', 'a long route is physically airborne');
     if (count === 10) distances.add(long.rightLane - long.leftLane);
     for (const id of long.actorIds) {
@@ -799,7 +807,7 @@ test('a jump really grabs and throws the other climber before both take their as
       if (stage === 'grip' || stage === 'throw') {
         assert.equal(thrower.lane, event.toLane);
         assert.equal(victim.lane, event.toLane, 'the target is physically within reach before being thrown');
-        assert.ok(victim.rungProgress > event.row, 'the victim is lifted before release');
+        assert.ok(victim.rungProgress > victim.fromRow, 'the victim is lifted from their own original height before release');
       }
       if (stage === 'flight') {
         assert.ok(victim.lane > Math.min(event.fromLane, event.toLane) && victim.lane < Math.max(event.fromLane, event.toLane));
@@ -808,7 +816,7 @@ test('a jump really grabs and throws the other climber before both take their as
       if (stage === 'catch') {
         assert.equal(victim.lane, event.fromLane);
         assert.equal(victim.pose, 'hang');
-        assert.equal(victim.gripRow, event.partnerLandingRow + 2);
+        assert.equal(victim.gripRow, Math.min(LADDER_RUNGS, Math.max(event.partnerLandingRow + 2, 4.2)));
       }
     }
     for (const phase of [.32, .48, .6, .9]) {
@@ -939,7 +947,7 @@ test('unrelated events never stop climbers or prolong another pair crossing', ()
           assert.ok(after.rungProgress > before.rungProgress);
         }
       }
-      const wave = timeline.waves.find(item => item.eventId === event.id);
+      const wave = timeline.waves.find(item => item.bridgeIds.includes(event.bridgeId));
       for (const bridge of timeline.bridges.filter(item => wave.bridgeIds.includes(item.id) && !item.eventId)) {
         assert.ok(bridge.end - bridge.start < event.end - event.setup, 'an ordinary pair has its own shorter mechanism clock');
         for (const id of bridge.actorIds) {

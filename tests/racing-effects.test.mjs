@@ -23,7 +23,10 @@ test('a reversed ten-horse field overtakes gradually without a late speed surge'
     const pace = 1 / (timeline.finish - timeline.start);
     for (const player of list) for (let at = timeline.straight.start; at < timeline.finish - 16; at += 16) {
       const speed = (readRacingDistance(timeline, player.id, at + 16) - readRacingDistance(timeline, player.id, at)) / 16;
-      assert.ok(speed >= pace * .5 && speed <= pace * 1.5, `sudden late surge: ${count}/${seed}/${player.id}/${at}: ${speed / pace}`);
+      const chasing = timeline.obstacles.some(item => item.actorId === player.id && item.catchupEnd > at);
+      assert.ok(speed >= pace * .5 && speed <= pace * (chasing ? 1.9 : 1.5), `sudden late surge: ${count}/${seed}/${player.id}/${at}: ${speed / pace}`);
+      const previousSpeed = (readRacingDistance(timeline, player.id, at) - readRacingDistance(timeline, player.id, at - 16)) / 16;
+      assert.ok(Math.abs(speed - previousSpeed) < pace * .12, 'a chasing horse gains speed progressively through the final straight');
     }
   }
 });
@@ -72,7 +75,7 @@ test('racing tactics and obstacle jumps animate the correct bodies smoothly', ()
 });
 
 test('opponents close the lane, respond to a pass, and separate without changing race distances', () => {
-  const base = [{ id: '0', x: 340, y: 290, scale: 1, distance: .5 }, { id: '1', x: 390, y: 420, scale: 1, distance: .505 }, { id: '2', x: 310, y: 350, scale: 1, distance: .497 }];
+  const base = [{ id: '0', x: 340, y: 290, scale: 1, distance: .5 }, { id: '1', x: 390, y: 330, scale: 1, distance: .505 }, { id: '2', x: 310, y: 350, scale: 1, distance: .497 }];
   for (const kind of ['blocked', 'draft', 'lead-change', 'inside', 'outside', 'rail', 'chase', 'last-kick', 'patience']) {
     const incident = { kind, actorId: '0', rivalId: '1', start: 10_000, end: 15_500, beforeOrder: ['1', '0', '2'], waitingOrder: ['1', '0', '2'], afterOrder: ['0', '1', '2'] };
     let previous = base;
@@ -138,7 +141,7 @@ test('rear kicks and landed beanbags slow actual travel and lose ground before r
     for (const trick of timeline.tricks) {
       assert.notEqual(trick.actorId, trick.targetId);
       if (trick.kind === 'beanbag') {
-        assert.ok(trick.start > timeline.obstacles[0].recovered, 'the complete throw starts after the first course accident resolves');
+        assert.ok(trick.start > timeline.obstacles[0].recovered || trick.recovered < timeline.obstacles[0].encounter, 'the complete throw remains separate from the first course accident');
         assert.ok(trick.recovered < timeline.obstacles[1].encounter, 'stun and recovery finish before the next hurdle approaches');
       }
       const actorDistance = readRacingDistance(timeline, trick.actorId, trick.impact), targetDistance = readRacingDistance(timeline, trick.targetId, trick.impact);

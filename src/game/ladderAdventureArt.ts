@@ -62,8 +62,12 @@ export function drawLadderAdventure(c: CanvasRenderingContext2D, g: LadderGeomet
   }
   for (const bridge of bridges) {
     if (bridge.state === 'future') continue;
-    const y = g.rowY(bridge.row), chosen = bridge.state === 'active';
-    for (const lane of [bridge.leftLane, bridge.rightLane]) { const x = g.laneX(lane); rect(c, x - 7 * s, y, 14 * s, 2 * s, chosen ? '#e9bd79' : '#a2b9a1'); rect(c, x - s, y - 2 * s, 2 * s, 2 * s, chosen ? '#ffeab0' : '#568ca2'); }
+    const chosen = bridge.state === 'active';
+    for (const lane of [bridge.leftLane, bridge.rightLane]) {
+      const row = lane === (bridge.fromLane ?? bridge.leftLane) ? bridge.fromRow ?? bridge.row : bridge.partnerFromRow ?? bridge.row;
+      const x = g.laneX(lane), y = g.rowY(row);
+      rect(c, x - 7 * s, y, 14 * s, 2 * s, chosen ? '#e9bd79' : '#a2b9a1'); rect(c, x - s, y - 2 * s, 2 * s, 2 * s, chosen ? '#ffeab0' : '#568ca2');
+    }
   }
   for (let lane = 0; lane < g.laneCount; lane++) {
     const x = g.laneX(lane), chosen = lane === target, opened = occupants.has(lane), cs = Math.min(Math.max(.35, s), laneGap / 26), cy = top - 5 * cs;

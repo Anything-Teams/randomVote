@@ -1,4 +1,4 @@
-import { arenaAction, arenaBeat, arenaCatchTargets, arenaChargeState, arenaEdgeTargets, arenaShoveTargets, type ArenaRound } from './arenaLogic';
+import { arenaAction, arenaBeat, arenaCatchTargets, arenaChargeState, arenaEdgeTargets, arenaShoveTargets, arenaSpinTargets, type ArenaRound } from './arenaLogic';
 
 export type ArenaStoryState = {
   kind: string;
@@ -23,7 +23,7 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
   const turned = step === 2;
   const result = beat === 'result';
   const a = round.aggressor, v = round.victim, h = round.helper;
-  const kinds = { team: '협공', betrayal: '배신', bait: '돌진 회피', catch: '돌진 받아 던지기', shove: '몸싸움에 끼어 밀기', edge: '가장자리 밀기', counter: '역습', brace: '버티기', lift: '들배지기', final: '마지막 승부' };
+  const kinds = { team: '협공', betrayal: '배신', bait: '돌진 회피', catch: '돌진 받아 던지기', spin: '한 바퀴 회전 되치기', shove: '몸싸움에 끼어 밀기', edge: '가장자리 밀기', counter: '역습', brace: '버티기', lift: '들배지기', final: '마지막 승부' };
   const state: ArenaStoryState = {
     kind: round.tactic, label: kinds[round.tactic], action: '', left: [a], right: [v],
     relation: '↔', relationLabel: '힘겨루기', steps: ['접근', '맞잡기', '승부수'], step,
@@ -64,6 +64,17 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
       state.action = ['돌진을 기다리며 발을 넓혀 중심을 낮춥니다.', '상대가 몸을 숙이고 달려듭니다. 두 팔을 앞으로 내밀어 받습니다.', '몸통과 팔을 잡았습니다! 뒤로 한 발 물러나 충격을 받아냅니다.', '손을 놓지 않고 골반을 돌립니다. 달려온 힘으로 상대를 들어 날립니다.'][state.step];
       break;
     }
+    case 'spin': {
+      const spin = arenaSpinTargets(round, elapsed, { x: 500, y: 416 });
+      state.step = spin.stage === 'approach' || spin.stage === 'grip' ? 0 : spin.stage === 'lift' || spin.stage === 'plant' ? 1 : spin.stage === 'reverse' ? 2 : spin.stage === 'spin' ? 3 : 4;
+      state.left = state.step < 2 ? [v] : [a]; state.right = state.step < 2 ? [a] : [v];
+      state.leftLabel = state.step < 2 ? '먼저 들어 올리는 선수' : '발을 딛고 되치는 선수';
+      state.rightLabel = state.step < 2 ? '들기를 버티는 선수' : '역으로 붙잡힌 선수';
+      state.relation = state.step < 2 ? '→' : '↶'; state.relationLabel = state.step < 2 ? '들기 시도' : '한 바퀴 회전 되치기';
+      state.steps = ['몸통 붙잡기', '들렸다가 발 딛기', '역으로 잡기', '축 잡고 한 바퀴', '손 놓아 던지기'];
+      state.action = ['상대가 먼저 몸통을 잡고 들어 올릴 준비를 합니다.', '잠깐 들렸습니다! 손을 놓지 않고 발을 내려 중심을 되찾습니다.', '몸통과 팔을 다시 잡았습니다. 잡힌 쪽이 힘을 되돌립니다.', '발을 바꿔 디디며 한 바퀴 돕니다. 붙잡힌 상대도 함께 회전합니다.', '회전을 마친 순간 손을 놓았습니다! 처음 공격한 선수가 장외로 날아갑니다.'][state.step];
+      break;
+    }
     case 'shove': {
       const shove = arenaShoveTargets(round, elapsed, { x: 675, y: 430 });
       state.step = shove.stage === 'wrestle' ? 0 : shove.stage === 'approach' ? 1 : shove.stage === 'contact' ? 2 : 3;
@@ -99,7 +110,7 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
       if (beat === 'turn' && frame.liftProgress === 0) state.action = '잡은 손에 힘을 주고, 무릎을 굽혀 들어 올릴 준비를 합니다.';
       break;
   }
-  if (beat === 'impact' && round.tactic !== 'bait' && round.tactic !== 'edge' && round.tactic !== 'shove') state.action = round.tactic === 'catch' ? '돌진한 몸을 잡은 채 발을 돌렸습니다! 상대가 장외로 날아갑니다.' : '중심이 무너졌습니다! 모래판 밖으로 넘어갑니다.';
+  if (beat === 'impact' && round.tactic !== 'bait' && round.tactic !== 'edge' && round.tactic !== 'shove' && round.tactic !== 'spin') state.action = round.tactic === 'catch' ? '돌진한 몸을 잡은 채 발을 돌렸습니다! 상대가 장외로 날아갑니다.' : '중심이 무너졌습니다! 모래판 밖으로 넘어갑니다.';
   if (result) state.action = round.exchange ? round.tactic === 'team' ? '공동공격 실패! 상대가 버텨 빠져나옵니다. 동맹도 함께 물러나 다시 빈틈을 봅니다.' : round.tactic === 'betrayal' ? '배신 뒤의 역습도 버텼습니다! 서로 손을 풀고 모두 모래판을 지켰습니다.' : round.tactic === 'bait' ? '돌진을 멈춰 세웠습니다! 서로 거리를 벌리고 다음 빈틈을 봅니다.' : '버텼습니다! 서로 손을 풀고 다시 빈틈을 봅니다.' : round.final ? '마지막 상대가 장외에 착지했습니다. 우승 확정!' : '장외에 착지했습니다. 순위가 확정되고 난투는 계속됩니다.';
   return state;
 }
