@@ -6,7 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { buildRacingTimeline, createRacingIncidents, readRacingDistance } = await source('src/racingNarrative.ts');
+const { buildRacingTimeline, createRacingIncidents, readRacingDistance, RACING_STORIES } = await source('src/racingNarrative.ts');
 const { createRacingCamera, placeRacingField } = await source('src/racingCamera.ts');
 const { racingIncidentMotion } = await source('src/racingEffects.ts');
 const players = Array.from({ length: 10 }, (_, index) => ({ id: String(index), name: `선수 ${index}`, color: '#abcdef' }));
@@ -38,9 +38,9 @@ test('the camera keeps every named horse visible throughout the live race on sma
   }
 });
 
-test('physical racing events animate the correct bodies and remain continuous, seekable and reduced-motion safe', () => {
+test('racing tactics animate the correct bodies smoothly without obstacle jumps or attacks', () => {
   const base = { actorId: '0', rivalId: '1', start: 10_000, end: 15_500, beforeOrder: ['1', '0'], waitingOrder: ['1', '0'], afterOrder: ['0', '1'] };
-  for (const kind of ['hay-jump', 'puddle', 'kick-dust']) {
+  for (const { kind } of RACING_STORIES) {
     const incident = { ...base, kind };
     let activeFrames = 0;
     for (const id of ['0', '1', '2']) {
@@ -49,7 +49,9 @@ test('physical racing events animate the correct bodies and remain continuous, s
         const motion = racingIncidentMotion(incident, id, at);
         assert.deepEqual(racingIncidentMotion(incident, id, at), motion, 'pause and seek must reproduce the same pose');
         assert.deepEqual(racingIncidentMotion(incident, id, at, true), {});
-        if (id === '2' || id === '1' && kind !== 'kick-dust') assert.deepEqual(motion, {});
+        assert.equal(motion.jump, undefined, 'flat racing never asks a horse to leap over an obstacle');
+        assert.equal(motion.kick, undefined, 'horses race through gaps instead of attacking rivals');
+        if (id === '2' || id === '1' && kind !== 'gust') assert.deepEqual(motion, {});
         for (const key of new Set([...Object.keys(previous), ...Object.keys(motion)])) {
           const current = motion[key] ?? 0, prior = previous[key] ?? 0;
           assert.ok(Number.isFinite(current) && Math.abs(current) <= 1);

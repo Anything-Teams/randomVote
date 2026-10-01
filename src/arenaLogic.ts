@@ -18,7 +18,7 @@ export type ArenaThrowFrame = ArenaPoint & { groundX: number; groundY: number; h
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 const ease = (n: number) => { const t = clamp(n); return t * t * (3 - 2 * t); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
-const tactics: ArenaTactic[] = ['team', 'bait', 'counter', 'betrayal', 'brace', 'lift'];
+const soloTactics: Exclude<ArenaTactic, 'team' | 'betrayal' | 'final'>[] = ['bait', 'counter', 'brace', 'lift'];
 
 /** Shared ground movement keeps acceleration, braking and a zero-delta pause consistent. */
 export function arenaMove(body: ArenaMovingBody, target: ArenaPoint, seconds: number, speed = 116): void {
@@ -130,6 +130,18 @@ export function arenaGuardTarget(origin: ArenaPoint, index: number, elapsed: num
   return { x: origin.x + Math.sin((elapsed + index * 371) / 750) * 5, y: origin.y + Math.sin((elapsed + index * 173) / 590) * 2.3 };
 }
 
+/** Independent bouts need enough sand between them to read as separate duels. */
+export function arenaContactPoint(origin: ArenaPoint, occupied: readonly ArenaPoint[]): ArenaPoint {
+  // Five clear patches fit the full ten-person field. Each new encounter
+  // approaches the nearest free patch from its current positions.
+  const candidates = [{ x: 500, y: 430 }, { x: 325, y: 350 }, { x: 675, y: 350 }, { x: 325, y: 490 }, { x: 675, y: 490 }];
+  const clearance = (point: ArenaPoint) => Math.min(Infinity, ...occupied.map(other => Math.hypot((point.x - other.x) / 180, (point.y - other.y) / 95)));
+  const travel = (point: ArenaPoint) => Math.hypot(point.x - origin.x, point.y - origin.y);
+  const open = candidates.filter(point => clearance(point) >= 1);
+  if (open.length) return open.sort((a, b) => travel(a) - travel(b))[0];
+  return candidates.sort((a, b) => clearance(b) - clearance(a) || travel(a) - travel(b))[0];
+}
+
 export function arenaReleaseTarget(origin: ArenaPoint, center: ArenaPoint, role: ArenaActionActor['role'], progress: number): ArenaPoint {
   const amount = ease(progress), away = origin.x >= center.x ? 1 : -1;
   return { x: origin.x + away * amount * 22, y: origin.y + (role === 'victim' ? -1 : 1) * amount * 10 };
@@ -142,6 +154,9 @@ export function arenaRounds(order: string[], duration = 44_000): ArenaRound[] {
   const preliminaries = order.length - 2;
   const spacing = 30.6 * unit / Math.max(1, preliminaries);
   const seed = order.join('|').split('').reduce((hash, letter) => (hash * 31 + letter.charCodeAt(0)) >>> 0, 0);
+  // A single surprise alliance can occur in a large field. Most eliminations
+  // are one-on-one, and short matches never force an alliance into the story.
+  const allianceAt = preliminaries >= 5 && seed % 3 === 0 ? 1 + seed % (preliminaries - 2) : -1;
   const rounds = Array.from({ length: preliminaries }, (_, index): ArenaRound => {
     const living = order.slice(0, order.length - index);
     const victim = living.at(-1)!;
@@ -149,8 +164,7 @@ export function arenaRounds(order: string[], duration = 44_000): ArenaRound[] {
     const aggressor = pool[(seed + index * 7 + index * index) % pool.length];
     const helpers = pool.filter(id => id !== aggressor);
     const possibleHelper = helpers.length ? helpers[((seed >>> 5) + index * 3) % helpers.length] : undefined;
-    let tactic = possibleHelper && index === 0 ? 'team' as ArenaTactic : possibleHelper && index === Math.min(2, preliminaries - 1) ? 'betrayal' as ArenaTactic : tactics[(seed + index) % tactics.length];
-    if (!possibleHelper && (tactic === 'team' || tactic === 'betrayal')) tactic = 'counter';
+    const tactic = possibleHelper && index === allianceAt ? (seed % 2 ? 'team' : 'betrayal') : soloTactics[(seed + index) % soloTactics.length];
     const span = Math.min(5 * unit, spacing);
     const start = 2.6 * unit + (index + 1) * spacing - span;
     const impact = start + span - 1.55 * unit;
@@ -179,10 +193,8 @@ export function arenaExchange(order: string[], elapsed: number, duration = 44_00
   const epoch = Math.floor(elapsed / span);
   const aggressor = living[epoch % living.length];
   const victim = living[(epoch + 1) % living.length];
-  const possibleHelper = living.length > 2 ? living[(epoch + 2) % living.length] : undefined;
-  let tactic = tactics[epoch % tactics.length];
-  if (!possibleHelper && (tactic === 'team' || tactic === 'betrayal')) tactic = epoch % 2 ? 'bait' : 'brace';
-  return { id: `exchange-${epoch}-${living.join('-')}`, index: epoch, tactic, aggressor, helper: tactic === 'team' || tactic === 'betrayal' ? possibleHelper : undefined, victim, start: epoch * span, impact: epoch * span + 3.2 * unit, resolve: Infinity, end: (epoch + 1) * span, final: false, exchange: true };
+  const tactic = soloTactics[epoch % soloTactics.length];
+  return { id: `exchange-${epoch}-${living.join('-')}`, index: epoch, tactic, aggressor, victim, start: epoch * span, impact: epoch * span + 3.2 * unit, resolve: Infinity, end: (epoch + 1) * span, final: false, exchange: true };
 }
 
 /** Commentary and the canvas reserve the same next opponents for a physical approach. */

@@ -8,7 +8,7 @@ async function load(entry) {
 }
 const { buildLadderTimeline, ladderFrame, LADDER_STORIES, LADDER_RUNGS } = await load('src/ladderLogic.ts');
 const { createSportsOrder } = await load('src/sports.ts');
-const { createLadderGeometry, ladderArtActors, sampleLadderRig } = await load('src/game/ladderArt.ts');
+const { createLadderGeometry, ladderArtActors, sampleLadderRig, ladderSuspension, drawLadderCrossing } = await load('src/game/ladderArt.ts');
 const participants = Array.from({ length: 10 }, (_, index) => ({ id: `person-${index}`, name: `참가자 ${index + 1}`, color: '#83c7de' }));
 
 test('the actual bridge paths preserve every uniformly drawn door assignment', () => {
@@ -127,7 +127,7 @@ test('every crossing has a readable mechanism, while arrivals and trap appointme
     }));
     for (const bridge of timeline.bridges) {
       assert.ok(bridge.motionType && bridge.mechanism && bridge.start < bridge.end);
-      assert.ok(['drop', 'swing', 'launch', 'rotate', 'conveyor', 'portal', 'pounce'].includes(bridge.motionType));
+      assert.ok(['slide', 'drop', 'swing', 'launch', 'rotate', 'conveyor', 'portal', 'pounce'].includes(bridge.motionType));
       for (const id of bridge.actorIds) {
         const segment = timeline.paths[id].segments.find(part => part.bridgeId === bridge.id);
         const event = timeline.events.find(item => item.id === segment.eventId);
@@ -154,9 +154,9 @@ test('every crossing has a readable mechanism, while arrivals and trap appointme
   }
 });
 
-test('seventeen readable event kinds vary independently of the destination draw', () => {
-  assert.equal(LADDER_STORIES.length, 17);
-  assert.equal(new Set(LADDER_STORIES.map(story => story.kind)).size, 17);
+test('nineteen readable event kinds vary independently of the destination draw', () => {
+  assert.equal(LADDER_STORIES.length, 19);
+  assert.equal(new Set(LADDER_STORIES.map(story => story.kind)).size, 19);
   const seen = new Set(), order = participants.map(candidate => candidate.id).reverse();
   for (let seed = 0; seed < 160; seed++) {
     const timeline = buildLadderTimeline(participants, order, 44_000, seed);
@@ -228,7 +228,7 @@ test('seventeen readable event kinds vary independently of the destination draw'
     timeline.events.forEach(event => seen.add(event.kind));
     assert.equal(ladderFrame(timeline, 44_000, count - 1).winnerId, order[count - 1]);
   }
-  assert.equal(seen.size, 17);
+  assert.equal(seen.size, 19);
 });
 
 test('frames are pure for pause, backward seek and direct result skip', () => {
@@ -285,6 +285,30 @@ test('the drawn body stays continuous from a lateral mechanism into the destinat
     }
   }
   for (const type of ['drop', 'launch', 'swing']) assert.ok(covered.has(type));
+});
+
+test('each hand follows its own arm through turns and settles without a late snap', () => {
+  const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  for (const count of [2, 5, 10]) for (const seed of [1, 4, 12, 31]) {
+    const candidates = participants.slice(0, count);
+    const timeline = buildLadderTimeline(candidates, candidates.map(candidate => candidate.id).reverse(), 44_000, seed);
+    const geometry = createLadderGeometry(800, 600, count);
+    const read = time => ladderFrame(timeline, time, 0);
+    const rigAt = (id, time) => {
+      const actor = ladderArtActors(timeline, read(time), candidates, time, geometry, false, read).find(item => item.id === id);
+      return sampleLadderRig(actor, geometry, time);
+    };
+    for (const bridge of timeline.bridges) for (const id of bridge.actorIds) {
+      const before = rigAt(id, bridge.start - 8), after = rigAt(id, bridge.start + 8);
+      for (const side of [0, 1]) assert.ok(distance(before.hands[side], after.hands[side]) < 2, 'a turn does not swap hands across the body');
+      const event = timeline.events.find(item => item.id === bridge.eventId);
+      const resolve = event?.resolve ?? bridge.end - (bridge.end - bridge.start) * .16;
+      for (let time = resolve + 16; time < bridge.end; time += 16) {
+        const previous = rigAt(id, time - 16), current = rigAt(id, time);
+        for (const side of [0, 1]) assert.ok(distance(previous.hands[side], current.hands[side]) < 9.5, `recovery hand jumps: ${count}/${seed}/${bridge.id}/${id}/${side}/${time}: ${distance(previous.hands[side], current.hands[side])}px`);
+      }
+    }
+  }
 });
 
 test('climbing cadences visibly differ while every individual segment moves strictly forward', () => {
@@ -477,7 +501,7 @@ test('both sides of every transfer use physical arcs, keep body separation and c
       largestArc = Math.max(largestArc, Math.abs(partner.actor.rungProgress - partner.actor.fromRow));
     }
     assert.ok(closeCrossing, 'the actors really pass each other');
-    assert.ok(largestArc > 3.8, 'the partner uses a body-height physical leap, swing or thrown fall');
+    assert.ok(largestArc > (bridge.partnerMotionType === 'swing' ? .4 : 3.8), 'the partner follows the height of its actual leap, cable or thrown fall');
     assert.ok(partnerPoses.has('swing') || partnerPoses.has('launch') || ((bridge.motionType === 'pounce' || event?.kind === 'wind') && partnerPoses.has('drop')));
     for (const id of bridge.actorIds) {
       const segment = timeline.paths[id].segments.find(part => part.bridgeId === bridge.id);
@@ -576,4 +600,25 @@ test('different pairs prepare and fire independently while their own climbs reta
     assert.equal(ladderFrame(timeline, 44_000).winnerId, order[0]);
     assert.ok(Object.values(timeline.paths).every(path => path.arrivalAt >= 39_500 && path.arrivalAt <= 41_200));
   }
+});
+
+
+test('rope swings retain a fixed anchor and length, while long routes follow a cable', () => {
+  const g = createLadderGeometry(640, 500, 10), candidate = participants[0];
+  const actor = { id: candidate.id, candidate, index: 0, lane: 2, height: .5, rungProgress: 12, pose: 'swing', phase: .5, fromLane: 2, toLane: 3, fromRow: 12, landingRow: 12, arrived: false, motionType: 'swing', eventStage: 'action' };
+  let anchor;
+  for (let step = 0; step <= 100; step++) {
+    const sample = ladderSuspension({ ...actor, transferProgress: step / 100 }, g);
+    assert.equal(sample.cable, false);
+    anchor ??= sample.anchor;
+    assert.deepEqual(sample.anchor, anchor, 'a rope never moves its attachment to follow the person');
+    assert.ok(Math.abs(Math.hypot(sample.handle.x - anchor.x, sample.handle.y - anchor.y) - sample.radius) < 1e-6, 'the rope never stretches');
+    const cable = ladderSuspension({ ...actor, toLane: 8, transferProgress: step / 100 }, g);
+    assert.equal(cable.cable, true);
+    assert.ok(Math.abs(cable.handle.y - cable.anchor.y - 8 * g.scale) < 1e-6, 'a trolley keeps its short hanging strap');
+  }
+  const touched = [];
+  const context = new Proxy({}, { get: (_, key) => (...args) => touched.push([key, args]), set: (_, key, value) => { touched.push([key, value]); return true; } });
+  drawLadderCrossing(context, { ...actor, eventStage: 'setup' }, g, 0, false);
+  assert.deepEqual(touched, [], 'the next mechanism cannot be seen before the action');
 });

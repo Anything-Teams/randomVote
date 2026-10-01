@@ -2,7 +2,7 @@ import type { Candidate } from './election';
 
 export const LADDER_DURATION = 44_000;
 export const LADDER_RUNGS = 24;
-export type LadderEventKind = 'loose-rung' | 'trapdoor' | 'wind' | 'pendulum' | 'spring' | 'bird' | 'paint' | 'sticky' | 'rope-tangle' | 'balloon' | 'false-sign' | 'bucket' | 'banana' | 'zipline' | 'lights-out' | 'safety-net' | 'leap-grapple';
+export type LadderEventKind = 'loose-rung' | 'trapdoor' | 'wind' | 'pendulum' | 'spring' | 'bird' | 'paint' | 'sticky' | 'rope-tangle' | 'balloon' | 'false-sign' | 'bucket' | 'banana' | 'zipline' | 'lights-out' | 'safety-net' | 'leap-grapple' | 'crumbling-step' | 'rocket-boots';
 export type LadderMotionType = 'slide' | 'drop' | 'swing' | 'launch' | 'rotate' | 'conveyor' | 'portal' | 'pounce';
 export type LadderPose = 'idle' | 'climb' | 'bridge' | 'balance' | 'fall' | 'hang' | 'clamber' | 'win' | 'arrived' | 'slide' | 'drop' | 'swing' | 'launch' | 'rotate' | 'ride' | 'transfer';
 export type LadderEventStage = 'setup' | 'action' | 'resolve';
@@ -35,9 +35,11 @@ export const LADDER_STORIES: readonly LadderStory[] = [
   { kind: 'false-sign', title: '화살표가 길을 바꿨다', setupText: '안내 화살표가 옆 통로를 가리킵니다.', actionText: '유도문이 열려 다른 사다리로 건너갑니다!', recoveryText: '새 줄의 문을 빠져나와 다시 올라갑니다.', prop: 'sign', motion: motion('portal') },
   { kind: 'bucket', title: '물벼락에 발이 헛디뎠다', setupText: '물통이 쏟아지며 발판에서 발이 밀립니다.', actionText: '옆 사다리로 떨어져 손잡이를 낚아챕니다!', recoveryText: '새 손잡이를 잡고 몸을 다시 올립니다.', prop: 'water-bucket', motion: motion('drop', 3, 0, -.17) },
   { kind: 'banana', title: '껍질이 바꾼 사다리', setupText: '노란 껍질에 발이 밀리며 옆으로 기울어집니다.', actionText: '옆 줄 아래로 떨어지다가 새 손잡이를 붙잡습니다!', recoveryText: '다른 사다리에서 몸을 끌어올려 중심을 되찾습니다.', prop: 'banana', motion: motion('drop', 3, 0, .22) },
-  { kind: 'zipline', title: '옆 사다리로 집라인', setupText: '옆 줄까지 연결된 도르래 손잡이를 잡습니다.', actionText: '줄에 매달려 큰 호를 그리며 다른 사다리로 갑니다!', recoveryText: '새 줄에 발을 고정하고 도르래를 놓습니다.', prop: 'pulley', motion: motion('swing', 4.6, 0, -.2) },
+  { kind: 'zipline', title: '옆 사다리로 집라인', setupText: '옆 줄까지 연결된 도르래 손잡이를 잡습니다.', actionText: '도르래가 케이블을 따라 미끄러집니다. 옆 줄로 손을 뻗습니다!', recoveryText: '새 줄에 발을 고정하고 도르래를 놓습니다.', prop: 'pulley', motion: motion('swing', 4.6, 0, -.2) },
   { kind: 'lights-out', title: '비상등 이동 발판', setupText: '불이 꺼지고 옆 줄로 가는 비상 발판이 켜집니다.', actionText: '빛나는 이동 발판을 타고 다른 사다리로 갑니다!', recoveryText: '옆 줄에서 다시 켜진 불빛을 확인합니다.', prop: 'lamp', motion: motion('conveyor') },
   { kind: 'safety-net', title: '그물이 옆으로 튕긴다', setupText: '옆 사다리를 향해 탄력 있는 그물이 펼쳐집니다.', actionText: '그물의 탄력으로 높이 뛰어 다른 줄을 잡습니다!', recoveryText: '옆 사다리에서 두 발을 올리고 위를 바라봅니다.', prop: 'net', motion: motion('launch', 0, 0, .1, 4.6) },
+  { kind: 'crumbling-step', title: '발판이 와르르!', setupText: '발을 딛는 순간 발판에 금이 갑니다.', actionText: '부서진 발판 사이로 떨어지며 옆 줄 손잡이를 잡습니다!', recoveryText: '흔들리는 발을 고정하고 부스러기를 털어냅니다.', prop: 'crumbles', motion: motion('drop', 3, 0, -.18) },
+  { kind: 'rocket-boots', title: '신발에서 불꽃이!', setupText: '신발 밑에서 작은 불꽃이 튑니다.', actionText: '추진 신발이 점화됐습니다! 옆 사다리로 날아갑니다!', recoveryText: '불꽃이 꺼지자 손잡이를 잡고 발을 올립니다.', prop: 'boost-boots', motion: motion('launch', 0, 0, .12, 4.6) },
   { kind: 'leap-grapple', title: '옆줄 습격! 잡고 던지기', setupText: '옆줄을 올려다보더니 발판을 박차고 뛰어듭니다.', actionText: '올라가던 상대를 붙잡아 반대쪽 사다리로 던집니다!', recoveryText: '던져진 사람은 옆줄 손잡이를 낚아채고 다시 올라갑니다.', prop: 'grapple', motion: motion('pounce', 3, 0, .18, 3) },
 ];
 
@@ -97,7 +99,7 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
     }
   }
   if (occupants.some((id, index) => id !== doorOrder[index])) throw new Error('Ladder bridge permutation is incomplete');
-  const normalTypes: LadderMotionType[] = ['swing', 'launch', 'drop', 'swing', 'launch', 'drop', 'rotate'];
+  const normalTypes: LadderMotionType[] = ['swing', 'launch', 'drop', 'rotate', 'conveyor', 'slide', 'portal'];
   pairWaves.forEach((pairs, index) => {
     // Leave room below for a rope swing and above for a body-height leap.
     const row = pairWaves.length === 1 ? 12 : Math.round(6 + index * 14 / Math.max(1, pairWaves.length - 1));
@@ -108,13 +110,13 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
       timeline.bridges.push(bridge); wave.bridgeIds.push(bridge.id);
     }); timeline.waves.push(wave);
   });
-  const count = Math.min(pairWaves.length, 4 + (pairWaves.length <= 11 ? Math.floor(random() * 2) : 0));
+  const count = Math.min(pairWaves.length, 5);
   const required = shuffled(['swing', 'launch', 'drop', 'pounce'] as LadderMotionType[], random);
   const stories = required.map(type => {
     const choices = LADDER_STORIES.filter(story => story.motion.type === type);
     return choices[Math.floor(random() * choices.length)];
   });
-  if (count > 4) stories.push(shuffled(LADDER_STORIES.filter(story => !stories.some(used => used.kind === story.kind)), random)[0]);
+  if (count > 4) stories.push(shuffled(LADDER_STORIES.filter(story => ['rotate', 'conveyor', 'slide', 'portal'].includes(story.motion.type)), random)[0]);
   const firstEventWave = timeline.waves[Math.floor(.5 * timeline.waves.length / count)];
   if (firstEventWave && timeline.bridges.some(bridge => firstEventWave.bridgeIds.includes(bridge.id) && bridge.rightLane - bridge.leftLane > 1)) {
     const airborne = stories.findIndex(story => story.motion.type === 'launch' || story.motion.type === 'swing');

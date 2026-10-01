@@ -22,27 +22,17 @@ export function drawLadderAdventure(c: CanvasRenderingContext2D, g: LadderGeomet
   const moon = Math.max(5, Math.min(h * .062, 29)); rect(c, w * .09, h * .075, moon, moon, '#f7db9c'); rect(c, w * .09 + moon * .65, h * .075, moon * .35, moon * .22, '#bda888');
   for (let i = 0; i < 24; i++) { const x = (i * 137 + 41) % w, y = (i * 59 + 7) % Math.max(1, h * .43); rect(c, x, y, i % 6 ? 1 : 2, 1, '#e1e8cb77'); }
   for (let i = 0; i < 9; i++) { const scale = .5 + i % 3 * .5, x = ((i * 143 + time / (170 + i * 9)) % (w + 150)) - 100; cloud(c, x, h * (.22 + i % 4 * .18), scale, i % 2 ? '#d8eee81b' : '#c5e8e929'); }
-  // Distant floating islands and the patrol's little flying machines establish the raid.
+  // Distant islands keep the climbing course suspended above the clouds.
   for (let i = 0; i < 4; i++) {
     const x = w * (.08 + i * .27), y = h * (.60 + i % 2 * .17), size = clamp(w * .045, 10, 42);
     c.fillStyle = '#25465c66'; c.beginPath(); c.moveTo(x - size, y); c.lineTo(x + size, y); c.lineTo(x + size * .22, y + size * .85); c.lineTo(x - size * .4, y + size * .65); c.closePath(); c.fill(); rect(c, x - size, y - 3, size * 2, 4, '#90b8a166');
   }
-  for (let i = 0; i < 3; i++) {
-    const x = w * (.16 + i * .32) + Math.sin(time / (2600 + i * 1100) + i) * Math.min(12, w * .02), y = h * (.25 + i * .22) + Math.sin(time / 900 + i) * 2;
-    rect(c, x - 5, y, 10, 4, '#34546a'); rect(c, x - 2, y - 2, 4, 3, '#d9be81'); stroke(c, x - 10, y - 3, x + 10, y - 3, 1, '#abc7c0'); rect(c, x - 1, y + 1, 2, 2, '#f1be75');
-  }
   const left = Math.max(2, g.left - laneGap * .37), right = Math.min(w - 2, g.right + laneGap * .37), deck = top + 1;
-  // Bronze treasure airship: a raised deck, riveted hull, ropes and propellers.
-  rect(c, left, deck, right - left, 6, '#d5b27d'); rect(c, left + 2, deck + 6, right - left - 4, 10, '#754c48'); rect(c, left + 7, deck + 16, right - left - 14, 4, '#4b3d51');
-  for (let x = left + 10; x < right; x += 18) { rect(c, x, deck + 8, 3, 3, '#e7c37e'); stroke(c, x, deck + 5, x + 5, deck + 14, 1, '#a7785e'); }
-  const blimpY = Math.max(18 * s, top - 52 * s, 8), blimpW = Math.min(w * .45, 155 * s), blimpX = w * .68;
-  c.fillStyle = '#806077'; c.beginPath(); c.ellipse(blimpX, blimpY, blimpW * .5, Math.max(4, 14 * s), 0, 0, Math.PI * 2); c.fill();
-  rect(c, blimpX - blimpW * .32, blimpY - 6 * s, blimpW * .64, 4 * s, '#c99583'); rect(c, blimpX - 5 * s, blimpY - 12 * s, 10 * s, 22 * s, '#dcb67d');
-  for (const dx of [-.3, .3]) stroke(c, blimpX + blimpW * dx, blimpY + 10 * s, blimpX + blimpW * dx * .6, deck, Math.max(.6, s), '#b9c8ba88');
-  for (const x of [left + 12 * s, right - 12 * s]) {
-    const angle = time / 140; stroke(c, x, deck + 16, x, deck + 30, Math.max(1, 2 * s), '#a69881');
-    stroke(c, x - Math.cos(angle) * 8 * s, deck + 25 - Math.sin(angle) * 3 * s, x + Math.cos(angle) * 8 * s, deck + 25 + Math.sin(angle) * 3 * s, Math.max(1, 2 * s), '#e6c58a');
-  }
+  // A quiet stone terrace supports the chests and each ladder's anchor.
+  rect(c, left, deck, right - left, 3 * s, '#e4d7af');
+  rect(c, left + s, deck + 3 * s, right - left - 2 * s, 6 * s, '#6b8490');
+  rect(c, left + 3 * s, deck + 9 * s, right - left - 6 * s, 2 * s, '#304c62');
+  for (let x = left + 13 * s; x < right; x += 26 * s) stroke(c, x, deck + 3 * s, x, deck + 9 * s, Math.max(.5, s * .6), '#4b697c');
   // Long rope ladders hang freely above the clouds; timber rungs match the IK.
   for (let lane = 0; lane < g.laneCount; lane++) {
     const x = g.laneX(lane), half = 6 * s;
@@ -52,9 +42,9 @@ export function drawLadderAdventure(c: CanvasRenderingContext2D, g: LadderGeomet
     const baseWidth = Math.max(11, Math.min(laneGap * .72, 23 * s)); rect(c, x - baseWidth / 2, bottom + 1, baseWidth, 5 * s, '#a69478'); rect(c, x - baseWidth / 2 + 2 * s, bottom + 6 * s, Math.max(3, baseWidth - 4 * s), 3 * s, '#526d71');
   }
   for (const bridge of bridges) {
+    if (bridge.state === 'future') continue;
     const y = g.rowY(bridge.row), chosen = bridge.state === 'active';
     for (const lane of [bridge.leftLane, bridge.rightLane]) { const x = g.laneX(lane); rect(c, x - 7 * s, y, 14 * s, 2 * s, chosen ? '#e9bd79' : '#a2b9a1'); rect(c, x - s, y - 2 * s, 2 * s, 2 * s, chosen ? '#ffeab0' : '#568ca2'); }
-    if (bridge.state === 'future') { const x = g.laneX((bridge.leftLane + bridge.rightLane) / 2); rect(c, x - 3 * s, y - 4 * s, 6 * s, 6 * s, '#314a6b'); text(c, '?', x, y - s, Math.max(5, 5 * s), '#e9bc81'); }
   }
   for (let lane = 0; lane < g.laneCount; lane++) {
     const x = g.laneX(lane), chosen = lane === target, opened = occupants.has(lane), cs = Math.min(Math.max(.35, s), laneGap / 26), cy = top - 5 * cs;

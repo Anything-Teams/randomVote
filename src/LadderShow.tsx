@@ -8,14 +8,14 @@ import './ladder.css';
 
 export type LadderShowProps = SportsStageProps & { targetLane: number; onTargetChange?: (lane: number) => void; storySeed?: number };
 const clamp = (value: number, low = 0, high = 1) => Math.max(low, Math.min(high, value));
-const poseNames = { idle: '준비', climb: '오르는 중', bridge: '옆길 이동', balance: '중심 잡기', drop: '옆줄로 추락', fall: '옆줄로 추락', hang: '한 손으로 버티기', clamber: '몸 끌어올리기', slide: '앉아서 미끄럼', swing: '줄 타고 건너기', launch: '공중 점프', rotate: '회전 발판', ride: '벨트 이동', transfer: '이동실 탑승', win: '보물 획득', arrived: '상자 도착' };
-const deviceNames = { slide: '미끄럼 통로', swing: '줄 스윙', launch: '공중 점프', drop: '옆줄 추락·붙잡기', pounce: '뛰어들어 던지기', rotate: '회전 발판', conveyor: '이동 벨트', portal: '이동실' };
+const poseNames = { idle: '준비', climb: '오르는 중', bridge: '옆길 이동', balance: '중심 잡기', drop: '옆줄로 추락', fall: '옆줄로 추락', hang: '한 손으로 버티기', clamber: '몸 끌어올리기', slide: '앉아서 미끄럼', swing: '줄 타고 건너기', launch: '공중 점프', rotate: '회전 발판', ride: '벨트 이동', transfer: '연결다리 건너기', win: '보물 획득', arrived: '상자 도착' };
+const deviceNames = { slide: '미끄럼 통로', swing: '줄타기', launch: '공중 점프', drop: '옆줄 추락·붙잡기', pounce: '뛰어들어 던지기', rotate: '회전 발판', conveyor: '이동 벨트', portal: '열리는 연결다리' };
 const interactionNames = { approach: '옆줄로 뛰어들기', grip: '상대를 붙잡기', throw: '들어 던지기', flight: '옆줄로 던져짐', catch: '손끝으로 버티기' };
 function actorStatus(actor: LadderActorFrame | undefined, preview?: boolean) {
   if (actor?.winner) return '당첨';
   if (actor?.arrived) return `${actor.doorLane! + 1}번 상자`;
   if (preview) return '준비';
-  if (actor?.eventStage === 'setup') return '손잡이 확인';
+  if (actor?.eventStage === 'setup') return '오르는 중';
   if (actor?.eventStage === 'resolve') return actor.interaction?.role === 'thrower' ? '새 줄에 발 딛기' : '붙잡고 올라가기';
   const action = actor?.interaction;
   if (!action) return poseNames[actor?.pose ?? 'idle'];
@@ -43,7 +43,7 @@ function storyAt(event: LadderTimeline['events'][number], elapsed: number): Ladd
   return { ...event, stage, age: elapsed - event.setup, phase: clamp((elapsed - start) / (end - start)) };
 }
 function runningStories(timeline: LadderTimeline | null, elapsed: number): LadderActiveEvent[] {
-  return (timeline?.events ?? []).filter(item => elapsed >= item.setup && elapsed < item.end)
+  return (timeline?.events ?? []).filter(item => elapsed >= item.action && elapsed < item.end)
     .sort((a, b) => a.setup - b.setup).map(event => storyAt(event, elapsed));
 }
 function currentStory(timeline: LadderTimeline | null, elapsed: number): LadderActiveEvent | undefined {
@@ -68,14 +68,16 @@ function render(ctx: CanvasRenderingContext2D, props: LadderShowProps, timeline:
   const occupants = new Set((frame?.actors ?? []).filter(actor => actor.arrived).map(actor => actor.doorLane!));
   const bridges = timeline?.bridges.map(bridge => {
     const crossing = timeline.paths[bridge.actorIds[0]].segments.find(segment => segment.bridgeId === bridge.id);
-    return { ...bridge, state: (props.preview || !crossing || elapsed < crossing.start - 600 ? 'future' : elapsed < crossing.end ? 'active' : 'past') as 'future' | 'active' | 'past' };
+    const actionAt = crossing ? crossing.start + (crossing.end - crossing.start) * .14 : undefined;
+    const revealAt = bridge.eventId ? timeline.events.find(event => event.id === bridge.eventId)?.action ?? actionAt : actionAt;
+    return { ...bridge, state: (props.preview || !crossing || elapsed < (revealAt ?? crossing.start) ? 'future' : elapsed < crossing.end ? 'active' : 'past') as 'future' | 'active' | 'past' };
   }) ?? [];
   drawLadderAdventure(ctx, geometry, bridges, targetLane, clock, reduced, occupants);
   if (!props.preview && frame?.winnerId) drawLadderTreasureReveal(ctx, geometry, targetLane, clock - (timeline?.paths[frame.winnerId].arrivalAt ?? elapsed), reduced);
   const story = props.preview ? undefined : currentStory(timeline, elapsed);
   const events = props.preview ? [] : runningStories(timeline, elapsed);
   const focused = new Set(events.flatMap(event => event.actors));
-  actors.filter(actor => actor.motionType).forEach(actor => drawLadderCrossing(ctx, actor, geometry, clock, reduced, actor.id === story?.actorId));
+  actors.filter(actor => actor.motionType && actor.eventStage !== 'setup').forEach(actor => drawLadderCrossing(ctx, actor, geometry, clock, reduced, actor.id === story?.actorId));
   events.forEach(event => drawLadderEvent(ctx, toArtEvent(event), geometry, clock, reduced, actors.find(actor => actor.id === event.actorId)));
   const ordered = [...actors].sort((a, b) => b.rungProgress - (b.depthOffset ?? 0) - a.rungProgress + (a.depthOffset ?? 0));
   ordered.forEach(actor => drawLadderName(ctx, actor, geometry, focused.has(actor.id), clock, reduced));
@@ -131,18 +133,16 @@ export default function LadderShow(props: LadderShowProps) {
   const frame = timeline ? ladderFrame(timeline, props.preview ? 0 : props.elapsed, targetLane) : undefined;
   const story = props.preview ? undefined : currentStory(timeline, props.elapsed), person = props.candidates.find(candidate => candidate.id === story?.actorId), winner = props.candidates.find(candidate => candidate.id === frame?.winnerId);
   const liveStories = props.preview ? [] : runningStories(timeline, props.elapsed);
-  const crossing = frame?.actors.find(actor => actor.id === story?.actorId && actor.motionType) ?? frame?.actors.find(actor => actor.motionType && actor.eventStage === 'action') ?? frame?.actors.find(actor => actor.motionType);
+  const crossing = frame?.actors.find(actor => actor.id === story?.actorId && actor.motionType && actor.eventStage !== 'setup') ?? frame?.actors.find(actor => actor.motionType && actor.eventStage !== 'setup');
   const spotlight = frame?.actors.find(actor => actor.id === story?.actorId);
   const interaction = spotlight?.interaction, grapple = story?.kind === 'leap-grapple';
   const storyBeat = !story || props.elapsed >= story.end ? undefined : story.stage === 'setup' ? 'takeoff' : story.stage === 'resolve' ? 'pull' : interaction?.stage === 'grip' || interaction?.stage === 'throw' || interaction?.stage === 'flight' ? 'grip' : interaction?.stage === 'catch' || spotlight?.transferStage === 'catch' ? 'catch' : 'flight';
   const flightLabel = grapple ? interaction?.stage === 'flight' ? '옆줄로 던져졌다!' : '옆줄로 뛰어들어!' : story?.kind === 'wind' ? '바람에 날려!' : story?.motion.type === 'launch' ? '도약!' : story?.motion.type === 'swing' ? '줄을 타고!' : story?.motion.type === 'drop' ? '손을 뻗어!' : '옆줄로!';
   const beatLabel = storyBeat === 'takeoff' ? '발판을 딛고' : storyBeat === 'flight' ? flightLabel : storyBeat === 'grip' ? interaction?.stage === 'flight' ? '옆줄로 던져졌다!' : interaction?.stage === 'throw' ? '들어 던지기!' : '상대를 붙잡았다!' : storyBeat === 'catch' ? '손끝으로 버티기' : storyBeat === 'pull' ? '몸을 끌어올려!' : undefined;
-  const storySteps = grapple ? ['takeoff', 'flight', 'grip', 'catch', 'pull'] : ['takeoff', 'flight', 'catch', 'pull'];
-  const storyStepLabels: Record<string, string> = { takeoff: '준비', flight: grapple ? '뛰어들기' : story?.kind === 'wind' ? '날림' : story?.motion.type === 'launch' ? '도약' : story?.motion.type === 'swing' ? '스윙' : story?.motion.type === 'drop' ? '추락' : '이동', grip: '잡고 던지기', catch: '붙잡기', pull: '발 딛기' };
   const partner = props.candidates.find(candidate => candidate.id === story?.partnerId);
-  const pastStories = props.preview ? [] : timeline?.events.filter(event => props.elapsed >= event.setup).slice(-3) ?? [];
-  const title = winner ? `${winner.name} · 황금 보물 획득!` : person && story ? `${person.name}${grapple && partner ? ` ↔ ${partner.name}` : ''} · ${story.title}` : props.preview ? '하늘 보물 쟁탈전' : props.elapsed < 3000 ? '보물 비행선 습격 준비!' : props.elapsed > 35500 ? '보물상자가 눈앞에!' : '빈틈을 노리고 옆줄로!';
-  const detail = winner ? `${targetLane + 1}번 상자의 황금 보물을 차지한 ${winner.name}님이 당첨됐습니다.` : story ? storyDetail(story, spotlight, person, partner, storyBeat === 'catch') : props.preview ? '황금 보물 위치를 고르세요. 줄을 타고, 상대를 넘겨 그 상자에 도착한 사람이 당첨됩니다.' : props.elapsed < 3000 ? '비행선에 실린 황금 보물! 발판을 잡고 구름 위로 출발합니다.' : props.elapsed > 35500 ? `${targetLane + 1}번 상자가 반짝입니다. 마지막 손잡이를 누가 붙잡을까요?` : '돌풍을 버티고 옆줄의 상대를 넘어야 합니다. 보물 주인은 끝까지 모릅니다!';
+  const pastStories = props.preview ? [] : timeline?.events.filter(event => props.elapsed >= event.action).slice(-3) ?? [];
+  const title = winner ? `${winner.name} · 황금 보물 획득!` : person && story ? `${person.name}${grapple && partner ? ` ↔ ${partner.name}` : ''} · ${story.title}` : props.preview ? '하늘 보물 쟁탈전' : props.elapsed < 3000 ? '구름 위 보물로 출발!' : props.elapsed > 35500 ? '보물상자가 바로 앞!' : '모두 한 칸씩, 위로!';
+  const detail = winner ? `${targetLane + 1}번 상자의 황금 보물을 차지한 ${winner.name}님이 당첨됐습니다.` : story ? storyDetail(story, spotlight, person, partner, storyBeat === 'catch') : props.preview ? '황금 보물 위치를 고르세요. 누가 어떤 길을 갈지는 시작한 뒤에 드러납니다.' : props.elapsed < 3000 ? '손잡이를 움켜쥐고, 구름 위로 올라갑니다.' : props.elapsed > 35500 ? `${targetLane + 1}번 상자에 누가 먼저 닿을까요?` : '서로의 움직임을 살피며 사다리를 오릅니다.';
   const selectDoor = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!props.preview || !props.onTargetChange || !geometryRef.current) return;
     const box = event.currentTarget.getBoundingClientRect(), geometry = geometryRef.current, x = event.clientX - box.left, y = event.clientY - box.top;
@@ -152,11 +152,11 @@ export default function LadderShow(props: LadderShowProps) {
   };
   return <section className={`ladder-show${props.preview ? ' ladder-preview' : ''}${props.paused ? ' ladder-paused' : ''}`} aria-label="사다리 오르기 · 하늘 보물 쟁탈전" style={{ '--ladder-count': Math.max(1, props.candidates.length), '--ladder-columns': Math.min(5, Math.max(1, props.candidates.length)), '--ladder-rows': Math.ceil(Math.max(1, props.candidates.length) / 5) } as CSSProperties}>
     <div className="ladder-stage">
-      <header className="ladder-stage-header"><span><i /> SKY HEIST</span><strong>황금 보물 <b>{targetLane + 1}</b></strong><span className={storyBeat ? `ladder-beat ladder-beat-${storyBeat}` : undefined}>{props.preview ? '보물을 골라요' : frame?.complete ? '쟁탈전 종료' : beatLabel ?? '구름 위 쟁탈전'}</span></header>
+      <header className="ladder-stage-header"><span><i /> SKY CLIMB</span><strong>황금 보물 <b>{targetLane + 1}</b></strong><span className={storyBeat ? `ladder-beat ladder-beat-${storyBeat}` : undefined}>{props.preview ? '보물을 골라요' : frame?.complete ? '쟁탈전 종료' : beatLabel ?? '구름 위 쟁탈전'}</span></header>
       <div className="ladder-canvas-wrap"><canvas ref={canvas} className="ladder-canvas" onClick={selectDoor} aria-label={winner ? `${winner.name} 황금 보물 당첨` : `${Math.max(2, props.candidates.length)}개의 사다리와 ${targetLane + 1}번 황금 보물상자`} />{props.paused && <span className="ladder-pause-label">잠시 멈춤</span>}{winner && !props.preview && <div className="ladder-award" key={winner.id} role="status"><span className="ladder-award-gem" aria-hidden="true" /><small>황금 보물의 주인</small><strong>{winner.name}</strong><span>{targetLane + 1}번 보물상자 획득 · 당첨!</span></div>}</div>
       <div className={`ladder-story${winner ? ' ladder-story-result' : ''}${storyBeat ? ` ladder-story-${storyBeat}` : ''}`} style={story && !winner ? { '--ladder-story-progress': `${clamp((props.elapsed - story.setup) / (story.end - story.setup)) * 100}%` } as CSSProperties : undefined} aria-live="off">
         {story && !winner && <div className="ladder-action-meter" aria-hidden="true"><span /></div>}
-        <div className="ladder-story-top"><span>{winner ? '보물 획득 확인' : story ? `사다리 ${story.fromLane + 1} → ${story.toLane + 1} · 현장 중계${liveStories.length > 1 ? ` · ${liveStories.length}곳에서 사건 진행` : ''}` : props.preview ? '보물 비행선에 올라라' : 'LIVE HEIST'}</span>{story && !winner && <ol aria-label="사건 단계">{storySteps.map(beat => <li key={beat} className={storyBeat === beat ? 'is-current' : ''}>{storyStepLabels[beat]}</li>)}</ol>}</div>
+        <div className="ladder-story-top"><span>{winner ? '보물 획득 확인' : story ? `사다리 ${story.fromLane + 1} → ${story.toLane + 1} · 현장 중계${liveStories.length > 1 ? ` · ${liveStories.length}곳에서 사건 진행` : ''}` : props.preview ? '구름 위 보물을 향해' : 'LIVE CLIMB'}</span>{story && !winner && <span className="ladder-story-beat">{story.stage === 'resolve' ? '착지 중!' : '지금!'}</span>}</div>
         <strong>{title}</strong><p>{detail}</p>
       </div>
     </div>
@@ -167,12 +167,12 @@ export default function LadderShow(props: LadderShowProps) {
         const state = actorStatus(actor, props.preview);
         return <div key={candidate.id} className={`ladder-person${active ? ' is-story' : ''}${actor?.winner ? ' is-lucky' : ''}${actor?.arrived && !actor.winner ? ' is-arrived' : ''}`} role="listitem" style={{ '--person-color': candidate.color } as CSSProperties} title={`${candidate.name} · ${state}`}>
           <span className="ladder-person-icon">{actor?.winner ? '★' : String(index + 1).padStart(2, '0')}</span><span className="ladder-person-name">{candidate.name}</span><span className="ladder-person-status">{state}</span>
-          <span className="ladder-person-floor">{props.preview ? '습격 준비' : actor?.arrived ? '비행선 도착' : `${Math.max(0, Math.floor((actor?.height ?? 0) * 6))}단 · 사다리 ${Math.round(actor?.lane ?? index) + 1}`}</span>
+          <span className="ladder-person-floor">{props.preview ? '준비 중' : actor?.arrived ? '보물 발판 도착' : `${Math.max(0, Math.floor((actor?.height ?? 0) * 6))}단 · 사다리 ${Math.round(actor?.lane ?? index) + 1}`}</span>
         </div>;
       })}{!props.candidates.length && <p className="ladder-empty">참가자를 입력해 주세요<br /><small>2~10명이 함께 올라갑니다</small></p>}</div>
       {!props.preview && <div className="ladder-history" aria-label="횡단 현황과 지나온 사건">
         <header>지금 이 길</header>
-        <div className="ladder-live-route"><strong>{crossing ? props.candidates[crossing.index]?.name : frame?.complete ? '쟁탈전 종료' : winner ? '보물 주인 확인' : '다음 장치를 향해'}</strong><span>{crossing ? `${crossing.fromLane! + 1}번 사다리 → ${crossing.toLane! + 1}번 사다리` : frame?.complete ? '모두 비행선에 도착했습니다' : winner ? '남은 참가자도 도착하고 있어요' : '손잡이를 딛고 보물을 향해 갑니다'}</span>{crossing?.motionType && <small>{deviceNames[crossing.motionType]}</small>}</div>
+        <div className="ladder-live-route"><strong>{crossing ? props.candidates[crossing.index]?.name : frame?.complete ? '쟁탈전 종료' : winner ? '보물 주인 확인' : '사다리를 오르는 중'}</strong><span>{crossing ? `${crossing.fromLane! + 1}번 사다리 → ${crossing.toLane! + 1}번 사다리` : frame?.complete ? '모두 보물 발판에 도착했습니다' : winner ? '남은 참가자도 도착하고 있어요' : '손잡이를 딛고 보물을 향해 갑니다'}</span>{crossing?.motionType && <small>{deviceNames[crossing.motionType]}</small>}</div>
         {!!pastStories.length && <ol>{pastStories.map(event => <li key={event.id}><span>{props.elapsed >= event.end ? '착지 완료' : '진행 중'}</span><strong>{props.candidates.find(candidate => candidate.id === event.actorId)?.name}</strong><p>{event.title}</p><small>{event.fromLane + 1}번 → {event.toLane + 1}번 사다리</small></li>)}</ol>}
       </div>}
     </aside>

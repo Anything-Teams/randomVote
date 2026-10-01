@@ -13,7 +13,7 @@ const path = (ctx: CanvasRenderingContext2D, draw: () => void, fill: string | Ca
   ctx.beginPath(); draw(); ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = .7; ctx.stroke(); }
 };
 
-export type RaceHorseMotion = { gait?: 'idle' | 'walk' | 'gallop'; phase?: number; settle?: number; victory?: number; jump?: number; stumble?: number; kick?: number; crouch?: number };
+export type RaceHorseMotion = { gait?: 'idle' | 'walk' | 'gallop'; phase?: number; settle?: number; victory?: number; stumble?: number; crouch?: number };
 
 /** A grounded four-beat stride, with the rider's pelvis and boots tied to the saddle. */
 export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidate, index: number, x: number, y: number, scale: number, clock: number, speed: number, reduced: boolean, cheer = false, lean = 0, motion: RaceHorseMotion = {}) {
@@ -39,11 +39,11 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   const strideLength = mode === 'walk' ? 18 : 26 * (.90 + effort * .07);
   const stance = mode === 'walk' ? .62 : .20;
   const breath = reduced ? 0 : Math.sin(clock / 960 + index * .83) * .18;
-  const jump = reduced ? 0 : clamp(motion.jump ?? 0, 0, 1), stumble = reduced ? 0 : motion.stumble ?? 0, kick = reduced ? 0 : clamp(motion.kick ?? 0, 0, 1), crouch = reduced ? 0 : clamp(motion.crouch ?? 0, 0, 1);
+  const stumble = reduced ? 0 : motion.stumble ?? 0, crouch = reduced ? 0 : clamp(motion.crouch ?? 0, 0, 1);
   const bob = mix(breath, .15 + Math.cos((phase - .12) * Math.PI * 2) * (mode === 'walk' ? .30 : 1.15), activity);
   // Give the cannon bones room below the belly, rather than folding four short legs into it.
-  const bounce = bob - 12 + activity * (mode === 'walk' ? 2 : 4) - jump * 24 + Math.abs(stumble) * 2;
-  const pitch = activity * (clamp(lean, -8, 8) * .004 + (mode === 'walk' ? 0 : -.008 + Math.sin(cycle) * .012)) + stumble * .055 - jump * .04;
+  const bounce = bob - 12 + activity * (mode === 'walk' ? 2 : 4) + Math.abs(stumble) * 2;
+  const pitch = activity * (clamp(lean, -8, 8) * .004 + (mode === 'walk' ? 0 : -.008 + Math.sin(cycle) * .012)) + stumble * .055;
   const bodyPoint = (point: Point): Point => { const p = rotate(point, pitch); return { x: p.x, y: p.y + bounce }; };
   const coat = coats[index % coats.length], dark = ['#583928', '#302e35', '#805632', '#a09b90', '#514a41', '#773e28'][index % 6];
   const legData = [
@@ -58,7 +58,7 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
     const center = data.rear ? data.hip.x - 2 : data.hip.x + 2;
     const travelX = support ? center + strideLength * (.5 - p / stance) : mix(center - strideLength / 2, center + strideLength / 2, ease(swing)) + fold * (data.rear ? 4 : -6);
     const lift = support ? 0 : fold * (mode === 'walk' ? 3 : data.rear ? 9 : 13);
-    const hoof = { x: mix(data.rest, travelX, activity) + (data.rear ? 0 : kick * 10 - jump * 4), y: -2 - lift * activity - jump * (data.rear ? 31 : 39) - (data.rear ? 0 : kick * 13) };
+    const hoof = { x: mix(data.rest, travelX, activity), y: -2 - lift * activity };
     const hip = bodyPoint(data.hip);
     const ankle = { x: hoof.x - 1.8, y: hoof.y - 3.8 };
     if (data.rear) {
@@ -73,7 +73,7 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   });
   ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
   const alpha = ctx.globalAlpha;
-  ctx.fillStyle = '#07162455'; ctx.beginPath(); ctx.ellipse(-2, 2.5, 38 + bob * .6 - jump * 10, 4.1 - jump * 1.5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#07162455'; ctx.beginPath(); ctx.ellipse(-2, 2.5, 38 + bob * .6, 4.1, 0, 0, Math.PI * 2); ctx.fill();
   const bone = (a: Point, b: Point, width: number, color: string) => {
     ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
   };

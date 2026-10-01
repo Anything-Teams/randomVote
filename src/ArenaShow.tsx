@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import type { Candidate } from './election';
 import type { SportsStageProps } from './sports';
-import { arenaAction, arenaFocusRound, arenaGuardTarget, arenaMiniExchanges, arenaMove as move, arenaNarration, arenaPodium, arenaRanks, arenaReleaseTarget, arenaRoamingTarget, arenaRounds, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
+import { arenaAction, arenaContactPoint, arenaFocusRound, arenaGuardTarget, arenaMiniExchanges, arenaMove as move, arenaNarration, arenaPodium, arenaRanks, arenaReleaseTarget, arenaRoamingTarget, arenaRounds, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
 import { arenaDrawOrder, createArenaFighterAnimation, drawArenaFighter, drawArenaName, type ArenaActor, type ArenaFighterAnimation, type ArenaPose } from './game/ArenaFighter';
 import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
@@ -171,10 +171,12 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     actors.set(id, { candidate: props.candidates[candidateIndex], index: candidateIndex, x: body.x, y: body.y, scale: 2.04, facing: body.facing, pose, angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: body.gait, phase: cycle / 5600, power: .7, gripTarget: touching && neighbor && ['grapple', 'push', 'brace'].includes(pose) ? { x: neighbor.x - body.facing * 17, y: neighbor.y - 62 } : undefined });
     if (!reduced && !props.preview && touching && cycle > 2700 && cycle < 3150) dust(ctx, body.x + body.facing * 24, body.y, cycle - 2700, .3);
   });
+  const liveContactIds = new Set([...sim.minis.keys(), ...(exchange ? [exchange.id] : []), ...(upcoming ? [upcoming.id] : [])]);
+  const contactPoint = (id: string, origin: ArenaPoint) => arenaContactPoint(origin, [...sim.contacts].filter(([otherId]) => otherId !== id && liveContactIds.has(otherId)).map(([, contact]) => contact.center));
   // Future participants approach while the preceding throw is still resolving.
   if (upcoming) {
     const a = sim.bodies.get(upcoming.aggressor), v = sim.bodies.get(upcoming.victim);
-    if (a && v && !sim.contacts.has(upcoming.id)) sim.contacts.set(upcoming.id, { center: { x: clamp((a.x + v.x) / 2, 315, 685), y: clamp(Math.max(a.y, v.y), 390, 465) }, side: upcoming.index % 2 ? 1 : -1 });
+    if (a && v && !sim.contacts.has(upcoming.id)) sim.contacts.set(upcoming.id, { center: contactPoint(upcoming.id, { x: clamp((a.x + v.x) / 2, 315, 685), y: clamp(Math.max(a.y, v.y), 390, 465) }), side: upcoming.index % 2 ? 1 : -1 });
     const contact = sim.contacts.get(upcoming.id);
     if (contact) [upcoming.aggressor, upcoming.victim, upcoming.helper].forEach((id, role) => {
       if (!id || !preparing.has(id)) return;
@@ -188,11 +190,11 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       actor.gripTarget = undefined;
     });
   }
-  const encounters = [...sim.minis.values(), ...(exchange ? [exchange] : [])];
+  const encounters = [...(exchange ? [exchange] : []), ...sim.minis.values()];
   for (const exchange of encounters) {
     const a = sim.bodies.get(exchange.aggressor), v = sim.bodies.get(exchange.victim);
     const mini = exchange.id.startsWith('mini-');
-    if (a && v && !sim.contacts.has(exchange.id)) sim.contacts.set(exchange.id, { center: { x: clamp((a.x + v.x) / 2, mini ? 250 : 315, mini ? 750 : 685), y: clamp(Math.max(a.y, v.y), mini ? 365 : 390, mini ? 490 : 465) }, side: exchange.index % 2 ? 1 : -1 });
+    if (a && v && !sim.contacts.has(exchange.id)) sim.contacts.set(exchange.id, { center: contactPoint(exchange.id, { x: clamp((a.x + v.x) / 2, mini ? 250 : 315, mini ? 750 : 685), y: clamp(Math.max(a.y, v.y), mini ? 365 : 390, mini ? 490 : 465) }), side: exchange.index % 2 ? 1 : -1 });
     const contact = sim.contacts.get(exchange.id);
     if (contact) {
       const center = contact.center, action = arenaAction(exchange, elapsed);

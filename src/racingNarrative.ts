@@ -1,6 +1,6 @@
 import type { Candidate } from './election';
 
-export type RacingIncidentKind = 'blocked' | 'inside' | 'outside' | 'late-start' | 'gust' | 'balance' | 'draft' | 'fatigue' | 'patience' | 'lead-change' | 'rail' | 'last-kick' | 'hay-jump' | 'puddle' | 'kick-dust';
+export type RacingIncidentKind = 'blocked' | 'inside' | 'outside' | 'chase' | 'gust' | 'balance' | 'draft' | 'fatigue' | 'patience' | 'lead-change' | 'rail' | 'last-kick';
 export type RacingIncident = {
   kind: RacingIncidentKind;
   actorId: string;
@@ -17,13 +17,10 @@ export type RacingTimeline = { start: number; finish: number; ids: string[]; fin
 export type RacingStanding = { id: string; distance: number; rank: number; finished: boolean; finishTime: number };
 export type RacingIncidentStatus = { stage: 'setup' | 'action' | 'outcome'; beforeRank: number; currentRank: number; afterRank: number; opponentIds: string[]; overtakenIds: string[]; passedByIds: string[]; nextRivalId?: string };
 export const RACING_STORIES: { kind: RacingIncidentKind; title: string; setup: string; action: string; outcome: string }[] = [
-  { kind: 'hay-jump', title: '굴러온 건초를 넘어라!', setup: '바람에 굴러온 건초 더미! 기수가 고삐를 잡고 도약을 준비합니다.', action: '앞다리를 접고 훌쩍! 건초를 뛰어넘으며 다시 땅을 딛습니다.', outcome: '건초 더미를 넘고 착지했습니다. 다음 상대를 향해 질주합니다.' },
-  { kind: 'puddle', title: '물웅덩이 대탈출', setup: '트랙에 커다란 물웅덩이가 나타났습니다. 말이 앞발을 모읍니다.', action: '물 위로 점프! 발굽이 닿은 자리에서 물방울이 터집니다.', outcome: '물을 넘은 말이 발을 단단히 딛고 추격을 이어갑니다.' },
-  { kind: 'kick-dust', title: '꾀돌이의 흙먼지', setup: '말이 앞발로 흙을 긁습니다. 옆의 기수가 눈을 가립니다.', action: '앞발을 차며 흙먼지를 뿌립니다! 상대가 몸을 숙인 틈을 노립니다.', outcome: '흙먼지가 걷힙니다. 두 말은 고삐를 다시 쥐고 경합을 이어갑니다.' },
   { kind: 'blocked', title: '막힌 길, 열린 틈', setup: '앞말에 길이 막혔습니다. 고삐를 당기며 틈을 기다립니다.', action: '한 박자 기다린 기수가 안쪽 빈 공간으로 파고듭니다.', outcome: '기다린 보람이 있습니다. 안쪽 돌파에 성공했습니다.' },
   { kind: 'inside', title: '짧은 길의 승부', setup: '코너 안쪽에 말 한 마리가 지날 틈이 생겼습니다.', action: '기수가 몸을 낮춥니다. 짧은 코스로 앞말을 따라잡습니다.', outcome: '코너를 짧게 돌아 순위를 끌어올렸습니다.' },
   { kind: 'outside', title: '바깥쪽의 추격자', setup: '말들이 몰린 안쪽을 버리고 바깥으로 크게 나갑니다.', action: '거리는 길어졌지만 앞이 열렸습니다. 보폭을 넓힙니다.', outcome: '자유롭게 달린 바깥 추격이 통했습니다.' },
-  { kind: 'late-start', title: '늦은 출발의 만회', setup: '출발 때 잃은 거리를 만회하려고 숨을 고릅니다.', action: '뒤에서 힘을 모았습니다. 바깥쪽으로 길게 가속합니다.', outcome: '늦었다고 끝난 게 아닙니다. 뒤쪽에서 순위를 바꿨습니다.' },
+  { kind: 'chase', title: '뒤에서 시작된 추격', setup: '앞말과 간격이 벌어집니다. 기수가 호흡을 맞추며 힘을 모읍니다.', action: '고삐를 풀고 보폭을 늘립니다. 바깥쪽으로 길게 가속합니다.', outcome: '꾸준히 거리를 좁힌 말이 앞쪽 경합에 합류했습니다.' },
   { kind: 'gust', title: '돌풍을 가른 질주', setup: '맞바람이 불자 선두 말들의 갈기가 크게 흔들립니다.', action: '앞말의 뒤에서 바람을 피하다 옆으로 빠져나옵니다.', outcome: '바람을 버틴 뒤의 가속으로 위치가 달라졌습니다.' },
   { kind: 'balance', title: '아찔한 한 걸음', setup: '코너 진입 때 발이 미끄러집니다. 기수가 중심을 잡습니다.', action: '흔들렸던 보폭을 되찾습니다. 고삐를 다시 앞으로 풉니다.', outcome: '낙마 없이 균형을 회복했습니다. 추격은 계속됩니다.' },
   { kind: 'draft', title: '등 뒤의 숨은 힘', setup: '앞말 바로 뒤에 붙어 힘을 아끼며 달립니다.', action: '바람을 피한 말이 옆으로 빠집니다. 비축한 힘을 씁니다.', outcome: '숨겨 둔 가속이 나왔습니다. 바로 앞말을 넘어섭니다.' },
@@ -59,7 +56,7 @@ export function createRacingIncidents(candidates: Candidate[], order: string[], 
   const result: RacingIncident[] = [];
   let previousActor = '';
   for (let scene = 0; scene < 3; scene++) {
-    const pool = kinds.filter(story => scene === 0 ? ['hay-jump', 'puddle', 'kick-dust'].includes(story.kind) : scene === 1 ? ['balance', 'gust', 'fatigue'].includes(story.kind) : !['hay-jump', 'puddle', 'kick-dust', 'balance', 'gust', 'fatigue'].includes(story.kind));
+    const pool = kinds.filter(story => scene === 0 ? ['blocked', 'inside', 'outside', 'draft'].includes(story.kind) : scene === 1 ? ['balance', 'gust', 'fatigue', 'patience'].includes(story.kind) : ['chase', 'lead-change', 'rail', 'last-kick'].includes(story.kind));
     const template = pool[random(pool.length)]; kinds.splice(kinds.indexOf(template), 1);
     const losing = template.kind === 'fatigue' || template.kind === 'balance';
     const eligible = positions.filter((id, rank) => id !== previousActor && (losing ? rank < positions.length - 1 : rank > 0));
@@ -193,5 +190,5 @@ export function racingLaneShift(incident: RacingIncident | undefined, id: string
   if (!incident || incident.actorId !== id) return 0;
   const age = clamp((elapsed - incident.start) / (incident.end - incident.start));
   const move = smooth((age - .24) / .36) * (1 - smooth((age - .83) / .17));
-  return ['outside', 'late-start', 'gust', 'draft'].includes(incident.kind) ? move : ['blocked', 'inside', 'rail'].includes(incident.kind) ? -move : 0;
+  return ['outside', 'chase', 'gust', 'draft'].includes(incident.kind) ? move : ['blocked', 'inside', 'rail'].includes(incident.kind) ? -move : 0;
 }

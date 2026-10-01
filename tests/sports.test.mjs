@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 const compiled = await build({ entryPoints: ['src/sports.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createSportsOrder } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const arenaCompiled = await build({ entryPoints: ['src/arenaLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { arenaRounds, arenaRanks, arenaThrow, arenaExchange, arenaBeat, arenaAction, arenaFocusRound, arenaMiniExchanges, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaGuardTarget, arenaReleaseTarget, arenaMove, ARENA_MAX_GROUND_SPEED } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
+const { arenaRounds, arenaRanks, arenaThrow, arenaExchange, arenaBeat, arenaAction, arenaFocusRound, arenaMiniExchanges, arenaContactPoint, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaGuardTarget, arenaReleaseTarget, arenaMove, ARENA_MAX_GROUND_SPEED } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
 const fighterCompiled = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { arenaDrawOrder } = await import(`data:text/javascript;base64,${Buffer.from(fighterCompiled.outputFiles[0].text).toString('base64')}`);
 const storyCompiled = await build({ entryPoints: ['src/arenaStoryLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
@@ -269,7 +269,7 @@ test('arena approach and release share a capped motor and remain anchored to the
   assert.ok(guard.every(point => Math.hypot(point.x - origin.x, point.y - origin.y) < 6));
 });
 
-test('focus reserves physical approach and alliances use living actors without changing the draw', () => {
+test('focus reserves physical approach and uses living actors without changing the draw', () => {
   for (const duration of [40_000, 62_000]) for (let size = 2; size <= 10; size++) {
     const order = participants.slice(0, size).map(player => player.id).reverse();
     const rounds = arenaRounds(order, duration), original = [...order];
@@ -280,11 +280,31 @@ test('focus reserves physical approach and alliances use living actors without c
       for (const part of arenaAction(round, elapsed).actors) assert.ok(order.includes(part.id) && !ranks[part.id] || part.id === round.victim && elapsed >= round.impact);
       if (elapsed < round.start) assert.equal(arenaAction(round, elapsed).lift, 0, 'early arrival waits in an active guard instead of attacking ahead of time');
     }
-    if (size >= 3) assert.equal(rounds[0].tactic, 'team');
-    if (size >= 4) assert.ok(rounds.some(round => round.tactic === 'betrayal'));
+    assert.ok(rounds.filter(round => round.tactic === 'team' || round.tactic === 'betrayal').length <= 1);
+    if (size < 7) assert.ok(rounds.every(round => round.tactic !== 'team' && round.tactic !== 'betrayal'));
+    assert.ok(!['team', 'betrayal'].includes(arenaExchange(order, 1000, duration)?.tactic));
     assert.deepEqual(arenaRanks(order, duration, duration), Object.fromEntries(order.map((id, index) => [id, index + 1])));
     assert.deepEqual(order, original);
   }
+});
+
+test('alliance attacks are a sparse surprise and never repeat in background exchanges', () => {
+  let allianceGames = 0, largeGames = 0;
+  for (let size = 2; size <= 10; size++) for (let variation = 0; variation < 60; variation++) {
+    const order = Array.from({ length: size }, (_, index) => `field-${variation}-${index}`);
+    const rounds = arenaRounds(order), alliances = rounds.filter(round => ['team', 'betrayal'].includes(round.tactic));
+    assert.ok(alliances.length <= 1, `repeated alliance in a ${size}-person match`);
+    if (size < 7) assert.equal(alliances.length, 0, 'small matches use individual tactics');
+    else { largeGames++; if (alliances.length) allianceGames++; }
+    for (let elapsed = 0; elapsed < 39_000; elapsed += 1200) {
+      const exchange = arenaExchange(order, elapsed);
+      if (exchange) {
+        assert.ok(!['team', 'betrayal'].includes(exchange.tactic));
+        assert.equal(exchange.helper, undefined, 'a background bout is always a duel');
+      }
+    }
+  }
+  assert.ok(allianceGames > 0 && allianceGames < largeGames / 2, 'alliances stay available without becoming the default story');
 });
 
 test('background mini exchanges engage every available pair independently and never eliminate spectators', () => {
@@ -324,6 +344,18 @@ test('background mini exchanges engage every available pair independently and ne
     const reserved = new Set(available.slice(0, 3).map(person => person.id));
     const outside = arenaMiniExchanges(available.filter(person => !reserved.has(person.id)), 20_000);
     for (const round of outside) assert.ok(!reserved.has(round.aggressor) && !reserved.has(round.victim), 'the main event cannot also move someone in a background pair');
+  }
+});
+
+test('simultaneous duels reserve separate contacts instead of forming an accidental alliance pileup', () => {
+  for (const origin of [{ x: 500, y: 440 }, { x: 575, y: 425 }, { x: 400, y: 410 }]) {
+    const occupied = [];
+    for (let pair = 0; pair < 5; pair++) {
+      const center = arenaContactPoint(origin, occupied);
+      for (const other of occupied) assert.ok(Math.hypot((center.x - other.x) / 180, (center.y - other.y) / 95) >= .99, 'independent pairs must have distinct physical room');
+      assert.ok((center.x - 500) ** 2 / 303 ** 2 + (center.y - 416) ** 2 / 112 ** 2 < 1, 'the contact stays on the sand');
+      occupied.push(center);
+    }
   }
 });
 
@@ -428,6 +460,17 @@ test('racing incidents describe real opponents and the displayed rank changes', 
     }
   }
   assert.deepEqual([...kinds].sort(), RACING_STORIES.map(story => story.kind).sort());
+});
+
+test('flat racing only generates track tactics, pace changes and weather responses', () => {
+  const allowed = new Set(['blocked', 'inside', 'outside', 'chase', 'gust', 'balance', 'draft', 'fatigue', 'patience', 'lead-change', 'rail', 'last-kick']);
+  assert.deepEqual(new Set(RACING_STORIES.map(story => story.kind)), allowed);
+  for (let size = 2; size <= 10; size++) for (let seed = 0; seed < 100; seed++) {
+    const list = participants.slice(0, size), order = list.map(player => player.id).reverse();
+    const incidents = createRacingIncidents(list, order, 44_000, seed);
+    assert.equal(incidents.length, 3, 'removing obstacles preserves the race story pacing');
+    for (const incident of incidents) assert.ok(allowed.has(incident.kind), `unexpected obstacle or attack: ${incident.kind}`);
+  }
 });
 
 test('every racing horse moves forward through stories and converges to the drawn finish order', () => {
