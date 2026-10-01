@@ -13,8 +13,7 @@
 .goal-choice-grid button { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 5px 0; border: 1px solid #a8bbb6; background: #edf1e9; color: #344e55; font: 800 11px monospace; }
 .goal-choice-grid button[aria-pressed="true"] { background: #ffe49a; color: #162d3a; border-color: #b88936; box-shadow: 0 2px 0 #d89a45; }
 .goal-choice-grid button:hover { border-color: #b88936; }
-.goal-door-icon { width: 11px; height: 13px; border: 2px solid currentColor; box-shadow: inset -2px 0 0 #ffffff88; position: relative; }
-.goal-door-icon::after { content: ''; position: absolute; width: 2px; height: 2px; right: 1px; top: 4px; background: currentColor; }
+.goal-door-icon { width: 13px; height: 13px; clip-path: polygon(22% 0, 78% 0, 100% 35%, 50% 100%, 0 35%); background: conic-gradient(from 45deg, #fff1bf, #c58b42, #ffe39a, #ffeeb7, #dfb16a); }
 .ladder-goal-selector p { color: #687780; font-size: 11px; margin: 7px 0 0; line-height: 1.4; }
 .ladder-goal-selector p b { color: #95632e; }
 .sports-shell { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }

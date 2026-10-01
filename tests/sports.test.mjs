@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 const compiled = await build({ entryPoints: ['src/sports.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createSportsOrder } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const arenaCompiled = await build({ entryPoints: ['src/arenaLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { arenaRounds, arenaRanks, arenaThrow, arenaExchange, arenaBeat, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaMove } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
+const { arenaRounds, arenaRanks, arenaThrow, arenaExchange, arenaBeat, arenaAction, arenaFocusRound, arenaMiniExchanges, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaGuardTarget, arenaReleaseTarget, arenaMove, ARENA_MAX_GROUND_SPEED } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
 const fighterCompiled = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { arenaDrawOrder } = await import(`data:text/javascript;base64,${Buffer.from(fighterCompiled.outputFiles[0].text).toString('base64')}`);
 const storyCompiled = await build({ entryPoints: ['src/arenaStoryLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
@@ -189,30 +189,142 @@ test('non-eliminating arena exchanges keep small games active and never reuse el
   }
 });
 
-test('arena cooperation and betrayal labels follow contact beats and identify the correct participants', () => {
+test('alliances physically attack together before resistance, betrayal and a front counter', () => {
   const base = { id: 'story', index: 0, aggressor: 'attacker', helper: 'helper', victim: 'target', start: 1000, impact: 5000, resolve: 6100, end: 6600, final: false };
-  const team = { ...base, tactic: 'team' };
-  const betrayal = { ...base, tactic: 'betrayal' };
-  assert.deepEqual(arenaStoryState(team, 2600).left, ['attacker', 'helper']);
-  assert.deepEqual(arenaStoryState(team, 2600).right, ['target']);
-  const alliance = arenaStoryState(betrayal, 2600);
-  assert.deepEqual(alliance.left, ['helper']);
-  assert.deepEqual(alliance.right, ['target']);
-  assert.equal(alliance.relation, '↔');
-  assert.match(alliance.relationLabel, /임시 동맹/);
-  assert.equal(arenaBeat(betrayal, 2600).stage, 'hold');
-  const broken = arenaStoryState(betrayal, 3800);
+  const team = { ...base, tactic: 'team' }, betrayal = { ...base, tactic: 'betrayal' };
+  const joint = arenaAction(team, 4500);
+  assert.deepEqual(joint.attackers, ['attacker', 'helper']);
+  assert.equal(joint.targetId, 'target');
+  const left = joint.actors.find(actor => actor.id === 'attacker'), right = joint.actors.find(actor => actor.id === 'helper');
+  assert.ok(left.offset.x < 0 && right.offset.x > 0, 'the allies surround the same opponent');
+  assert.equal(left.gripId, 'target'); assert.equal(right.gripId, 'target');
+  assert.equal(left.pose, 'lift'); assert.equal(right.pose, 'lift');
+  assert.ok(joint.lift > 10);
+
+  const firstAttack = arenaAction(betrayal, 3200);
+  assert.equal(firstAttack.stage, 'joint-attack');
+  assert.deepEqual(firstAttack.attackers, ['target', 'helper']);
+  assert.equal(firstAttack.targetId, 'attacker');
+  assert.equal(firstAttack.liftedId, 'attacker');
+  assert.ok(firstAttack.lift > 10, 'the alliance actually lifts its opponent before it breaks');
+  assert.equal(firstAttack.actors.find(actor => actor.id === 'helper').gripId, 'attacker');
+  const alliance = arenaStoryState(betrayal, 3200);
+  assert.deepEqual(alliance.left, ['target', 'helper']);
+  assert.deepEqual(alliance.right, ['attacker']);
+  assert.match(alliance.action, /양쪽에서.*함께 들어/);
+
+  const resisting = arenaAction(betrayal, 3950);
+  assert.equal(resisting.stage, 'resist');
+  assert.equal(resisting.betrayed, false);
+  assert.ok(resisting.lift < firstAttack.lift);
+  assert.equal(resisting.actors.find(actor => actor.id === 'helper').gripId, 'attacker');
+  const released = arenaAction(betrayal, 4250);
+  assert.equal(released.stage, 'betrayal');
+  assert.equal(released.actors.find(actor => actor.id === 'helper').gripId, undefined);
+  assert.equal(released.lift, 0, 'letting go alone is not an automatic rear throw');
+  const broken = arenaStoryState(betrayal, 4250);
   assert.equal(broken.relation, '×');
-  assert.equal(broken.leftLabel, '배신한 선수');
-  assert.equal(broken.rightLabel, '버려진 선수');
   assert.match(broken.action, /손을 놓습니다/);
-  assert.equal(arenaBeat(betrayal, 3800).stage, 'turn');
+  const counter = arenaAction(betrayal, 4800);
+  assert.equal(counter.stage, 'counter');
+  assert.equal(counter.liftedId, 'target');
+  assert.equal(counter.actors.find(actor => actor.id === 'attacker').gripId, 'target');
+  assert.ok(counter.lift > 20);
   assert.equal(arenaBeat(team, 5000).stage, 'impact');
   assert.equal(arenaBeat(team, 6100).stage, 'result');
   assert.match(arenaStoryState(team, 6100).action, /장외에 착지/);
-  const survived = arenaStoryState({ ...team, exchange: true, resolve: Infinity }, 5100);
-  assert.match(survived.action, /서로 손을 풀고/);
-  assert.doesNotMatch(survived.action, /장외|우승/);
+
+  const failed = { ...team, exchange: true, resolve: Infinity };
+  assert.equal(arenaAction(failed, 5600).outcome, 'resisted');
+  assert.equal(arenaAction(failed, 5600).lift, 0);
+  assert.match(arenaStoryState(failed, 5600).action, /공동공격 실패/);
+  assert.doesNotMatch(arenaStoryState(failed, 5600).action, /장외|우승/);
+  const survived = { ...betrayal, exchange: true, resolve: Infinity };
+  assert.match(arenaStoryState(survived, 5600).action, /역습도 버텼/);
+});
+
+test('arena approach and release share a capped motor and remain anchored to the current encounter', () => {
+  for (const requested of [94, 105, 165, 190, 300, 330]) {
+    const body = { x: 220, y: 350, facing: 1 }, target = { x: 720, y: 470 };
+    for (let frame = 0; frame < 420; frame++) {
+      const before = { ...body };
+      arenaMove(body, target, .016, requested);
+      assert.ok(Math.hypot(body.x - before.x, body.y - before.y) <= Math.min(requested, ARENA_MAX_GROUND_SPEED) * .016 + 1e-6);
+      const frozen = { ...body }; arenaMove(body, target, 0, requested); assert.deepEqual(body, frozen);
+    }
+    assert.ok(Math.hypot(body.x - target.x, body.y - target.y) < 1, 'approach must walk to its target');
+  }
+  const origin = { x: 590, y: 444 }, center = { x: 550, y: 430 };
+  let previous = arenaReleaseTarget(origin, center, 'helper', 0);
+  assert.deepEqual(previous, origin);
+  for (let step = 1; step <= 100; step++) {
+    const current = arenaReleaseTarget(origin, center, 'helper', step / 100);
+    assert.ok(Math.hypot(current.x - previous.x, current.y - previous.y) < .5);
+    assert.ok(Math.hypot(current.x - origin.x, current.y - origin.y) < 25);
+    previous = current;
+  }
+  assert.deepEqual(arenaReleaseTarget({ x: origin.x - 73, y: origin.y + 9 }, { x: center.x - 73, y: center.y + 9 }, 'helper', 1), { x: previous.x - 73, y: previous.y + 9 });
+  const guard = Array.from({ length: 24 }, (_, step) => arenaGuardTarget(origin, 3, step * 100));
+  assert.ok(Math.max(...guard.map(point => point.x)) - Math.min(...guard.map(point => point.x)) > 6, 'a solitary guard keeps searching on its feet');
+  assert.ok(guard.every(point => Math.hypot(point.x - origin.x, point.y - origin.y) < 6));
+});
+
+test('focus reserves physical approach and alliances use living actors without changing the draw', () => {
+  for (const duration of [40_000, 62_000]) for (let size = 2; size <= 10; size++) {
+    const order = participants.slice(0, size).map(player => player.id).reverse();
+    const rounds = arenaRounds(order, duration), original = [...order];
+    for (let elapsed = 0; elapsed < rounds.at(-1).resolve; elapsed += 160) {
+      const round = arenaFocusRound(order, elapsed, duration);
+      if (!round) continue;
+      const ranks = arenaRanks(order, elapsed, duration);
+      for (const part of arenaAction(round, elapsed).actors) assert.ok(order.includes(part.id) && !ranks[part.id] || part.id === round.victim && elapsed >= round.impact);
+      if (elapsed < round.start) assert.equal(arenaAction(round, elapsed).lift, 0, 'early arrival waits in an active guard instead of attacking ahead of time');
+    }
+    if (size >= 3) assert.equal(rounds[0].tactic, 'team');
+    if (size >= 4) assert.ok(rounds.some(round => round.tactic === 'betrayal'));
+    assert.deepEqual(arenaRanks(order, duration, duration), Object.fromEntries(order.map((id, index) => [id, index + 1])));
+    assert.deepEqual(order, original);
+  }
+});
+
+test('background mini exchanges engage every available pair independently and never eliminate spectators', () => {
+  for (let size = 2; size <= 10; size++) {
+    const available = participants.slice(0, size).map((person, index) => ({ id: person.id, ...arenaStartingPoint(index, size) }));
+    const before = structuredClone(available), rounds = arenaMiniExchanges(available, 12_000);
+    assert.equal(rounds.length, Math.floor(size / 2));
+    assert.equal(new Set(rounds.flatMap(round => [round.aggressor, round.victim])).size, rounds.length * 2);
+    assert.equal(new Set(rounds.map(round => round.start)).size, rounds.length, 'each pair starts on its own beat');
+    assert.deepEqual(arenaMiniExchanges(available, 12_000), rounds);
+    for (const round of rounds) {
+      assert.ok(round.exchange && !round.final && round.resolve === Infinity);
+      assert.notEqual(round.aggressor, round.victim);
+      const bodies = new Map([round.aggressor, round.victim].map(id => [id, { ...available.find(person => person.id === id), facing: 1 }]));
+      const originalA = bodies.get(round.aggressor), originalV = bodies.get(round.victim);
+      const center = { x: (originalA.x + originalV.x) / 2, y: (originalA.y + originalV.y) / 2 };
+      const seen = new Set(), poses = new Set();
+      let actualContact = false;
+      for (let time = round.start; time < round.end; time += 16) {
+        const action = arenaAction(round, time); seen.add(action.stage);
+        for (const part of action.actors) {
+          poses.add(part.pose);
+          const body = bodies.get(part.id), previous = { ...body };
+          arenaMove(body, { x: center.x + part.offset.x, y: center.y + part.offset.y }, .016, 165);
+          assert.ok(Math.hypot(body.x - previous.x, body.y - previous.y) <= ARENA_MAX_GROUND_SPEED * .016 + 1e-6);
+        }
+        const attacker = bodies.get(round.aggressor), defender = bodies.get(round.victim);
+        if (action.actors.some(part => part.gripId) && Math.hypot(attacker.x - defender.x, attacker.y - defender.y) < 86) actualContact = true;
+      }
+      assert.ok(seen.has('approach') && seen.has('link') && seen.has('lift') && seen.has('release'), 'mini fights contain contact and a response, rather than only an idle loop');
+      if (round.tactic === 'bait') assert.ok(poses.has('dodge') && poses.has('run'), 'a feint has an actual charge and a sidestep');
+      else assert.ok(actualContact && poses.has('brace') && poses.has('lift'), 'a background pair reaches contact, blocks and counters');
+      assert.equal(arenaAction(round, round.impact + 1000).outcome, 'resisted');
+      assert.equal(arenaAction(round, round.impact + 1000).lift, 0);
+    }
+    assert.deepEqual(available, before);
+    const reserved = new Set(available.slice(0, 3).map(person => person.id));
+    const outside = arenaMiniExchanges(available.filter(person => !reserved.has(person.id)), 20_000);
+    for (const round of outside) assert.ok(!reserved.has(round.aggressor) && !reserved.has(round.victim), 'the main event cannot also move someone in a background pair');
+  }
 });
 
 test('arena awards the actual top three in fixed rank positions and waits for runner-up recovery', () => {

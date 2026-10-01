@@ -16,7 +16,7 @@ const games = {
   election: { label: '투표', noun: '후보', title: '오늘의 당선자를 뽑아볼까요?', detail: '60가지 사건이 판세를 뒤흔드는 픽셀 투표 쇼.', action: '투표 시작', instruction: '몸싸움과 돌발 사건을 지나, 마지막 한 표의 주인공을 지켜보세요.' },
   racing: { label: '경마', noun: '말', title: '결승선까지, 순위는 모릅니다.', detail: '출발 게이트부터 마지막 직선까지, 순위를 뒤집는 픽셀 경마.', action: '경주 시작', instruction: '코너 추월부터 마지막 질주와 사진 판정까지, 모든 말의 순위를 지켜보세요.' },
   arena: { label: '난투', noun: '선수', title: '모래판의 마지막 한 사람은?', detail: '전원이 동시에 맞붙는 모래판. 끝까지 버티는 픽셀 장외 난투.', action: '난투 시작', instruction: '모두 한꺼번에 싸웁니다. 모래판 밖으로 밀려난 순서대로 순위가 확정됩니다.' },
-  ladder: { label: '사다리', noun: '참가자', title: '행운의 문에는 누가 들어갈까요?', detail: '줄을 타고, 뛰어 건너고, 떨어져 붙잡는 아슬아슬한 사다리 모험.', action: '사다리 오르기 시작', instruction: '당첨 문을 고르세요. 서로 다른 옆길을 건너 그 문에 들어온 사람이 당첨됩니다.' },
+  ladder: { label: '사다리', noun: '참가자', title: '하늘 보물은 누구 손에?', detail: '보물 비행선으로 올라가는 쟁탈전. 옆줄 습격과 돌풍을 버티고 황금 보물을 차지하세요.', action: '보물 쟁탈전 시작', instruction: '황금 보물이 든 상자를 고르세요. 그 상자에 도착한 사람이 당첨됩니다.' },
 } as const;
 const gameOrder = ['arena', 'racing', 'election', 'ladder'] as const;
 
@@ -208,11 +208,11 @@ export default function App() {
                   {templates.map((template, index) => <button key={template} type="button" aria-pressed={topic === template} className={topic === template ? 'template active' : 'template'} onClick={() => { setTopic(template); setError(''); }}>{['☕', '🍽', '🎯', '🧹', '🎤'][index]} {['커피 쏘기', '점심값', '벌칙자', '청소 담당', '발표자'][index]}</button>)}
                 </div>
               </div> : mode === 'ladder' ? <fieldset className="ladder-goal-selector">
-                <legend className="field-label">당첨 지점 선택</legend>
+                <legend className="field-label">황금 보물 위치 선택</legend>
                 <div className="goal-choice-grid" style={{ '--goal-columns': ladderLaneCount, '--goal-mobile-columns': ladderLaneCount > 5 ? Math.ceil(ladderLaneCount / 2) : ladderLaneCount } as CSSProperties}>
                   {Array.from({ length: ladderLaneCount }, (_, lane) => <button key={lane} type="button" aria-label={`${lane + 1}번 당첨 지점`} aria-pressed={targetLane === lane} onClick={() => { setLadderTarget(lane); setError(''); }}><span className="goal-door-icon" aria-hidden="true" /><span>{String(lane + 1).padStart(2, '0')}</span></button>)}
                 </div>
-                <p><b>{targetLane + 1}번 문</b>에 들어간 사람이 당첨됩니다. 옆길과 함정을 지켜보세요.</p>
+                <p><b>{targetLane + 1}번 상자</b>의 보물을 차지한 사람이 당첨됩니다. 옆줄 습격과 함정을 지켜보세요.</p>
               </fieldset> : <div className="game-instruction"><b>{mode === 'racing' ? '한 번의 경주, 모든 순위' : '전원 동시 장외 난투'}</b><p>{game.instruction}</p></div>}
               {error && <p className="error-message" role="alert">{error}</p>}
               <button className="start-button" type="button" onClick={start}>{game.action} <span aria-hidden="true">▶</span></button>
@@ -229,7 +229,7 @@ export default function App() {
           </div>
         ) : (
           mode === 'election' ? result && snapshot && <BroadcastShow result={result} frame={snapshot} drama={drama} phase={phase} topic={topic} elapsed={elapsed} finished={status === 'finished'} runId={runId} reducedMotion={reducedMotion} paused={paused} onPause={togglePause} onSkip={finishNow} onReplay={start} onReset={reset} /> : <section className={`sports-shell ${paused ? 'is-paused' : ''}`} aria-label={`${game.label} 경기`}>
-            <div className="sports-toolbar"><span><b>{game.label}</b> {status === 'finished' ? mode === 'ladder' ? '당첨자 확정' : '최종 순위 확정' : paused ? '일시정지' : mode === 'ladder' ? '행운의 문을 향해' : '경기 중계 중'}</span>{status !== 'finished' && <button type="button" className="playback-button" onClick={togglePause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div>
+            <div className="sports-toolbar"><span><b>{game.label}</b> {status === 'finished' ? mode === 'ladder' ? '보물 주인 확정' : '최종 순위 확정' : paused ? '일시정지' : mode === 'ladder' ? '보물 비행선을 향해' : '경기 중계 중'}</span>{status !== 'finished' && <button type="button" className="playback-button" onClick={togglePause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div>
             <div className="sports-body" key={`${mode}-${runId}`}>{sportsScene}</div>
             <div className="sports-actions">{status === 'finished' ? <><button type="button" className="start-button" onClick={start}>같은 명단으로 다시 뽑기 <span aria-hidden="true">▶</span></button><button type="button" className="secondary-button" onClick={reset}>명단 수정하기</button></> : <button type="button" className="secondary-button" onClick={finishNow}>연출 건너뛰고 {mode === 'ladder' ? '당첨자' : '순위'} 보기</button>}</div>
           </section>

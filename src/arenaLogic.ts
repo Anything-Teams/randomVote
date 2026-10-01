@@ -8,6 +8,12 @@ export type ArenaPodiumPlace = ArenaPoint & { id: string; rank: 1 | 2 | 3; ready
 export type ArenaRoamingStage = 'approach' | 'contact' | 'sidestep' | 'watch';
 export type ArenaBeatStage = 'approach' | 'hold' | 'turn' | 'impact' | 'result';
 export type ArenaBeat = { stage: ArenaBeatStage; progress: number; weightProgress: number; liftProgress: number };
+export type ArenaActionStage = 'approach' | 'link' | 'joint-attack' | 'resist' | 'betrayal' | 'counter' | 'lift' | 'throw' | 'release';
+export type ArenaActionPose = 'guard' | 'grapple' | 'brace' | 'push' | 'lift' | 'dodge' | 'run' | 'throw';
+export type ArenaActionActor = { id: string; role: 'aggressor' | 'victim' | 'helper'; offset: ArenaPoint; pose: ArenaActionPose; phase: number; gripId?: string; badge: string };
+export type ArenaAction = { stage: ArenaActionStage; actors: ArenaActionActor[]; attackers: string[]; targetId: string; allies: string[]; liftedId?: string; lift: number; outcome: 'pending' | 'success' | 'resisted' | 'betrayed'; betrayed: boolean };
+export const ARENA_MAX_GROUND_SPEED = 165;
+export const ARENA_LIFT_HEIGHT = 42;
 export type ArenaThrowFrame = ArenaPoint & { groundX: number; groundY: number; height: number; angle: number; phase: number; stage: 'hold' | 'flight' | 'land' | 'roll' | 'recover' | 'walk' };
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 const ease = (n: number) => { const t = clamp(n); return t * t * (3 - 2 * t); };
@@ -17,6 +23,7 @@ const tactics: ArenaTactic[] = ['team', 'bait', 'counter', 'betrayal', 'brace', 
 /** Shared ground movement keeps acceleration, braking and a zero-delta pause consistent. */
 export function arenaMove(body: ArenaMovingBody, target: ArenaPoint, seconds: number, speed = 116): void {
   if (seconds <= 0) return;
+  speed = Math.min(ARENA_MAX_GROUND_SPEED, Math.max(0, speed));
   const dx = target.x - body.x, dy = target.y - body.y, distance = Math.hypot(dx, dy);
   const acceleration = speed * 5.8, brake = speed * 7;
   const wantedSpeed = Math.min(speed, Math.sqrt(2 * brake * Math.max(0, distance - .6)));
@@ -35,6 +42,52 @@ export function arenaBeat(round: ArenaRound, elapsed: number): ArenaBeat {
   const progress = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
   const stage: ArenaBeatStage = elapsed >= round.impact ? round.exchange || elapsed >= round.resolve ? 'result' : 'impact' : progress < .30 ? 'approach' : progress < .52 ? 'hold' : 'turn';
   return { stage, progress, weightProgress: ease((progress - .52) / .20), liftProgress: ease((progress - .72) / .28) };
+}
+
+/** Body contacts and commentary share an actual attack, rather than only an alliance label. */
+export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
+  const beat = arenaBeat(round, elapsed), p = beat.progress, a = round.aggressor, v = round.victim, h = round.helper;
+  const post = elapsed >= round.impact, release = round.exchange && post;
+  const action: ArenaAction = { stage: release ? 'release' : post ? 'throw' : beat.stage === 'approach' ? 'approach' : beat.stage === 'hold' ? 'link' : 'lift', actors: [], attackers: [a], targetId: v, allies: [], liftedId: v, lift: beat.liftProgress * (round.exchange ? 18 : ARENA_LIFT_HEIGHT), outcome: release ? 'resisted' : elapsed >= round.resolve ? 'success' : 'pending', betrayed: false };
+  const actor = (id: string, role: ArenaActionActor['role'], x: number, y: number, pose: ArenaActionPose, phase: number, gripId: string | undefined, badge: string) => ({ id, role, offset: { x, y }, pose, phase, gripId, badge });
+  const phase = p >= .52 ? beat.liftProgress : clamp((p - .30) / .22);
+  if (round.tactic === 'team' && h) {
+    action.stage = release ? 'release' : post ? 'throw' : p < .30 ? 'approach' : p < .52 ? 'link' : 'joint-attack';
+    action.attackers = [a, h]; action.allies = [a, h];
+    action.actors = [actor(a, 'aggressor', -44, 0, p >= .52 ? 'lift' : 'grapple', phase, v, '함께 공격'), actor(v, 'victim', 0, 0, 'brace', phase, a, release ? '공격 버팀' : '양쪽에 대응'), actor(h, 'helper', 44, 0, p >= .52 ? 'lift' : 'grapple', phase, v, '함께 공격')];
+  } else if (round.tactic === 'betrayal' && h) {
+    const attack = ease((p - .34) / .24), resist = ease((p - .64) / .12), broken = p >= .76;
+    const counter = ease((p - .84) / .16);
+    action.stage = release ? 'release' : post ? 'throw' : p < .22 ? 'approach' : p < .34 ? 'link' : p < .64 ? 'joint-attack' : p < .76 ? 'resist' : p < .84 ? 'betrayal' : 'counter';
+    action.betrayed = broken; action.allies = [v, h]; action.attackers = broken ? [a] : [v, h]; action.targetId = broken ? v : a;
+    action.liftedId = broken ? v : a;
+    // The alliance first raises its opponent. That opponent plants a foot and
+    // resists before the helper lets go; the counter is an observable new action.
+    action.lift = broken ? counter * (round.exchange ? 18 : ARENA_LIFT_HEIGHT) : attack * (1 - resist) * 20;
+    action.outcome = release ? 'resisted' : broken ? 'betrayed' : action.stage === 'resist' ? 'resisted' : 'pending';
+    action.actors = [
+      actor(a, 'aggressor', 0, 0, broken ? p >= .84 ? 'lift' : 'grapple' : 'brace', broken ? counter : resist, v, broken ? '앞에서 역습' : '공동공격 버팀'),
+      actor(v, 'victim', -44, 0, broken ? 'brace' : p >= .34 ? 'lift' : 'grapple', broken ? counter : attack, a, broken ? '혼자 대응' : '동맹 공격'),
+      actor(h, 'helper', 44 + ease((p - .76) / .15) * 26, ease((p - .76) / .15) * 22, broken ? 'dodge' : p >= .34 ? 'lift' : 'grapple', attack, broken ? undefined : a, broken ? '손 놓음' : '동맹 공격'),
+    ];
+  } else {
+    let ax = -25, ay = 0, vx = 25, vy = 0;
+    let ap: ArenaActionPose = p < .30 ? 'guard' : 'grapple', vp: ArenaActionPose = 'brace';
+    if (round.tactic === 'bait') {
+      const dodge = ease((p - .52) / .22), charge = ease((p - .32) / .68);
+      ax = -30 - dodge * 23; ay = dodge * 43; vx = 102 - charge * 188; vy = -charge * 12;
+      ap = p < .52 ? 'guard' : 'dodge'; vp = p < .30 ? 'guard' : 'run'; action.lift = 0; action.liftedId = undefined;
+    } else if (round.tactic === 'counter' || round.tactic === 'brace') {
+      const press = Math.sin(clamp((p - .30) / .22) * Math.PI / 2) * 12;
+      const shift = p < .52 ? press : press * (1 - beat.weightProgress); ax -= shift; vx -= shift;
+      ap = p < .52 ? 'brace' : 'lift'; vp = p < .52 ? 'push' : 'brace';
+    } else { ap = p < .52 ? 'grapple' : 'lift'; }
+    action.actors = [actor(a, 'aggressor', ax, ay, ap, phase, round.tactic === 'bait' ? undefined : v, '공격'), actor(v, 'victim', vx, vy, vp, phase, round.tactic === 'bait' ? undefined : a, '대응')];
+  }
+  if (release) { action.lift *= 1 - ease((elapsed - round.impact) / Math.max(1, (round.end - round.impact) * .24)); action.actors.forEach(part => { part.pose = part.id === action.targetId ? 'dodge' : 'guard'; part.gripId = undefined; }); }
+  else if (post) action.actors.forEach(part => { if (part.id !== v) { part.pose = elapsed - round.impact < 350 * (round.resolve - round.impact) / 1100 ? 'throw' : 'guard'; part.gripId = undefined; } });
+  if (action.stage === 'approach') action.actors.forEach(part => { part.pose = 'guard'; part.gripId = undefined; });
+  return action;
 }
 
 /** Even field coverage without left/right starting teams. The ellipse stays inside the sand. */
@@ -72,6 +125,16 @@ export function arenaRoamingTarget(origin: ArenaPoint, opponent: ArenaPoint | un
   return target;
 }
 
+/** Small live guard steps stay anchored to the present encounter, never a starting slot. */
+export function arenaGuardTarget(origin: ArenaPoint, index: number, elapsed: number): ArenaPoint {
+  return { x: origin.x + Math.sin((elapsed + index * 371) / 750) * 5, y: origin.y + Math.sin((elapsed + index * 173) / 590) * 2.3 };
+}
+
+export function arenaReleaseTarget(origin: ArenaPoint, center: ArenaPoint, role: ArenaActionActor['role'], progress: number): ArenaPoint {
+  const amount = ease(progress), away = origin.x >= center.x ? 1 : -1;
+  return { x: origin.x + away * amount * 22, y: origin.y + (role === 'victim' ? -1 : 1) * amount * 10 };
+}
+
 /** Ranking is supplied by the uniform draw; choreography never redraws a result. */
 export function arenaRounds(order: string[], duration = 44_000): ArenaRound[] {
   if (order.length < 2) return [];
@@ -86,7 +149,7 @@ export function arenaRounds(order: string[], duration = 44_000): ArenaRound[] {
     const aggressor = pool[(seed + index * 7 + index * index) % pool.length];
     const helpers = pool.filter(id => id !== aggressor);
     const possibleHelper = helpers.length ? helpers[((seed >>> 5) + index * 3) % helpers.length] : undefined;
-    let tactic = tactics[(seed + index) % tactics.length];
+    let tactic = possibleHelper && index === 0 ? 'team' as ArenaTactic : possibleHelper && index === Math.min(2, preliminaries - 1) ? 'betrayal' as ArenaTactic : tactics[(seed + index) % tactics.length];
     if (!possibleHelper && (tactic === 'team' || tactic === 'betrayal')) tactic = 'counter';
     const span = Math.min(5 * unit, spacing);
     const start = 2.6 * unit + (index + 1) * spacing - span;
@@ -107,9 +170,9 @@ export function arenaRanks(order: string[], elapsed: number, duration = 44_000):
 }
 
 /** Non-eliminating exchanges keep two- and three-person games active between exits. */
-export function arenaExchange(order: string[], elapsed: number, duration = 44_000): ArenaRound | undefined {
+export function arenaExchange(order: string[], elapsed: number, duration = 44_000, reserved: readonly string[] = []): ArenaRound | undefined {
   const ranks = arenaRanks(order, elapsed, duration);
-  const living = order.filter(id => !ranks[id]);
+  const living = order.filter(id => !ranks[id] && !reserved.includes(id));
   if (living.length < 2) return undefined;
   const unit = duration / 44;
   const span = 4.8 * unit;
@@ -119,7 +182,33 @@ export function arenaExchange(order: string[], elapsed: number, duration = 44_00
   const possibleHelper = living.length > 2 ? living[(epoch + 2) % living.length] : undefined;
   let tactic = tactics[epoch % tactics.length];
   if (!possibleHelper && (tactic === 'team' || tactic === 'betrayal')) tactic = epoch % 2 ? 'bait' : 'brace';
-  return { id: `exchange-${epoch}`, index: epoch, tactic, aggressor, helper: tactic === 'team' || tactic === 'betrayal' ? possibleHelper : undefined, victim, start: epoch * span, impact: epoch * span + 3.2 * unit, resolve: Infinity, end: (epoch + 1) * span, final: false, exchange: true };
+  return { id: `exchange-${epoch}-${living.join('-')}`, index: epoch, tactic, aggressor, helper: tactic === 'team' || tactic === 'betrayal' ? possibleHelper : undefined, victim, start: epoch * span, impact: epoch * span + 3.2 * unit, resolve: Infinity, end: (epoch + 1) * span, final: false, exchange: true };
+}
+
+/** Commentary and the canvas reserve the same next opponents for a physical approach. */
+export function arenaFocusRound(order: string[], elapsed: number, duration = 44_000): ArenaRound | undefined {
+  const rounds = arenaRounds(order, duration), current = rounds.find(round => elapsed >= round.start && elapsed < round.end);
+  if (current) return current;
+  const upcoming = rounds.find(round => round.start > elapsed && round.start - elapsed < 2400 * duration / 44_000);
+  const reserved = upcoming ? [upcoming.aggressor, upcoming.victim, upcoming.helper].filter((id): id is string => !!id) : [];
+  return arenaExchange(order, elapsed, duration, reserved) ?? upcoming;
+}
+
+/** Background bouts choose a nearby available opponent and never eliminate anyone. */
+export function arenaMiniExchanges(available: readonly (ArenaPoint & { id: string })[], elapsed: number, duration = 44_000): ArenaRound[] {
+  const pending = [...available], rounds: ArenaRound[] = [], unit = duration / 44_000;
+  const hash = (id: string) => id.split('').reduce((value, char) => (value * 31 + char.charCodeAt(0)) >>> 0, 0);
+  pending.sort((a, b) => hash(a.id) - hash(b.id));
+  while (pending.length > 1) {
+    const a = pending.shift()!;
+    let nearest = 0;
+    for (let index = 1; index < pending.length; index++) if (Math.hypot(pending[index].x - a.x, pending[index].y - a.y) < Math.hypot(pending[nearest].x - a.x, pending[nearest].y - a.y)) nearest = index;
+    const [v] = pending.splice(nearest, 1), seed = hash(a.id + v.id) + Math.floor(elapsed / 800);
+    const start = elapsed + (rounds.length * 270 + seed % 150) * unit;
+    const tactic = (['brace', 'counter', 'bait'] as ArenaTactic[])[seed % 3];
+    rounds.push({ id: 'mini-' + Math.round(elapsed) + '-' + a.id + '-' + v.id, index: seed, tactic, aggressor: a.id, victim: v.id, start, impact: start + 3200 * unit, resolve: Infinity, end: start + 4800 * unit, final: false, exchange: true });
+  }
+  return rounds;
 }
 
 /** The first 120 ms holds the contact. Flight and ground recovery remain separate. */
@@ -154,6 +243,21 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
   if (preview) return { title: '장외 난투 · 모두 함께 맞붙습니다', detail: '색 띠와 번호로 구분합니다. 마지막까지 모래판에 남은 참가자가 우승합니다.' };
   if (!round) return { title: '여러 무리가 동시에 힘겨루기', detail: '접근하고 샅바를 잡고, 상대의 힘을 버티며 다음 빈틈을 엿봅니다.' };
   const a = actor(round.aggressor), v = actor(round.victim), h = actor(round.helper);
+  const action = arenaAction(round, elapsed);
+  if (round.tactic === 'betrayal' && elapsed < round.resolve) {
+    const details: Partial<Record<ArenaActionStage, string>> = {
+      approach: `${v} · ${h}, 동맹을 맺고 ${a}의 양쪽으로 접근합니다.`,
+      link: `${v} · ${h}, 같은 상대를 양쪽에서 잡고 함께 공격할 준비를 합니다.`,
+      'joint-attack': `${v} · ${h}, ${a}를 함께 밀고 들어 올립니다.`,
+      resist: `${a}, 발을 다시 딛고 버텼습니다. 동맹의 공동공격이 막혔습니다.`,
+      betrayal: `${h}, 손을 놓고 물러납니다. 함께 공격하던 ${v}가 혼자 남았습니다.`,
+      counter: `${a}, 앞에서 ${v}를 다시 붙잡아 되칩니다.`,
+      throw: `${a}, 공동공격을 버틴 뒤 역습했습니다. ${v}가 장외로 넘어갑니다.`,
+      release: `${v}, 배신 뒤의 역습을 버텨냈습니다. 모두 모래판을 지켰습니다.`,
+    };
+    return { title: action.stage === 'joint-attack' ? '동맹의 공동공격!' : action.stage === 'resist' ? '버텼다! 동맹 공격이 막혔다' : action.betrayed ? round.exchange && elapsed >= round.impact ? '배신 뒤의 역습도 버텨냈다' : '공동공격 뒤 배신 · 앞에서 역습' : '동맹 결성 · 함께 공격 준비', detail: details[action.stage] ?? '' };
+  }
+  if (round.tactic === 'team' && round.exchange && elapsed >= round.impact) return { title: '동맹 공동공격 실패 · 상대가 버텼다!', detail: `${a} · ${h}, 함께 공격했지만 ${v}가 빠져나왔습니다. 동맹은 함께 물러나 다음 빈틈을 봅니다.` };
   if (round.exchange && elapsed >= round.impact) return { title: '버텼다! 다시 빈틈을 살핍니다', detail: `${a} · ${v}, 모두 모래판을 지켰습니다. 손을 풀고 다음 빈틈을 봅니다.` };
   if (elapsed >= round.resolve) return { title: round.final ? `${a}, 오늘의 장사!` : `장외! ${v} · ${order.indexOf(round.victim) + 1}위 확정`, detail: round.final ? `버티던 마지막 상대를 뒤집었습니다. ${order.length >= 3 ? '1·2·3위 선수들이' : '1·2위 선수들이'} 시상대에서 인사합니다.` : `${v}, 모래판 밖에 착지했습니다. 나머지 선수들의 난투는 계속됩니다.` };
   const titles: Record<ArenaTactic, string> = { team: '협공 · 한 명은 길을 막고, 한 명은 민다', bait: '미끼 · 돌진을 기다렸다가 옆으로 피한다', counter: '역습 · 밀리던 쪽이 중심을 낮춘다', betrayal: '배신 · 등을 맡긴 순간 방향을 바꾼다', brace: '버티기 · 발을 박고 힘을 되돌린다', lift: '들배지기 · 체중을 싣고 들어 올린다', final: '마지막 두 명 · 최후의 버티기' };
@@ -161,7 +265,7 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
     team: `${h}, ${v}의 퇴로를 막습니다. ${a}, 앞에서 함께 밀어냅니다.`,
     bait: `${a}, 틈을 보입니다. ${v}의 돌진을 옆으로 피해 관성을 이용합니다.`,
     counter: `${a}, 낮게 파고들어 샅바를 잡습니다. ${v}의 밀기를 되칩니다.`,
-    betrayal: `${h}, ${v}의 등을 놓습니다. ${a}, 열린 틈으로 밀어냅니다.`,
+    betrayal: `${v} · ${h}, 공동공격 뒤 ${h}가 손을 놓습니다. ${a}가 앞에서 역습합니다.`,
     brace: `${a}, ${v}의 밀기를 두 발로 버텨냅니다. 힘을 반대로 돌립니다.`,
     lift: `${a}, ${v}의 몸통을 잡습니다. 무릎을 굽혀 체중을 싣고 들어 올립니다.`,
     final: `${a} · ${v}, 팽팽한 힘겨루기. 한 번의 중심 이동이 승부를 가릅니다.`,

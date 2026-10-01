@@ -22,7 +22,7 @@ export default function ArenaStory({ round, candidates, elapsed, preview, finish
         <div className="arena-story-side">{story.left.map(chip)}{story.leftLabel && <small>{story.leftLabel}</small>}</div>
         <div className="arena-story-link"><b aria-hidden="true">{story.relation}</b><span>{story.relationLabel}</span></div>
         <div className="arena-story-side">{story.right.map(chip)}{story.rightLabel && <small>{story.rightLabel}</small>}</div>
-        {story.kind === 'betrayal' && round && <div className="arena-story-intruder">{chip(round.aggressor)}<span>{story.step < 2 ? '빈틈을 기다림' : '빈틈으로 공격'}</span></div>}
+        {story.intruderLabel && round && <div className="arena-story-intruder">{chip(round.aggressor)}<span>{story.intruderLabel}</span></div>}
       </div>
       <p className="arena-story-action">{story.action}</p>
     </> : <><strong>{title}</strong><span>{detail}</span></>}

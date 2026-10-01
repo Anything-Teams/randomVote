@@ -5,19 +5,19 @@ import { activeRacingIncident, buildRacingTimeline, createRacingIncidents, racin
 import { drawRaceDust, drawRaceHorse, drawRaceStadium, raceBox, raceLabel } from './racingArt';
 import { drawRacingCourse, drawRacingStartingGate, drawRacingTopView } from './racingCourse';
 import { createRacingCamera, placeRacingField, racingFocusIds, type RacingCamera } from './racingCamera';
+import { drawRacingIncidentEffects, racingIncidentMotion } from './racingEffects';
 import './racing.css';
 
 type RacePhase = 'preview' | 'paddock' | 'countdown' | 'race' | 'straight' | 'photo' | 'winner';
 type RaceView = { phase: RacePhase; standings: RacingStanding[]; headline: string; detail: string; focusId?: string; progress: number; speed: number; badge: string };
-type RaceScene = { camera: RacingCamera; elapsed: number | null; topMix: number; phase: RacePhase | null; topOnly: boolean };
-type HorseTagBounds = { left: number; top: number; width: number; height: number };
+type RaceScene = { camera: RacingCamera; elapsed: number | null };
 const clamp = (value: number, low = 0, high = 1) => Math.max(low, Math.min(high, value));
 const smooth = (value: number) => { const t = clamp(value); return t * t * (3 - 2 * t); };
 function phaseAt(elapsed: number, duration: number, preview: boolean): RacePhase {
   if (preview) return 'preview';
   if (elapsed < 3000) return 'paddock';
   if (elapsed < 5500) return 'countdown';
-  if (elapsed < duration - 9000) return 'race';
+  if (elapsed < 5500 + (duration - 10_500) * 26_500 / 33_500) return 'race';
   if (elapsed < duration - 5000) return 'straight';
   if (elapsed < duration - 2600) return 'photo';
   return 'winner';
@@ -33,7 +33,7 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
     preview: ['출발선에 모이는 경주마', '번호와 기수의 색으로 내 말을 따라가세요. 모두 같은 출발선에서 한 바퀴를 달립니다.', 'STARTING GATE'],
     paddock: ['출발선 · 마지막 준비', '말들이 같은 출발선의 게이트에 입장합니다. 기수가 고삐와 등자를 확인합니다.', 'GATE LOADING'],
     countdown: ['게이트 오픈 직전', '나란히 준비했습니다. 문이 열리면 한꺼번에 출발합니다.', 'STARTING GATE'],
-    race: [(leader?.name ?? '') + ' · 현재 선두', '코스 전체와 선두 경합을 번갈아 중계합니다. 앞말과 추격마의 실제 간격을 보세요.', 'LIVE RACE'],
+    race: [(leader?.name ?? '') + ' · 현재 선두', '현장 중계로 선두와 추격마의 실제 간격을 보세요. 우측 상단 지도에서 전체 위치를 확인할 수 있습니다.', 'LIVE RACE'],
     straight: ['마지막 직선 · 끝까지 추격', '선두 세 말이 같은 화면에서 달립니다. 코끝이 결승선을 지나는 순간까지 순위가 바뀝니다.', 'FINAL STRAIGHT'],
     photo: ['결승선 통과 · 사진 판정', '말들이 도착 순서대로 결승선을 통과합니다. 통과한 말도 앞으로 달리며 속도를 줄입니다.', 'PHOTO FINISH'],
     winner: [(leader?.name ?? '오늘의 말') + ' · 우승 확정', '전원 한 바퀴 완주. 말은 천천히 멈추고 기수가 한 손을 들어 인사합니다.', 'WINNER’S CIRCLE'],
@@ -53,17 +53,14 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
   const pace = leader ? (readRacingTravel(timeline, leader.id, elapsed + 100) - readRacingTravel(timeline, leader.id, elapsed)) * 335 : 1;
   return { phase, standings, headline, detail, focusId: incident?.actorId, badge, progress: Math.max(0, ...standings.map(standing => standing.distance)), speed: phase === 'race' || phase === 'straight' ? Math.round(clamp(56 * pace, 35, 72)) : 0 };
 }
-function horseTag(ctx: CanvasRenderingContext2D, name: string, rank: number, color: string, x: number, y: number, scale: number, canvasWidth: number, compact: boolean, number: number, occupied: HorseTagBounds[]) {
-  const size = compact ? 8 : clamp(scale * 13, 8, 12);
+function horseTag(ctx: CanvasRenderingContext2D, name: string, color: string, x: number, y: number, canvasWidth: number, canvasHeight: number, compact: boolean) {
+  const size = compact ? 7 : 9;
   ctx.font = '800 ' + size + 'px "Malgun Gothic", sans-serif';
-  const letters = Array.from(name); let label = compact ? String(number).padStart(2, '0') + ' · ' + rank + '위' : rank + '위 · ' + name;
-  while (ctx.measureText(label).width > 105 && letters.length > 2) { letters.pop(); label = rank + '위 · ' + letters.join('') + '…'; }
-  const width = Math.min(116, ctx.measureText(label).width + (compact ? 7 : 12)), height = compact ? 14 : 19, top = y - 86 * scale - 16;
+  const letters = Array.from(name); let label = name;
+  while (ctx.measureText(label).width > (compact ? 47 : 88) && letters.length > 2) { letters.pop(); label = letters.join('') + '…'; }
+  const width = ctx.measureText(label).width + 9, height = compact ? 10 : 14, top = Math.min(canvasHeight - height - 2, y + 4);
   x = clamp(x, width / 2 + 2, canvasWidth - width / 2 - 2);
-  const bounds = { left: x - width / 2, top, width, height };
-  if (occupied.some(other => bounds.left < other.left + other.width + 2 && bounds.left + width + 2 > other.left && top < other.top + other.height + 2 && top + height + 2 > other.top)) return;
-  occupied.push(bounds);
-  raceBox(ctx, bounds.left, top, width, height, 3, '#132b3fee', color);
+  raceBox(ctx, x - width / 2, top, width, height, 2, '#132b3fe6', color);
   raceLabel(ctx, label, x, top + height / 2, size, '#fff0ce', true);
 }
 function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: SportsStageProps, timeline: RacingTimeline, elapsed: number, clock: number, reduced: boolean, scene: RaceScene, delta: number, reset: boolean) {
@@ -79,6 +76,7 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
     ctx.strokeStyle = '#dfd9be'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(finishX, h * .13); ctx.lineTo(finishX, h * .42); ctx.stroke();
     if (phase === 'photo') raceLabel(ctx, 'FINISH · 실제 통과 순서', 14, h * .37, clamp(w / 65, 8, 13), '#f2ddb0');
   }
+  drawRacingIncidentEffects(ctx, incident, locations, elapsed, reduced, 'ground');
   locations.forEach(item => {
     const candidate = props.candidates[item.index], before = readRacingTravel(timeline, item.id, elapsed - 100), effort = clamp((item.distance - before) * 335, .45, 1.35);
     drawRaceDust(ctx, item.index, item.x, item.y, item.scale, clock, reduced, effort);
@@ -86,21 +84,17 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
     const velocityRatio = standing?.finished ? Math.exp(-(elapsed - standing.finishTime) / 1100) : 1;
     // Invert the renderer's easing so stride shrinks with the continuous run-out velocity.
     const settle = .5 - Math.sin(Math.asin(2 * velocityRatio - 1) / 3);
-    drawRaceHorse(ctx, candidate, item.index, item.x, item.y, item.scale, clock, effort, reduced, false, 0, { settle });
+    drawRaceHorse(ctx, candidate, item.index, item.x, item.y, item.scale, clock, effort, reduced, false, 0, { settle, ...racingIncidentMotion(incident, item.id, elapsed, reduced) });
   });
-  const occupied: HorseTagBounds[] = [], compactTags = w < 520 || h < 250;
-  [...locations].sort((a, b) => standings.findIndex(standing => standing.id === a.id) - standings.findIndex(standing => standing.id === b.id)).forEach(item => {
-    if (!item.featured) return;
-    if (item.x < -70 || item.x > w + 70) return;
-    const rank = standings.find(standing => standing.id === item.id)?.rank ?? item.index + 1;
-    horseTag(ctx, props.candidates[item.index].name, rank, props.candidates[item.index].color, item.x, item.y, item.scale, w, compactTags, item.index + 1, occupied);
-  });
-  // The large field view preserves context while a close camera follows an incident.
+  drawRacingIncidentEffects(ctx, incident, locations, elapsed, reduced, 'air');
+  // Fixed ground labels stay readable when another horse passes through the same screen space.
+  locations.forEach(item => horseTag(ctx, props.candidates[item.index].name, props.candidates[item.index].color, item.x, item.y, w, h, w < 520 || h < 250));
+  // The corner map preserves the full field while the main camera follows the race.
   const mw = Math.min(180, w * .25), mh = Math.min(104, h * .23);
   ctx.save(); ctx.translate(w - mw - 9, 9); drawRacingCourse(ctx, mw, mh, clock, reduced); drawRacingTopView(ctx, mw, mh, props.candidates, standings, clock, reduced, racingFocusIds(timeline, elapsed)); ctx.restore();
 }
-function render(ctx: CanvasRenderingContext2D, w: number, h: number, props: SportsStageProps, timeline: RacingTimeline, elapsed: number, clock: number, reduced: boolean, scene: RaceScene, delta: number, topOnly: boolean) {
-  const phase = phaseAt(elapsed, props.duration, props.preview), standings = racingStandings(timeline, elapsed);
+function render(ctx: CanvasRenderingContext2D, w: number, h: number, props: SportsStageProps, timeline: RacingTimeline, elapsed: number, clock: number, reduced: boolean, scene: RaceScene, delta: number) {
+  const phase = phaseAt(elapsed, props.duration, props.preview);
   const reset = scene.elapsed === null || elapsed < scene.elapsed - 150 || elapsed - scene.elapsed > 500;
   scene.elapsed = elapsed;
   if (phase === 'preview' || phase === 'paddock' || phase === 'countdown') {
@@ -110,7 +104,7 @@ function render(ctx: CanvasRenderingContext2D, w: number, h: number, props: Spor
       const boxW = clamp(w * .085, 34, 64), boxH = clamp(h * .13, 30, 52), boxY = h * .79;
       raceBox(ctx, (w - boxW) / 2, boxY, boxW, boxH, 5, '#10243cdd', '#d6bb81'); raceLabel(ctx, String(digit), w / 2, boxY + boxH / 2, clamp(h * .08, 20, 38), '#ffe4aa', true);
     }
-    scene.topMix = 1; scene.phase = phase; return;
+    return;
   }
   if (phase === 'winner') {
     const id = timeline.finishOrder[0], winner = props.candidates.find(candidate => candidate.id === id);
@@ -125,29 +119,19 @@ function render(ctx: CanvasRenderingContext2D, w: number, h: number, props: Spor
     raceLabel(ctx, 'WINNER’S CIRCLE', w / 2, h * .13, clamp(w / 44, 9, 23), '#e7d092', true);
     raceLabel(ctx, winner.name, w / 2, y + Math.max(16, h * .1) / 2 + 5, clamp(w * .62 / Math.max(10, winner.name.length), 9, 20), '#283440', true);
     if (!reduced) for (let particle = 0; particle < 35; particle++) { const px = (particle * 79 + Math.sin(clock / 1200 + particle) * 9) % w, py = (clock / (16 + particle % 4) + particle * 37) % h; ctx.fillStyle = [winner.color, '#e7cc8c', '#87b8b5'][particle % 3]; ctx.fillRect(px, py, 3, 2); }
-    scene.phase = phase; return;
+    return;
   }
-  const active = activeRacingIncident(timeline, elapsed);
-  const target = topOnly || phase === 'race' && !active ? 1 : 0;
-  const manualChanged = topOnly !== scene.topOnly; scene.topOnly = topOnly;
-  const blend = reset || reduced || manualChanged && props.paused ? 1 : props.paused ? 0 : 1 - Math.exp(-delta / 280);
-  scene.topMix += (target - scene.topMix) * blend;
   sideView(ctx, w, h, props, timeline, elapsed, clock, reduced, scene, delta, reset);
-  if (scene.topMix > .002) {
-    ctx.save(); ctx.globalAlpha = scene.topMix; drawRacingCourse(ctx, w, h, clock, reduced); drawRacingTopView(ctx, w, h, props.candidates, standings, clock, reduced, racingFocusIds(timeline, elapsed)); ctx.restore();
-  }
   if (elapsed < 6600) {
     ctx.save(); ctx.globalAlpha = reduced ? 0 : 1 - smooth((elapsed - 5500) / 1100); drawRacingStartingGate(ctx, w, h, props.candidates, clock, reduced, elapsed, false); ctx.restore();
   }
-  scene.phase = phase;
 }
 export default function RacingShow(props: SportsStageProps) {
   const key = props.duration + ':' + props.order.join('|') + ':' + props.candidates.map(candidate => candidate.id).join('|');
   const timeline = useMemo(() => buildRacingTimeline(props.candidates, props.order, props.duration, createRacingIncidents(props.candidates, props.order, props.duration, randomInt(0x100000000))), [key]);
   const canvas = useRef<HTMLCanvasElement>(null), latest = useRef(props), latestTimeline = useRef(timeline), synchronizedAt = useRef(performance.now()), lastPropElapsed = useRef(props.elapsed);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  const [view, setView] = useState(() => viewAt(props, timeline, props.elapsed)), [topOnly, setTopOnly] = useState(false);
-  const topView = useRef(topOnly); topView.current = topOnly;
+  const [view, setView] = useState(() => viewAt(props, timeline, props.elapsed));
   useLayoutEffect(() => {
     const jumped = Math.abs(props.elapsed - lastPropElapsed.current) > 950;
     latest.current = props; latestTimeline.current = timeline; synchronizedAt.current = performance.now(); lastPropElapsed.current = props.elapsed;
@@ -157,14 +141,14 @@ export default function RacingShow(props: SportsStageProps) {
   useEffect(() => {
     const element = canvas.current, ctx = element?.getContext('2d'); if (!element || !ctx) return;
     let w = 1, h = 1, ratio = 1, frame = 0, previous = performance.now(), clock = 0, boardAt = -1000, viewKey = '';
-    const scene: RaceScene = { camera: createRacingCamera(), elapsed: null, topMix: 1, phase: null, topOnly: topView.current };
+    const scene: RaceScene = { camera: createRacingCamera(), elapsed: null };
     const resize = () => { const rect = element.getBoundingClientRect(); w = Math.max(1, rect.width); h = Math.max(1, rect.height); ratio = Math.min(2, window.devicePixelRatio || 1); element.width = Math.round(w * ratio); element.height = Math.round(h * ratio); scene.elapsed = null; };
     const observer = new ResizeObserver(resize); observer.observe(element); resize();
     const animate = (now: number) => {
       const current = latest.current, plan = latestTimeline.current, delta = Math.min(50, Math.max(0, now - previous)); previous = now;
       if (!current.paused && !reducedMotion) clock += delta;
       const elapsed = current.preview || current.paused ? current.elapsed : Math.min(current.duration, current.elapsed + Math.max(0, now - synchronizedAt.current));
-      ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, w, h); render(ctx, w, h, current, plan, elapsed, clock, reducedMotion, scene, delta, topView.current);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, w, h); render(ctx, w, h, current, plan, elapsed, clock, reducedMotion, scene, delta);
       const incident = displayedIncident(plan, elapsed), phase = phaseAt(elapsed, current.duration, current.preview);
       const standings = racingStandings(plan, elapsed);
       const immediateKey = phase + ':' + incident?.start + ':' + standings.map(standing => standing.id).join('|') + ':' + current.candidates.map(candidate => candidate.name).join('|');
@@ -177,8 +161,8 @@ export default function RacingShow(props: SportsStageProps) {
   const style = { '--racing-count': rows, '--racing-compact-count': Math.ceil(rows / 2), '--racing-progress': view.progress * 100 + '%' } as CSSProperties;
   return <div className={'racing-show racing-phase-' + view.phase + (props.preview ? ' racing-preview' : '') + (props.paused ? ' racing-paused' : '')} style={style}>
     <section className="racing-stage" aria-label="경마 경기장">
-      <div className="racing-stage-top"><span><i aria-hidden="true" />{props.preview ? 'DERBY NIGHT' : finished ? 'RACE COMPLETE' : 'DERBY LIVE'}</span><div className="racing-view-switch" aria-label="경마 카메라"><button type="button" aria-pressed={!topOnly} onClick={() => setTopOnly(false)}>중계</button><button type="button" aria-pressed={topOnly} onClick={() => setTopOnly(true)}>탑뷰</button></div><span>{view.speed ? view.speed + ' KM/H' : '1,600 M'}</span></div>
-      <div className="racing-canvas-wrap"><canvas ref={canvas} className="racing-canvas" role="img" aria-label={view.headline} /><div className="racing-phase-badge">{props.paused ? 'Ⅱ 일시정지' : topOnly && !finished ? '코스 전체 · 탑뷰' : view.badge}</div></div>
+      <div className="racing-stage-top"><span><i aria-hidden="true" />{props.preview ? 'DERBY NIGHT' : finished ? 'RACE COMPLETE' : 'DERBY LIVE'}</span><span>{view.speed ? view.speed + ' KM/H' : '1,600 M'}</span></div>
+      <div className="racing-canvas-wrap"><canvas ref={canvas} className="racing-canvas" role="img" aria-label={view.headline} /><div className="racing-phase-badge">{props.paused ? 'Ⅱ 일시정지' : view.badge}</div></div>
       <div className="racing-commentary" aria-live={finished ? 'polite' : 'off'}><div className="racing-story-kicker">{view.focusId ? 'RACE STORY' : view.phase === 'photo' ? 'FINISH LINE' : 'TRACKSIDE COMMENTARY'}</div><strong>{view.headline}</strong><p title={view.detail}>{view.detail}</p><div className="racing-distance-meter" aria-hidden="true"><span /></div></div>
     </section>
     <aside className="racing-board" aria-label={finished ? '경마 최종 순위' : '경마 실시간 순위'}>

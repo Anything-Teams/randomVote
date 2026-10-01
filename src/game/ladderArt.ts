@@ -1,10 +1,10 @@
 import type { Candidate } from '../election';
-import type { LadderActorFrame, LadderFrame, LadderTimeline } from '../ladderLogic';
+import type { LadderActorFrame, LadderFrame, LadderInteraction, LadderTimeline } from '../ladderLogic';
 
 export type LadderPose = 'idle' | 'climb' | 'bridge' | 'balance' | 'fall' | 'hang' | 'clamber' | 'drop' | 'slide' | 'swing' | 'launch' | 'rotate' | 'ride' | 'transfer' | 'win' | 'arrived';
-type TransferMotion = 'slide' | 'swing' | 'launch' | 'drop' | 'rotate' | 'conveyor' | 'portal';
+type TransferMotion = 'slide' | 'swing' | 'launch' | 'drop' | 'rotate' | 'conveyor' | 'portal' | 'pounce';
 type Point = { x: number; y: number };
-export type LadderArtActor = { id: string; index: number; lane: number; height: number; rungProgress: number; pose: LadderPose; phase: number; fromLane?: number; toLane?: number; fromRow?: number; toRow?: number; supportRow?: number; gripRow?: number; gripLane?: number; footRow?: number; fallDepth?: number; tilt?: number; eventStage?: string; eventKind?: string; floating?: boolean; motionType?: TransferMotion; motionPhase?: number; actionProgress?: number; transferStage?: 'takeoff' | 'flight' | 'catch' | 'pull'; catchRow?: number; transferProgress?: number; transferRole?: 'primary' | 'partner'; landingRow?: number; pivotLane?: number; pivotRow?: number; depthOffset?: number; arrived: boolean; doorLane?: number; candidate: Candidate; transition?: { from: LadderArtActor; progress: number; shift: Point; clock: number }; };
+export type LadderArtActor = { id: string; index: number; lane: number; height: number; rungProgress: number; pose: LadderPose; phase: number; fromLane?: number; toLane?: number; fromRow?: number; toRow?: number; supportRow?: number; gripRow?: number; gripLane?: number; footRow?: number; fallDepth?: number; tilt?: number; eventStage?: string; eventKind?: string; floating?: boolean; motionType?: TransferMotion; motionPhase?: number; actionProgress?: number; transferStage?: 'takeoff' | 'flight' | 'catch' | 'pull'; catchRow?: number; transferProgress?: number; transferRole?: 'primary' | 'partner'; landingRow?: number; pivotLane?: number; pivotRow?: number; depthOffset?: number; interaction?: LadderInteraction; contactTargets?: [Point, Point]; arrived: boolean; doorLane?: number; candidate: Candidate; transition?: { from: LadderArtActor; progress: number; shift: Point; clock: number }; };
 export type LadderArtBridge = { id: string; row: number; leftLane: number; rightLane: number; fromRow?: number; toRow?: number; landingRow?: number; pivotLane?: number; pivotRow?: number; motionType?: TransferMotion; state?: 'future' | 'active' | 'past' };
 export type LadderArtEvent = { id: string; kind: string; actorId: string; row: number; lane: number; toLane?: number; fromRow?: number; landingRow?: number; motionType?: TransferMotion; pivotLane?: number; pivotRow?: number; phase: number; stage: 'setup' | 'action' | 'recovery'; };
 export type LadderGeometry = { width: number; height: number; laneCount: number; rungCount: number; left: number; right: number; top: number; bottom: number; laneGap: number; rungGap: number; scale: number; subdivisions: number; laneX: (lane: number) => number; rowY: (row: number) => number; };
@@ -47,7 +47,7 @@ export function createLadderGeometry(width: number, height: number, laneCount: n
   const top = clamp(height * .23, 25, 105), bottom = Math.max(top + 15, height - clamp(height * .065, 9, 28));
   const rungGap = (bottom - top) / rungCount;
   const scale = Math.max(.12, Math.min(2.05, laneGap / 23, rungGap / 8.2));
-  const subdivisions = Math.max(1, Math.ceil(rungGap / (scale * 8.6)));
+  const subdivisions = Math.max(2, Math.ceil(rungGap / (scale * 5.2)));
   return { width, height, laneCount: count, rungCount, left, right: left + laneGap * (count - 1), top, bottom, laneGap, rungGap, scale, subdivisions, laneX: lane => left + laneGap * lane, rowY: row => bottom - row / rungCount * (bottom - top) };
 }
 
@@ -59,7 +59,7 @@ export function ladderArtActors(timeline: LadderTimeline, frame: LadderFrame, ca
     const footRow = actor.pose === 'balance' ? actor.eventStage === 'resolve' ? actor.landingRow : actor.fromRow ?? event?.row : undefined;
     return { ...actor, candidate: candidates[actor.index], gripRow: actor.gripRow ?? actor.supportRow, footRow, eventKind: event?.kind };
   };
-  return frame.actors.map(current => {
+  const actors = frame.actors.map(current => {
     if (reduced) return adapt(current.arrived ? current : initial!.actors[current.index]);
     const actor = adapt(current), path = timeline.paths[actor.id];
     const boundaries = [path.startAt, path.arrivalAt, ...path.segments.map(segment => segment.start)];
@@ -78,6 +78,16 @@ export function ladderArtActors(timeline: LadderTimeline, frame: LadderFrame, ca
     }
     return actor;
   });
+  actors.forEach(actor => {
+    if (actor.interaction?.role !== 'thrower' || actor.eventStage !== 'action' || actor.interaction.phase < .32 || actor.interaction.phase >= .67) return;
+    const partner = actors.find(item => item.id === actor.interaction!.partnerId);
+    if (!partner) return;
+    const victim = rawLadderRig(partner, geometry, elapsed, reduced), direction = Math.sign((actor.toLane ?? actor.lane) - (actor.fromLane ?? actor.lane)) || 1;
+    // One hand catches a wrist; the other takes the near side of the belt.
+    // These are the actual rendered victim points, rather than an assumed torso.
+    actor.contactTargets = [victim.hands[1], { x: victim.hip.x + direction * 5.8 * geometry.scale, y: victim.hip.y - geometry.scale }];
+  });
+  return actors;
 }
 
 /** Hands and soles sample fixed world rungs; no frame cache is needed to seek or pause. */
@@ -89,39 +99,75 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
   let hip = { x: 0, y: -13 }, hands: [Point, Point] = [{ x: -8, y: -16 }, { x: 8, y: -16 }], feet: [Point, Point] = [{ x: -3.8, y: 0 }, { x: 3.8, y: 0 }];
   let handContact: [boolean, boolean] = [false, false], footContact: [boolean, boolean] = [true, true];
   let anchorAmount: [number, number] = [0, 0];
+  let contactAmount = 0;
   const catchY = geometry.rowY(actor.catchRow ?? actor.gripRow ?? (actor.landingRow ?? actor.rungProgress) + 2);
   const catchLane = actor.toLane ?? actor.gripLane ?? actor.lane;
   const catchHands: [Point, Point] = [0, 1].map(side => ({ x: geometry.laneX(catchLane) + (side ? 1 : -1) * facing * 6 * scale, y: catchY })) as [Point, Point];
   const motor = reduced ? 0 : step;
-  if (actor.pose === 'climb') {
-    const gripOffset = Math.max(3, Math.round(31 / rung));
+  if (actor.interaction?.role === 'victim' && actor.eventStage === 'action' && actor.interaction.phase < .6) {
+    const p = actor.interaction.phase, ready = ease((p - .18) / .14), lift = ease((p - .32) / .28);
+    hip = { x: 7 * ready, y: -13 }; angle = 0;
+    hands = [{ x: mix(-8, 16, ready), y: mix(-16, -23, ready) }, { x: mix(8, 0, ready), y: mix(-16, -19, ready) }];
+    feet = [{ x: mix(-3.8, 1, ready), y: -lift * 4 }, { x: mix(3.8, 6, ready), y: -lift * 7 }];
+    footContact = [p <= .32, p <= .32];
+  } else if (actor.interaction?.role === 'thrower' && actor.eventStage !== 'setup') {
+    const p = actor.interaction.phase;
+    if (actor.eventStage === 'resolve') {
+      const climb = rawLadderRig({ ...actor, interaction: undefined, motionType: undefined, pose: 'climb', transition: undefined }, geometry, clock, reduced);
+      const local = (point: Point): Point => ({ x: (point.x - base.x) / scale, y: (point.y - base.y) / scale });
+      hip = local(climb.hip); hands = climb.hands.map(local) as [Point, Point]; feet = climb.feet.map(local) as [Point, Point];
+      angle = climb.angle; handContact = climb.handContact; footContact = climb.footContact;
+    } else if (p < .32) {
+      const flight = clamp(actor.transferProgress ?? p / .32), takeoff = ease(flight / .18), reach = ease((flight - .72) / .28);
+      hip = { x: mix(0, 7, reach), y: mix(-13 + (1 - takeoff) * 4, -11.8, reach) }; angle = -.18 * Math.sin(flight * Math.PI) * (1 - reach);
+      hands = [{ x: mix(-12, 4, reach), y: mix(-25, -22, reach) }, { x: mix(14, 8, reach), y: mix(-28, -17, reach) }];
+      feet = [{ x: mix(-4, 1, reach), y: -Math.sin(flight * Math.PI) * 5 }, { x: mix(8, 6, reach), y: -Math.sin(flight * Math.PI) * 7 }];
+      footContact = [false, false];
+    } else {
+      const lifting = ease((p - .32) / .28), release = ease((p - .6) / .07), settle = ease((p - .67) / .33);
+      const climb = rawLadderRig({ ...actor, interaction: undefined, motionType: undefined, pose: 'climb', transition: undefined }, geometry, clock, reduced);
+      const local = (point: Point): Point => ({ x: (point.x - base.x) / scale, y: (point.y - base.y) / scale });
+      const targetHip = local(climb.hip);
+      hip = { x: mix(7, targetHip.x, settle), y: mix(-11.8 - lifting * 1.5, targetHip.y, settle) }; angle = climb.angle * settle;
+      hands = [{ x: mix(4, 11, release), y: mix(-22, -23, release) }, { x: mix(8, 13, release), y: mix(-17, -24, release) }];
+      feet = [{ x: 1, y: 0 }, { x: 6, y: 0 }];
+      hands = hands.map((point, side) => ({ x: mix(point.x, local(climb.hands[side]).x, settle), y: mix(point.y, local(climb.hands[side]).y, settle) })) as [Point, Point];
+      feet = feet.map((point, side) => ({ x: mix(point.x, local(climb.feet[side]).x, settle), y: mix(point.y, local(climb.feet[side]).y, settle) })) as [Point, Point];
+      contactAmount = ease((p - .32) / .06) * (1 - release);
+      handContact = settle > .999999 ? climb.handContact : [false, false]; footContact = settle > .999999 ? climb.footContact : [settle < .000001, settle < .000001];
+    }
+  } else if (actor.pose === 'climb') {
+    const gripOffset = Math.max(3, Math.round(29 / rung));
     hands = [0, 1].map(side => {
       const leading = (side + actor.index % 2) % 2;
       const progress = (motor + leading) / 2, cycle = wrap(progress), start = Math.floor(progress) * 2 - leading;
       const swing = clamp((cycle - .62) / .38);
       const row = start + gripOffset + 2 * ease(swing);
       handContact[side] = cycle < .62;
-      return { x: (side ? 1 : -1) * (6 + Math.sin(swing * Math.PI) * 2.2), y: -(row - motor) * rung };
+      return { x: (side ? 1 : -1) * (6 + Math.sin(swing * Math.PI) * 1.3), y: -(row - motor) * rung };
     }) as [Point, Point];
     feet = [0, 1].map(side => {
       const leading = (side + actor.index % 2) % 2;
       const progress = (motor + 1 - leading) / 2, cycle = wrap(progress), start = Math.floor(progress) * 2 - (1 - leading);
       const swing = clamp((cycle - .52) / .48), row = start + 1 + 2 * ease(swing);
       footContact[side] = cycle < .52;
-      return { x: (side ? 1 : -1) * (4.2 + Math.sin(swing * Math.PI) * 1.2), y: -(row - motor) * rung - Math.sin(swing * Math.PI) * .8 };
+      return { x: (side ? 1 : -1) * (3.6 + Math.sin(swing * Math.PI) * .8), y: -(row - motor) * rung - Math.sin(swing * Math.PI) * .65 };
     }) as [Point, Point];
     const breath = reduced ? 0 : Math.sin((clock + actor.index * 313) / (680 + personality * 70)) * .1;
     const side = actor.index % 2 ? -1 : 1;
-    hip.x = Math.sin(motor * Math.PI) * .65 * side; hip.y += Math.sin(motor * Math.PI * 2) * .16 + breath; angle = Math.sin(motor * Math.PI) * .023 * side;
+    // Shift the pelvis over the planted foot before the opposite arm reaches.
+    // Rung targets stay in world space, so the torso's effort never drags a grip.
+    const weight = Math.sin(motor * Math.PI) * side;
+    hip.x = weight * (.52 + personality * .03); hip.y += Math.sin(motor * Math.PI * 2) * .14 + breath; angle = weight * .019;
   } else if (actor.motionType && actor.eventStage === 'setup') {
     const prep = ease(reduced ? .5 : actor.phase);
     const groundY = (geometry.rowY(actor.fromRow ?? actor.rungProgress) - base.y) / scale;
     feet = [{ x: -3.2, y: groundY }, { x: 3.2, y: groundY }];
     if (actor.motionType === 'swing') {
       hip.y = -13 + prep; hands = [{ x: -5.5, y: mix(-16, -37.2, prep) }, { x: 5.5, y: mix(-16, -37.2, prep) }];
-    } else if (actor.motionType === 'launch') {
-      hip.y = -15 + prep * 5; angle = -.085 * prep;
-      hands = [{ x: -10, y: -14 }, { x: 9, y: -15 }];
+    } else if (actor.motionType === 'launch' || actor.motionType === 'pounce') {
+      hip.y = -15 + prep * 6; hip.x = -prep * .55; angle = -.11 * prep;
+      hands = [{ x: -10 - prep, y: -14 + prep * 2 }, { x: 9, y: -15 + prep }];
     } else if (actor.motionType === 'drop') {
       hip.y = -13 + prep * 1.5; angle = -.08 * prep;
       hands = [{ x: -11, y: mix(-16, -24, prep) }, { x: 12, y: mix(-16, -27, prep) }];
@@ -130,7 +176,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
   } else if (actor.motionType && actor.eventStage !== 'resolve' && actor.pose !== 'clamber') {
     const p = reduced ? .5 : clamp(actor.actionProgress ?? actor.motionPhase ?? actor.phase), pulse = Math.sin(p * Math.PI);
     const catchAt = actor.motionType === 'drop' ? .64 : .86;
-    const flight = clamp(p / catchAt), takeoff = ease(flight / .16), land = ease((flight - .76) / .24);
+    const flight = clamp(actor.transferProgress ?? p / catchAt), takeoff = ease(flight / .18), land = ease((flight - .76) / .24);
     footContact = [false, false]; handContact = [false, false];
     // The model supplies the moving body's world trajectory. These are joint actions,
     // rather than an extra body translation that could jump at a timeline boundary.
@@ -142,23 +188,36 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
       feet = [{ x: mix(-3.2, 10.5, seated), y: 0 }, { x: mix(3.2, 14, seated), y: -.5 * seated }];
       if (actor.eventKind === 'banana') { hands[0] = { x: -11, y: -18 }; angle = .035 * seated; }
     } else if (actor.motionType === 'swing') {
-      const sweep = Math.sin(flight * Math.PI);
-      hip = { x: -sweep * 1.2, y: -13 }; angle = -.23 * Math.sin(flight * Math.PI * 2);
+      const sweep = Math.sin(flight * Math.PI), trail = Math.sin(flight * Math.PI * 2);
+      hip = { x: -sweep * 1.4, y: -13 + sweep * .35 }; angle = -.24 * trail;
       hands = [{ x: -5.5, y: -37.2 }, { x: 5.5, y: -37.2 }];
-      feet = [{ x: mix(-5, 8, sweep), y: mix(-5, -3.5, sweep) }, { x: mix(4, 13, sweep), y: mix(-8, -2.5, sweep) }];
+      // One knee pulls forward while the trailing leg sweeps through the rope arc.
+      feet = [{ x: -6 + sweep * 12 - trail * 2, y: -3.5 - sweep * 3.2 }, { x: 4 + sweep * 9, y: -7.5 + sweep * 4.5 }];
       if (actor.eventKind === 'rope-tangle') feet[0].y -= sweep * 1.5;
       if (actor.eventKind === 'zipline') angle = -.13 * sweep;
     } else if (actor.motionType === 'launch') {
-      const crouch = (1 - takeoff) * 3;
-      hip = { x: pulse * .8, y: -13 + crouch }; angle = -.16 * Math.sin(flight * Math.PI);
-      hands = [{ x: -13, y: -24 }, { x: 14, y: -27 }];
-      feet = [{ x: -5.5, y: -takeoff * 5 }, { x: mix(-3, 8, land), y: -takeoff * 8 * (1 - land) }];
+      const crouch = (1 - takeoff) * 4, tuck = Math.sin(flight * Math.PI) * (1 - land), kick = Math.sin(clamp(flight / .28) * Math.PI) * 2.4;
+      hip = { x: -.55 * (1 - takeoff) + pulse * .8, y: -13 + crouch }; angle = -.2 * Math.sin(flight * Math.PI);
+      hands = [{ x: mix(-11, -13, takeoff), y: mix(-12, -24, takeoff) }, { x: mix(9, 14, takeoff), y: mix(-14, -28, takeoff) }];
+      feet = [{ x: -3.2 - kick + tuck * 4, y: -takeoff * 1.5 - tuck * 6.5 }, { x: mix(3.2, 10, takeoff) - tuck * 3, y: -takeoff * 2 - tuck * 8 }];
       if (actor.eventKind === 'balloon') { hands = [{ x: -4, y: -32 }, { x: 5, y: -31 }]; angle = Math.sin(p * Math.PI) * .055; }
       if (actor.eventKind === 'safety-net') { hands[0] = { x: -12, y: -20 }; hands[1] = { x: 12, y: -20 }; }
+      if (actor.eventKind === 'wind') {
+        const balance = Math.sin(flight * Math.PI * 2) * Math.sin(flight * Math.PI);
+        hands = [{ x: -13, y: -21 - balance * 2 }, { x: 13, y: -24 + balance * 2 }];
+        feet[0].y += balance * 1.2; angle += balance * .06;
+      }
     } else if (actor.motionType === 'drop') {
-      hip = { x: -.5, y: -13 }; angle = -.24 * Math.sin(flight * Math.PI);
-      hands = [{ x: -13, y: -27 }, { x: 13, y: -30 }];
-      feet = [{ x: -7, y: -3 }, { x: 9, y: -6 }];
+      const surprise = ease(flight / .16), scramble = Math.sin(flight * Math.PI * 3) * Math.sin(flight * Math.PI);
+      hip = { x: -.5 + scramble * .35, y: -13 }; angle = -.25 * Math.sin(flight * Math.PI);
+      hands = [{ x: mix(-11, -14, surprise), y: mix(-24, -28, surprise) }, { x: mix(12, 14, surprise), y: mix(-27, -31, surprise) }];
+      feet = [{ x: -5 - surprise * 2, y: -2 - scramble * 2.2 }, { x: 6 + surprise * 3, y: -5 + scramble * 2.2 }];
+      if (actor.interaction?.role === 'victim') {
+        const release = ease((actor.interaction.phase - .6) / .12);
+        hip.x = mix(7, hip.x, release); angle *= release;
+        hands = hands.map((point, side) => ({ x: mix(side ? 0 : 16, point.x, release), y: mix(side ? -19 : -23, point.y, release) })) as [Point, Point];
+        feet = feet.map((point, side) => ({ x: mix(side ? 6 : 1, point.x, release), y: mix(side ? -7 : -4, point.y, release) })) as [Point, Point];
+      }
     } else if (actor.motionType === 'rotate') {
       hip = { x: Math.sin(p * Math.PI * 2) * .7, y: -15 + pulse * 1.4 }; angle = -.07 * Math.sin(p * Math.PI * 2);
       feet = [{ x: -3.2, y: 0 }, { x: 3.2, y: 0 }];
@@ -181,6 +240,17 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
       feet = feet.map((point, side) => ({ x: mix(point.x, side ? 5 : -4.5, catchBlend), y: mix(point.y, hangingHip + 12 + side * .8, catchBlend) })) as [Point, Point];
       hands[0] = { x: mix(hands[0].x, -9, catchBlend), y: mix(hands[0].y, hangingHip - 7, catchBlend) };
       angle *= 1 - catchBlend; anchorAmount[1] = catchBlend;
+      if (!reduced && p >= catchAt) {
+        const age = clamp((p - catchAt) / (1 - catchAt));
+        const impact = Math.sin(age * Math.PI) * Math.exp(-age * 4), effort = Math.sin(age * Math.PI);
+        // The fixed hand absorbs a short downward jolt. Keep it inside arm reach.
+        hip.y += impact * 1.4; hip.x += Math.sin(age * Math.PI * 2) * effort * .3;
+        hands[0].x -= effort * .8; hands[0].y -= Math.sin(age * Math.PI * 2) * effort * 1.2;
+        feet.forEach((foot, side) => {
+          const struggle = Math.sin(age * Math.PI * 3 + side * Math.PI) * effort;
+          foot.x += struggle * 1.5; foot.y += impact * 1.4 - struggle * 2.2;
+        });
+      }
     } else {
       const reach = ease((p - .76) / .24);
       const gripY = (catchY - base.y) / scale;
@@ -243,6 +313,13 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
       anchorAmount = [ease(actor.phase / .32) * (1 - settle), 1 - settle];
       const targetFeet = climb.feet.map(local) as [Point, Point];
       const plant = ease((actor.phase - .28) / .4);
+      if (!reduced) {
+        const effort = Math.sin(actor.phase * Math.PI) * (1 - settle), kneeDrive = Math.sin(clamp(actor.phase / .6) * Math.PI);
+        hip.x += effort * .45; hip.y -= effort * .55;
+        // The free knee searches upward before its boot takes the body's weight.
+        feet[1].x += kneeDrive * 1.7; feet[1].y -= kneeDrive * 3.2;
+        feet[0].x -= effort * .7; feet[0].y -= Math.sin(actor.phase * Math.PI * 2) * effort * .8;
+      }
       feet = feet.map((point, side) => ({ x: mix(point.x, targetFeet[side].x, side ? plant : settle), y: mix(point.y, targetFeet[side].y, side ? plant : settle) })) as [Point, Point];
       hands = hands.map((point, side) => ({ x: mix(point.x, local(climb.hands[side]).x, settle), y: mix(point.y, local(climb.hands[side]).y, settle) })) as [Point, Point];
       if (settle > .9999999) { handContact = climb.handContact; footContact = climb.footContact; }
@@ -253,8 +330,8 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
     }
   } else if (actor.pose === 'win') {
     const breath = reduced ? 0 : Math.sin(clock / (650 + personality * 70)) * .18;
-    const wave = reduced ? 0 : Math.sin(clock / (470 + personality * 40)) * .7;
-    hip.y = -13 + breath; hands = [{ x: -8, y: -13 }, { x: 6 + wave, y: -35 }]; angle = 0;
+    const triumph = reduced ? 0 : Math.sin(clock / (520 + personality * 40)) * .32;
+    hip.y = -13 + breath; hands = [{ x: -7, y: -11 }, { x: 6 + triumph, y: -39 + breath }]; angle = 0;
   } else {
     const breath = reduced ? 0 : Math.sin((clock + actor.index * 433) / (650 + personality * 60)) * .12;
     hip.y += breath;
@@ -264,13 +341,14 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
   const toWorld = (point: Point) => { const p = rotate({ x: point.x * facing, y: point.y }, angle); return { x: base.x + p.x * scale, y: base.y + p.y * scale }; };
   const hipWorld = toWorld(hip);
   const shoulders = [{ x: hip.x - 4.2, y: hip.y - 10 }, { x: hip.x + 4.2, y: hip.y - 10 }].map(toWorld) as [Point, Point];
+  if (actor.pose === 'win') shoulders[1].y -= 2 * scale; // a raised shoulder supports the treasure above the helmet
   let handWorld = hands.map(toWorld) as [Point, Point];
   let footWorld = feet.map(point => ({ x: base.x + point.x * facing * scale, y: base.y + point.y * scale })) as [Point, Point];
   if (actor.floating && (actor.pose === 'hang' || actor.pose === 'clamber')) {
     const climb = rawLadderRig({ ...actor, pose: 'climb', transition: undefined }, geometry, clock, reduced);
     handWorld = climb.hands; handContact = climb.handContact;
   }
-  if (actor.pose === 'climb' || actor.pose === 'clamber') {
+  if (actor.pose === 'climb' || actor.pose === 'clamber' && actor.interaction?.role !== 'thrower' || actor.interaction?.role === 'thrower' && actor.eventStage === 'resolve') {
     // Contact markers lie on actual rails and decorative rungs, independent of torso sway.
     handWorld = hands.map(point => ({ x: base.x + point.x * scale, y: base.y + point.y * scale })) as [Point, Point];
   }
@@ -283,6 +361,9 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
     if (amount > 0) handContact[side] = amount > .999999;
     return { x: mix(point.x, catchHands[side].x, amount), y: mix(point.y, catchHands[side].y, amount) };
   }) as [Point, Point];
+  if (actor.contactTargets && contactAmount > 0) {
+    handWorld = handWorld.map((point, side) => ({ x: mix(point.x, actor.contactTargets![side].x, contactAmount), y: mix(point.y, actor.contactTargets![side].y, contactAmount) })) as [Point, Point];
+  }
   const handsReached = handWorld.map((point, side) => {
     const target = reachable(shoulders[side], point, ARM_REACH * scale);
     if (Math.hypot(target.x - point.x, target.y - point.y) > .001) handContact[side] = false;
@@ -391,6 +472,10 @@ export function drawLadderCrossing(ctx: CanvasRenderingContext2D, actor: LadderA
   const floor = { x: geometry.laneX(actor.lane), y: geometry.rowY(actor.rungProgress) + (actor.depthOffset ?? 0) * geometry.rungGap };
   const stroke = (a: Point, b: Point, width: number, color: string) => line(ctx, a, b, Math.max(.6, width * s), color);
   const plate = (point: Point, color: string) => { rectangle(ctx, point.x - 8 * s, point.y, 16 * s, 2.5 * s, '#112936'); rectangle(ctx, point.x - 8 * s, point.y - s, 16 * s, 1.8 * s, color); };
+  const rope = (a: Point, b: Point, bow: number, color: string) => {
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(.6, .9 * s); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo((a.x + b.x) / 2 + bow * s, (a.y + b.y) / 2 + Math.abs(bow) * .35 * s, b.x, b.y); ctx.stroke();
+  };
   ctx.save();
   if (focused) {
     stroke(from, to, 5, '#e8b77222');
@@ -399,17 +484,24 @@ export function drawLadderCrossing(ctx: CanvasRenderingContext2D, actor: LadderA
     stroke({ x: arrowX - direction * 5 * s, y: mix(from.y, to.y, .5) - 8 * s }, { x: arrowX + direction * 5 * s, y: mix(from.y, to.y, .5) - 8 * s }, 1, '#f3d28e');
     stroke({ x: arrowX + direction * 5 * s, y: mix(from.y, to.y, .5) - 8 * s }, { x: arrowX + direction * s, y: mix(from.y, to.y, .5) - 11 * s }, 1, '#f3d28e');
   }
-  if (actor.motionType === 'drop') {
+  if (actor.motionType === 'pounce') {
+    // The other climber is the obstacle: no travelling cradle or rope disguises
+    // the leap, the two grips, or the throw's release.
+    plate(from, '#c8b780');
+    if (actor.interaction?.stage === 'grip' || actor.interaction?.stage === 'throw') {
+      const phase = actor.interaction.phase;
+      if (!reduced && phase > .38 && phase < .44 && actor.contactTargets) {
+        actor.contactTargets.forEach((target, side) => {
+          const age = (phase - .38) / .06, offset = (2 + age * 4) * s;
+          stroke({ x: target.x + (side ? 1 : -1) * offset, y: target.y - offset }, { x: target.x + (side ? 1 : -1) * (offset + s), y: target.y - offset - s }, .65, '#ead09b');
+        });
+      }
+    }
+  } else if (actor.motionType === 'drop') {
     const hinge = { x: from.x - 6 * s, y: from.y };
-    ctx.save(); ctx.translate(hinge.x, hinge.y); ctx.rotate(actor.eventStage === 'setup' ? -.04 : Math.min(1.35, p * 2)); rectangle(ctx, 0, -s, 12 * s, 2 * s, '#b6a17b'); ctx.restore();
+    if (!actor.interaction) { ctx.save(); ctx.translate(hinge.x, hinge.y); ctx.rotate(actor.eventStage === 'setup' ? -.04 : Math.min(1.35, p * 2)); rectangle(ctx, 0, -s, 12 * s, 2 * s, '#b6a17b'); ctx.restore(); }
     const hookY = geometry.rowY(actor.catchRow ?? (actor.landingRow ?? actor.rungProgress) + 2);
     stroke({ x: to.x - 6 * s, y: hookY }, { x: to.x + 6 * s, y: hookY }, 1.8, '#c3d7b1');
-    const catchProgress = actor.actionProgress ?? actor.phase;
-    if (actor.transferStage === 'catch' && catchProgress < .78) {
-      const hand = rig.hands[1];
-      stroke({ x: hand.x - 4 * s, y: hand.y - 3 * s }, { x: hand.x - 2 * s, y: hand.y - s }, .7, '#e3d09a');
-      stroke({ x: hand.x + 3 * s, y: hand.y - 4 * s }, { x: hand.x + 2 * s, y: hand.y - 2 * s }, .7, '#e3d09a');
-    }
   } else if (actor.motionType === 'slide') {
     const direction = Math.sign(to.x - from.x), normal = { x: -(to.y - from.y), y: to.x - from.x }, length = Math.max(1, Math.hypot(normal.x, normal.y));
     stroke(from, to, 7.5, '#152d3c'); stroke(from, to, 4.8, '#709b9f'); stroke(from, to, 1.5, '#adc9bd');
@@ -422,20 +514,25 @@ export function drawLadderCrossing(ctx: CanvasRenderingContext2D, actor: LadderA
     stroke({ x: pivot.x - 5 * s, y: pivot.y }, { x: pivot.x + 5 * s, y: pivot.y }, 3, '#a48568');
     if (actor.transferStage === 'catch' || actor.transferStage === 'pull') {
       const released = { x: to.x - Math.sign(to.x - from.x) * 10 * s, y: geometry.rowY(actor.catchRow ?? (actor.landingRow ?? actor.rungProgress) + 2) + 7 * s };
-      stroke(pivot, released, .8, '#ddcfa1'); stroke({ x: released.x - 5 * s, y: released.y }, { x: released.x + 5 * s, y: released.y }, 1.8, '#bea27b');
+      const flutter = reduced ? 0 : Math.sin(actor.phase * Math.PI * 2) * 1.5;
+      rope(pivot, released, flutter, '#ddcfa1'); stroke({ x: released.x - 5 * s, y: released.y }, { x: released.x + 5 * s, y: released.y }, 1.8, '#bea27b');
     } else {
       // The handle's two ends are exactly the two grip points, above the helmet.
       const grip = { x: (rig.hands[0].x + rig.hands[1].x) / 2, y: (rig.hands[0].y + rig.hands[1].y) / 2 };
-      stroke(pivot, grip, .9, '#ddcfa1'); stroke(rig.hands[0], rig.hands[1], 2, '#bea27b');
+      const slack = actor.eventStage === 'setup' ? (1 - ease(actor.phase)) * 2.2 : Math.sin(p * Math.PI) * .25;
+      rope(pivot, grip, Math.sign(to.x - from.x) * slack, '#ddcfa1'); stroke(rig.hands[0], rig.hands[1], 2, '#bea27b');
     }
     plate(from, '#b4c3a8'); plate(to, '#e3c780');
   } else if (actor.motionType === 'launch') {
     const compression = actor.eventStage === 'setup' ? ease(actor.phase) * 2 : (1 - ease(p / .2)) * 2;
     const plateY = from.y + compression * s;
-    ctx.strokeStyle = '#c2d2cd'; ctx.lineWidth = Math.max(.6, s * .8); ctx.beginPath(); ctx.moveTo(from.x, from.y + 6 * s);
-    for (let coil = 0; coil < 7; coil++) ctx.lineTo(from.x + (coil % 2 ? -3 : 3) * s, mix(from.y + 6 * s, plateY + s, coil / 6)); ctx.stroke();
-    plate({ x: from.x, y: plateY }, '#efbc68'); plate(to, '#b9d0a8');
-    if (!reduced && p > .06 && p < .35) { ctx.strokeStyle = '#ecd09180'; ctx.lineWidth = s; ctx.beginPath(); ctx.ellipse(from.x, from.y, (p - .06) * 30 * s, (p - .06) * 10 * s, 0, 0, Math.PI * 2); ctx.stroke(); }
+    if (actor.eventKind !== 'wind') {
+      ctx.strokeStyle = '#c2d2cd'; ctx.lineWidth = Math.max(.6, s * .8); ctx.beginPath(); ctx.moveTo(from.x, from.y + 6 * s);
+      for (let coil = 0; coil < 7; coil++) ctx.lineTo(from.x + (coil % 2 ? -3 : 3) * s, mix(from.y + 6 * s, plateY + s, coil / 6)); ctx.stroke();
+      plate({ x: from.x, y: plateY }, '#efbc68');
+      if (!reduced && p > .06 && p < .35) { ctx.strokeStyle = '#ecd09180'; ctx.lineWidth = s; ctx.beginPath(); ctx.ellipse(from.x, from.y, (p - .06) * 30 * s, (p - .06) * 10 * s, 0, 0, Math.PI * 2); ctx.stroke(); }
+    } else plate(from, '#acc7b3');
+    plate(to, '#b9d0a8');
   } else if (actor.motionType === 'rotate') {
     const pivot = { x: mix(from.x, to.x, .5), y: mix(from.y, to.y, .5) + 3 * s };
     stroke(from, to, 3.3, '#314d60'); stroke(from, to, 1.2, '#bf9b76');
@@ -453,6 +550,39 @@ export function drawLadderCrossing(ctx: CanvasRenderingContext2D, actor: LadderA
     for (const side of [-1, 1]) stroke({ x: floor.x + side * 9 * s, y: floor.y }, { x: floor.x + side * 9 * s, y: floor.y - 34 * s }, 1, '#98b6b1');
     stroke({ x: floor.x - 9 * s, y: floor.y - 22 * s }, { x: floor.x + 9 * s, y: floor.y - 22 * s }, 1, '#d5c18f');
     rectangle(ctx, floor.x - 7 * s, floor.y - 38 * s, 14 * s, 3 * s, '#e1be79');
+  }
+  if (!reduced && ['launch', 'swing', 'drop', 'pounce'].includes(actor.motionType)) {
+    const action = clamp(actor.actionProgress ?? actor.motionPhase ?? actor.phase), catchAt = actor.motionType === 'drop' ? .64 : .86;
+    if (actor.transferStage === 'flight' && p > .12 && p < .88 && (!actor.interaction || actor.interaction.stage === 'approach' || actor.interaction.stage === 'flight')) {
+      const dx = to.x - from.x, arc = actor.motionType === 'launch' ? -4.6 : actor.motionType === 'pounce' ? -3 : actor.motionType === 'swing' ? 4.6 : 0;
+      const dy = to.y - from.y + arc * geometry.rungGap * Math.PI * Math.cos(p * Math.PI);
+      const length = Math.max(1, Math.hypot(dx, dy)), vx = dx / length, vy = dy / length;
+      const amount = Math.sin(p * Math.PI);
+      for (let streak = 0; streak < 2; streak++) {
+        const offset = (streak ? 1 : -1) * 8 * s;
+        const tip = { x: rig.hip.x - vx * 9 * s - vy * offset, y: rig.hip.y - vy * 9 * s + vx * offset };
+        stroke({ x: tip.x - vx * (4 + streak * 2) * amount * s, y: tip.y - vy * (4 + streak * 2) * amount * s }, tip, .65, '#d2d7b968');
+      }
+    }
+    if (actor.transferStage === 'catch') {
+      const age = clamp((action - catchAt) / (1 - catchAt));
+      if (age < .34) {
+        const hand = rig.hands[1], spread = (2 + age * 10) * s;
+        for (let chip = 0; chip < 3; chip++) {
+          const direction = -Math.PI * .9 + chip * Math.PI * .4;
+          const x = hand.x + Math.cos(direction) * spread, y = hand.y + Math.sin(direction) * spread;
+          rectangle(ctx, x, y, s, s, age < .14 ? '#f2dda5' : '#c8c9a582');
+        }
+      }
+    }
+    if (actor.motionType === 'launch' && actor.transferStage === 'flight' && action < .22) {
+      const age = clamp(action / .22), direction = Math.sign(to.x - from.x);
+      for (let particle = 0; particle < 4; particle++) {
+        const x = from.x - direction * (2 + particle * 1.8 + age * (3 + particle)) * s;
+        const y = from.y - Math.sin(age * Math.PI) * (1.2 + particle * .7) * s + age * s;
+        rectangle(ctx, x, y, (1 - age * .55) * s, (1 - age * .55) * s, '#c9bd9385');
+      }
+    }
   }
   ctx.restore();
 }

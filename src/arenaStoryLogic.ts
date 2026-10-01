@@ -1,4 +1,4 @@
-import { arenaBeat, type ArenaRound } from './arenaLogic';
+import { arenaAction, arenaBeat, type ArenaRound } from './arenaLogic';
 
 export type ArenaStoryState = {
   kind: string;
@@ -10,13 +10,14 @@ export type ArenaStoryState = {
   relationLabel: string;
   leftLabel?: string;
   rightLabel?: string;
+  intruderLabel?: string;
   steps: string[];
   step: number;
 };
 
 /** The same beat drives the bodies and the explanation of their relationship. */
 export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryState {
-  const frame = arenaBeat(round, elapsed);
+  const frame = arenaBeat(round, elapsed), action = arenaAction(round, elapsed);
   const beat = frame.stage;
   const step = beat === 'approach' ? 0 : beat === 'hold' ? 1 : 2;
   const turned = step === 2;
@@ -30,18 +31,20 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
   switch (round.tactic) {
     case 'team':
       state.left = h ? [a, h] : [a];
-      state.relation = '→'; state.relationLabel = '둘이 한 명을 공격';
+      state.relation = '→'; state.relationLabel = result && round.exchange ? '공동공격을 버텨냄' : '둘이 한 명을 함께 공격';
       state.steps = ['양쪽 포위', '함께 잡기', '동시에 들기'];
       state.action = ['두 선수가 양쪽으로 돌아서 퇴로를 막습니다.', '양쪽에서 붙잡았습니다. 한 선수가 신호를 보냅니다.', '같은 순간 몸을 낮추고 함께 들어 올립니다.'][step];
       if (beat === 'turn' && frame.liftProgress === 0) state.action = '신호에 맞춰 두 선수가 함께 무릎을 굽힙니다.';
       break;
     case 'betrayal':
-      state.left = h ? [h] : [a]; state.right = [v];
-      state.leftLabel = turned ? '배신한 선수' : '동료';
-      state.rightLabel = turned ? '버려진 선수' : '도움받는 선수';
-      state.relation = turned ? '×' : '↔'; state.relationLabel = turned ? '동맹 파기 · 손을 놓음' : '임시 동맹 · 함께 버팀';
-      state.steps = ['동맹 접근', '서로 지지', '손을 놓음'];
-      state.action = ['서로 손을 잡고 임시 동맹을 맺습니다.', '동료를 믿고 버팁니다. 다른 선수가 빈틈을 살핍니다.', '동료가 갑자기 손을 놓습니다! 지켜보던 선수가 빈틈으로 들어옵니다.'][step];
+      state.step = action.stage === 'joint-attack' ? 1 : action.stage === 'resist' ? 2 : action.stage === 'betrayal' ? 3 : action.stage === 'counter' || action.stage === 'throw' || action.stage === 'release' ? 4 : 0;
+      state.left = action.betrayed ? h ? [h] : [a] : h ? [v, h] : [v]; state.right = action.betrayed ? [v] : [a];
+      state.leftLabel = action.betrayed ? '손을 놓은 동료' : '함께 공격하는 동맹';
+      state.rightLabel = action.betrayed ? '혼자 대응' : '공동공격을 버티는 선수';
+      state.relation = action.betrayed ? '×' : '→'; state.relationLabel = action.betrayed ? '동맹 파기 · 역습 시작' : action.stage === 'resist' ? '공격이 막혔습니다' : '동맹의 실제 공동공격';
+      state.steps = ['동맹', '공동공격', '저항', '배신', '역습'];
+      state.action = ['둘이 함께 상대의 양쪽으로 접근합니다.', '동맹 둘이 양쪽에서 붙잡아 상대를 함께 들어 올립니다.', '상대가 발을 딛어 버팁니다. 동맹의 첫 공격이 막혔습니다.', '동료가 손을 놓습니다! 함께 공격하던 선수가 혼자 남았습니다.', '버티던 상대가 앞에서 다시 붙잡아 역습합니다.'][state.step];
+      if (action.betrayed) state.intruderLabel = '앞에서 역습';
       break;
     case 'bait':
       state.relation = turned ? '↗' : '←'; state.relationLabel = turned ? '옆으로 회피' : '돌진 유도';
@@ -65,6 +68,6 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
       break;
   }
   if (beat === 'impact') state.action = '중심이 무너졌습니다! 모래판 밖으로 넘어갑니다.';
-  if (result) state.action = round.exchange ? '버텼습니다! 서로 손을 풀고 다시 빈틈을 봅니다.' : round.final ? '마지막 상대가 장외에 착지했습니다. 우승 확정!' : '장외에 착지했습니다. 순위가 확정되고 난투는 계속됩니다.';
+  if (result) state.action = round.exchange ? round.tactic === 'team' ? '공동공격 실패! 상대가 버텨 빠져나옵니다. 동맹도 함께 물러나 다시 빈틈을 봅니다.' : round.tactic === 'betrayal' ? '배신 뒤의 역습도 버텼습니다! 서로 손을 풀고 모두 모래판을 지켰습니다.' : '버텼습니다! 서로 손을 풀고 다시 빈틈을 봅니다.' : round.final ? '마지막 상대가 장외에 착지했습니다. 우승 확정!' : '장외에 착지했습니다. 순위가 확정되고 난투는 계속됩니다.';
   return state;
 }

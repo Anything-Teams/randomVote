@@ -7,7 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test tests/election.test.mjs tests/sports.test.mjs tests/ladder.test.mjs"
+    "test": "node --test tests/election.test.mjs tests/sports.test.mjs tests/ladder.test.mjs tests/racing-effects.test.mjs"
   },
   "keywords": [],
   "author": "",

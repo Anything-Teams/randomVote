@@ -4,10 +4,6 @@
 .racing-stage-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex: 0 0 32px; padding: 0 13px; color: #9babbb; font: 800 9px monospace; letter-spacing: 1px; background: linear-gradient(110deg, #132b3e, #091827); border-bottom: 1px solid #5f695342; }
 .racing-stage-top > span:first-child { color: #ebd39c; }
 .racing-stage-top i { display: inline-block; width: 5px; height: 5px; margin-right: 8px; border-radius: 50%; background: #edb371; box-shadow: 0 0 8px #edb37188; }
-.racing-view-switch { display: flex; flex: none; gap: 2px; padding: 2px; border: 1px solid #556774; border-radius: 4px; }
-.racing-view-switch button { border: 0; border-radius: 2px; padding: 2px 8px; color: #b6c5cc; background: transparent; font: 800 9px "Malgun Gothic", sans-serif; cursor: pointer; }
-.racing-view-switch button[aria-pressed="true"] { color: #263743; background: #dec796; }
-.racing-view-switch button:focus-visible { outline: 2px solid #fff1c6; outline-offset: 2px; }
 .racing-canvas-wrap { flex: 1; min-height: 0; position: relative; overflow: hidden; }
 .racing-canvas { display: block; width: 100%; height: 100%; }
 .racing-phase-badge { position: absolute; top: 8px; left: 9px; max-width: 68%; pointer-events: none; padding: 4px 8px; border-left: 2px solid #dbc795; border-radius: 2px; background: #0c1c2bdf; color: #f3dfaf; font: 800 10px monospace; letter-spacing: .4px; }

@@ -58,7 +58,7 @@ function Preview() {
       </label>
       <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>당첨 지점
         <select aria-label="사다리 당첨 지점" value={targetLane} onChange={event => selectTarget(Number(event.target.value))}>
-          {Array.from({ length: count }, (_, lane) => <option key={lane} value={lane}>위쪽 문 {lane + 1}</option>)}
+          {Array.from({ length: count }, (_, lane) => <option key={lane} value={lane}>보물 상자 {lane + 1}</option>)}
         </select>
       </label>
       <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}><input type="checkbox" checked={longNames} onChange={event => setLongNames(event.target.checked)} />긴 이름</label>
@@ -67,7 +67,7 @@ function Preview() {
       }} />입력 순서 도착 검증</label>
       <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}><input type="checkbox" checked={reduced} onChange={event => { forceReduced = event.target.checked; setReduced(event.target.checked); setPlaying(false); }} />모션 줄이기</label>
       <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>장면 시드<input aria-label="사다리 장면 시드" type="number" min={0} max={999} value={storySeed} onChange={event => { setStorySeed(Number(event.target.value)); setPlaying(false); setPreview(true); setElapsed(0); setRunId(id => id + 1); }} style={{ width: 42 }} /></label>
-      <button type="button" onClick={() => { setPlaying(false); setPreview(true); setElapsed(0); setRunId(id => id + 1); }}>문 고르기</button>
+      <button type="button" onClick={() => { setPlaying(false); setPreview(true); setElapsed(0); setRunId(id => id + 1); }}>보물 고르기</button>
       {[0, 5, 12, 20, 28, 36, 40, 44].map(second => <button type="button" key={second} onClick={() => seek(second * 1000)}>{second}초</button>)}
       <button type="button" onClick={togglePlay}>{playing ? '정지' : '재생'}</button>
       <button type="button" onClick={() => { setPreview(false); setElapsed(0); setPlaying(true); setRunId(id => id + 1); }}>처음부터</button>
@@ -75,7 +75,7 @@ function Preview() {
     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, flex: 'none' }}>
       <output style={{ minWidth: 39 }}>{(elapsed / 1000).toFixed(1)}초</output>
       <input aria-label="사다리 검증 시간" aria-valuetext={`${(elapsed / 1000).toFixed(1)}초`} type="range" min={0} max={DURATION} step={100} value={elapsed} onChange={event => seek(Number(event.target.value))} style={{ flex: 1, minWidth: 0 }} />
-      <span>{targetLane + 1}번 문 · 당첨 지점</span>
+      <span>{targetLane + 1}번 보물 · 당첨 지점</span>
     </label>
     <div className="sports-body" key={`${count}-${runId}-${reduced}`} style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
       <LadderShow candidates={candidates} order={order} elapsed={elapsed} duration={DURATION} paused={!playing} preview={preview} targetLane={targetLane} onTargetChange={selectTarget} storySeed={storySeed} />

@@ -1,5 +1,5 @@
 import type { Candidate } from './election';
-import { activeRacingIncident, racingIncidentStatus, racingStandings, readRacingTravel, type RacingTimeline } from './racingNarrative';
+import { racingIncidentStatus, racingStandings, readRacingTravel, type RacingTimeline } from './racingNarrative';
 
 export type RacingCamera = { center: number; span: number; elapsed: number | null; key: string; horses: Map<string, { y: number; scale: number }> };
 export type RacingPlacement = { id: string; index: number; distance: number; x: number; y: number; scale: number; featured: boolean };
@@ -12,19 +12,16 @@ export function racingFocusIds(timeline: RacingTimeline, elapsed: number): strin
   const straightOpponents = timeline.straight.waves.flatMap(wave => wave.swaps.flatMap(swap =>
     wave.beforeOrder.indexOf(swap.aheadId) < 3 && elapsed >= swap.start - 500 && elapsed < swap.end + 650
       ? [swap.aheadId, swap.behindId] : []));
-  const incident = activeRacingIncident(timeline, elapsed)
-    ?? timeline.incidents.find(item => elapsed >= item.end && elapsed < item.end + 1600)
-    ?? timeline.incidents.find(item => item.start > elapsed && item.start - elapsed <= 1100);
-  if (!incident) return [...new Set([...leaders, ...straightOpponents])];
-  const status = racingIncidentStatus(timeline, incident, elapsed);
-  return [...new Set([...leaders, ...straightOpponents, incident.actorId, incident.rivalId, ...status.opponentIds])];
+  const incidentActors = timeline.incidents.filter(item => elapsed >= item.start - 1100 && elapsed < item.end + 1600)
+    .flatMap(incident => [incident.actorId, incident.rivalId, ...racingIncidentStatus(timeline, incident, elapsed).opponentIds]);
+  return [...new Set([...leaders, ...straightOpponents, ...incidentActors])];
 }
 
 /** A fixed distance projection and persistent horses replace rank-based scene cuts. */
 export function placeRacingField(camera: RacingCamera, candidates: Candidate[], timeline: RacingTimeline, elapsed: number, w: number, h: number, delta: number, immediate = false): RacingPlacement[] {
   const focus = racingFocusIds(timeline, elapsed);
   const distances = candidates.map(candidate => readRacingTravel(timeline, candidate.id, elapsed));
-  const tracked = candidates.flatMap((candidate, index) => focus.includes(candidate.id) ? [distances[index]] : []);
+  const tracked = distances;
   const ahead = Math.max(0, ...tracked), behind = tracked.length ? Math.min(...tracked) : 0;
   const span = Math.max(.067, (ahead - behind) * 1.35 + .016), center = (ahead + behind) / 2;
   const key = timeline.ids.join('|') + ':' + timeline.finishOrder.join('|');

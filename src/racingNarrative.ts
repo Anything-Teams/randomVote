@@ -1,6 +1,6 @@
 import type { Candidate } from './election';
 
-export type RacingIncidentKind = 'blocked' | 'inside' | 'outside' | 'late-start' | 'gust' | 'balance' | 'draft' | 'fatigue' | 'patience' | 'lead-change' | 'rail' | 'last-kick';
+export type RacingIncidentKind = 'blocked' | 'inside' | 'outside' | 'late-start' | 'gust' | 'balance' | 'draft' | 'fatigue' | 'patience' | 'lead-change' | 'rail' | 'last-kick' | 'hay-jump' | 'puddle' | 'kick-dust';
 export type RacingIncident = {
   kind: RacingIncidentKind;
   actorId: string;
@@ -17,6 +17,9 @@ export type RacingTimeline = { start: number; finish: number; ids: string[]; fin
 export type RacingStanding = { id: string; distance: number; rank: number; finished: boolean; finishTime: number };
 export type RacingIncidentStatus = { stage: 'setup' | 'action' | 'outcome'; beforeRank: number; currentRank: number; afterRank: number; opponentIds: string[]; overtakenIds: string[]; passedByIds: string[]; nextRivalId?: string };
 export const RACING_STORIES: { kind: RacingIncidentKind; title: string; setup: string; action: string; outcome: string }[] = [
+  { kind: 'hay-jump', title: '굴러온 건초를 넘어라!', setup: '바람에 굴러온 건초 더미! 기수가 고삐를 잡고 도약을 준비합니다.', action: '앞다리를 접고 훌쩍! 건초를 뛰어넘으며 다시 땅을 딛습니다.', outcome: '건초 더미를 넘고 착지했습니다. 다음 상대를 향해 질주합니다.' },
+  { kind: 'puddle', title: '물웅덩이 대탈출', setup: '트랙에 커다란 물웅덩이가 나타났습니다. 말이 앞발을 모읍니다.', action: '물 위로 점프! 발굽이 닿은 자리에서 물방울이 터집니다.', outcome: '물을 넘은 말이 발을 단단히 딛고 추격을 이어갑니다.' },
+  { kind: 'kick-dust', title: '꾀돌이의 흙먼지', setup: '말이 앞발로 흙을 긁습니다. 옆의 기수가 눈을 가립니다.', action: '앞발을 차며 흙먼지를 뿌립니다! 상대가 몸을 숙인 틈을 노립니다.', outcome: '흙먼지가 걷힙니다. 두 말은 고삐를 다시 쥐고 경합을 이어갑니다.' },
   { kind: 'blocked', title: '막힌 길, 열린 틈', setup: '앞말에 길이 막혔습니다. 고삐를 당기며 틈을 기다립니다.', action: '한 박자 기다린 기수가 안쪽 빈 공간으로 파고듭니다.', outcome: '기다린 보람이 있습니다. 안쪽 돌파에 성공했습니다.' },
   { kind: 'inside', title: '짧은 길의 승부', setup: '코너 안쪽에 말 한 마리가 지날 틈이 생겼습니다.', action: '기수가 몸을 낮춥니다. 짧은 코스로 앞말을 따라잡습니다.', outcome: '코너를 짧게 돌아 순위를 끌어올렸습니다.' },
   { kind: 'outside', title: '바깥쪽의 추격자', setup: '말들이 몰린 안쪽을 버리고 바깥으로 크게 나갑니다.', action: '거리는 길어졌지만 앞이 열렸습니다. 보폭을 넓힙니다.', outcome: '자유롭게 달린 바깥 추격이 통했습니다.' },
@@ -56,7 +59,8 @@ export function createRacingIncidents(candidates: Candidate[], order: string[], 
   const result: RacingIncident[] = [];
   let previousActor = '';
   for (let scene = 0; scene < 3; scene++) {
-    const templateIndex = random(kinds.length), template = kinds.splice(templateIndex, 1)[0];
+    const pool = kinds.filter(story => scene === 0 ? ['hay-jump', 'puddle', 'kick-dust'].includes(story.kind) : scene === 1 ? ['balance', 'gust', 'fatigue'].includes(story.kind) : !['hay-jump', 'puddle', 'kick-dust', 'balance', 'gust', 'fatigue'].includes(story.kind));
+    const template = pool[random(pool.length)]; kinds.splice(kinds.indexOf(template), 1);
     const losing = template.kind === 'fatigue' || template.kind === 'balance';
     const eligible = positions.filter((id, rank) => id !== previousActor && (losing ? rank < positions.length - 1 : rank > 0));
     const fallback = positions.filter((_, rank) => losing ? rank < positions.length - 1 : rank > 0);
@@ -70,7 +74,7 @@ export function createRacingIncidents(candidates: Candidate[], order: string[], 
     const waitingOrder = template.kind === 'blocked' ? moved(positions, actorId, Math.min(positions.length - 1, rank + 1)) : [...positions];
     positions = moved(positions, actorId, destination);
     const scale = Math.max(0.25, (duration - 10_500) / 33_500);
-    const start = 5500 + (5000 + scene * 8500) * scale;
+    const start = 5500 + (5000 + scene * 7250) * scale;
     result.push({ kind: template.kind, actorId, rivalId, start, end: start + 5500 * scale, beforeOrder, waitingOrder, afterOrder: [...positions] });
     previousActor = actorId;
   }
@@ -96,8 +100,8 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   for (const incident of incidents) {
     knots.push(makeKnot(incident.start, incident.beforeOrder), makeKnot(incident.start + 1300 * scale, incident.waitingOrder), makeKnot(incident.end, incident.afterOrder));
   }
-  if (!incidents.length) knots.push(makeKnot(start + 27_500 * scale, firstOrder));
-  const straightStart = start + 29_500 * scale, straightOrder = incidents[incidents.length - 1]?.afterOrder ?? firstOrder;
+  if (!incidents.length) knots.push(makeKnot(start + 24_500 * scale, firstOrder));
+  const straightStart = start + 26_500 * scale, straightOrder = incidents[incidents.length - 1]?.afterOrder ?? firstOrder;
   // Move the field's common origin before the straight, without changing any actual gap.
   knots.push(makeKnot(straightStart, straightOrder, true));
   knots.push(makeKnot(finish, finishOrder, true));
