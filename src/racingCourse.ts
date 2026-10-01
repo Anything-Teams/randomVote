@@ -202,14 +202,56 @@ export function racingTopLegPose(clock: number, index: number, running: boolean 
   });
 }
 
-function topHorse(ctx: CanvasRenderingContext2D, candidate: Candidate, index: number, x: number, y: number, angle: number, scale: number, clock: number, reduced: boolean, running: boolean | number) {
+export function racingGateWalk(elapsed: number, index: number, approach: number) {
+  const progress = smooth((elapsed - index * 55) / 2000);
+  return { distance: approach * progress, progress };
+}
+
+/** During stance, hoof retraction exactly cancels the horse's travelled distance. */
+export function racingWalkingTopLegPose(distance: number, index: number) {
+  const stance = .64, stride = 12, phase = (distance / (stride / stance) + index * .13) % 1;
+  return [
+    { side: -1, front: false, offset: .5 }, { side: 1, front: false, offset: 0 },
+    { side: -1, front: true, offset: .25 }, { side: 1, front: true, offset: .75 },
+  ].map(leg => {
+    const p = (phase - leg.offset + 1) % 1, support = p < stance;
+    const swing = clamp((p - stance) / (1 - stance), 0, 1), fold = support ? 0 : Math.sin(swing * Math.PI) ** 2;
+    const rootY = leg.front ? 5 : -6.8, restY = leg.front ? 10.1 : -7.3;
+    const hoofY = restY + (support ? stride * (.5 - p / stance) : stride * (smooth(swing) - .5));
+    return { ...leg, support, root: { x: leg.side * 3.25, y: rootY }, knee: { x: leg.side * (3.9 - fold * .4), y: rootY + (hoofY - rootY) * .55 }, hoof: { x: leg.side * (4.35 - fold * .65), y: hoofY } };
+  });
+}
+
+/** Finish the last swing, then place the other feet before waiting in the stall. */
+export function racingGateLegPose(elapsed: number, index: number, approach: number, preview = false, reduced = false) {
+  const resting = racingTopLegPose(0, index, false, true).map(leg => ({ ...leg, support: true }));
+  if (preview || reduced) return resting;
+  const walk = racingGateWalk(elapsed, index, approach), walking = racingWalkingTopLegPose(walk.distance, index);
+  const arrivedAt = 2000 + index * 55;
+  if (elapsed <= arrivedAt) return walking;
+  const steps = walking.map((leg, legIndex) => ({ legIndex, support: leg.support })).sort((a, b) => Number(a.support) - Number(b.support));
+  return walking.map((leg, legIndex) => {
+    const order = steps.findIndex(step => step.legIndex === legIndex), progress = clamp((elapsed - arrivedAt - order * 80) / 160, 0, 1);
+    const settle = smooth(progress), lift = Math.sin(progress * Math.PI) ** 2;
+    const target = resting[legIndex];
+    const blendPoint = (point: { x: number; y: number }, destination: { x: number; y: number }, tuck = 0) => ({ x: point.x + (destination.x - point.x) * settle - leg.side * lift * tuck, y: point.y + (destination.y - point.y) * settle });
+    return { ...leg, support: progress >= 1 || (progress <= 0 && leg.support), root: blendPoint(leg.root, target.root), knee: blendPoint(leg.knee, target.knee, .2), hoof: blendPoint(leg.hoof, target.hoof, .35) };
+  });
+}
+
+function topHorse(ctx: CanvasRenderingContext2D, candidate: Candidate, index: number, x: number, y: number, angle: number, scale: number, clock: number, reduced: boolean, running: boolean | number, gateLegs?: ReturnType<typeof racingGateLegPose>) {
   const activity = reduced ? 0 : typeof running === 'number' ? clamp(running, 0, 1) : Number(running);
   const gait = reduced ? 0 : clock / (95 + index % 5 * 7) + index * 1.91, stride = Math.sin(gait) * activity, breath = reduced ? 0 : Math.sin(clock / 680 + index) * .22 * (1 - activity);
   const coat = coats[index % coats.length], dark = shadows[index % shadows.length];
   ctx.save(); ctx.translate(x, y); ctx.rotate(angle - Math.PI / 2); ctx.scale(scale, scale);
   ellipse(ctx, 1.8, 2.2, 6.8, 14, '#07132166');
   ctx.lineCap = 'round';
-  for (const [leg, pose] of racingTopLegPose(clock, index, running, reduced).entries()) {
+  const gallop = racingTopLegPose(clock, index, running, reduced);
+  const legs = gateLegs ? gateLegs.map((leg, i) => {
+    const blendPoint = (point: { x: number; y: number }, target: { x: number; y: number }) => ({ x: point.x + (target.x - point.x) * activity, y: point.y + (target.y - point.y) * activity });
+    return { ...leg, root: blendPoint(leg.root, gallop[i].root), knee: blendPoint(leg.knee, gallop[i].knee), hoof: blendPoint(leg.hoof, gallop[i].hoof) };
+  }) : gallop;
+  for (const [leg, pose] of legs.entries()) {
     ctx.strokeStyle = dark; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(pose.root.x, pose.root.y); ctx.lineTo(pose.knee.x, pose.knee.y); ctx.stroke();
     ctx.strokeStyle = leg % 3 === 0 ? '#d2c6af' : coat; ctx.lineWidth = 1.25; ctx.beginPath(); ctx.moveTo(pose.knee.x, pose.knee.y); ctx.lineTo(pose.hoof.x, pose.hoof.y); ctx.stroke();
     ctx.strokeStyle = '#172129'; ctx.lineWidth = 1.45; ctx.beginPath(); ctx.moveTo(pose.hoof.x, pose.hoof.y - .3); ctx.lineTo(pose.hoof.x, pose.hoof.y + .6); ctx.stroke();
@@ -326,8 +368,9 @@ export function drawRacingStartingGate(ctx: CanvasRenderingContext2D, w: number,
   ctx.strokeStyle = '#eee3bc'; ctx.lineWidth = Math.max(1, h * .009); ctx.beginPath(); ctx.moveTo(-lineWidth / 2, 0); ctx.lineTo(lineWidth / 2, 0); ctx.stroke();
   const launch = preview ? 0 : reduced ? Number(elapsed >= 5500) : smooth((elapsed - 5500) / 1150), opened = preview ? 0 : smooth((elapsed - 5500) / 430);
   candidates.forEach((candidate, index) => {
-    const sx = left + slot * (index + .5), incoming = preview || reduced ? 1 : smooth((elapsed - index * 55) / 1700);
-    const travel = -17.4 * scale - (1 - incoming) * Math.min(h * .12, 12 * scale) + launch * h * .82;
+    const sx = left + slot * (index + .5), approach = Math.min(44, h * .4 / scale);
+    const walk = preview || reduced ? { distance: approach, progress: 1 } : racingGateWalk(elapsed, index, approach);
+    const travel = -17.4 * scale - (approach - walk.distance) * scale + launch * h * .82;
     const horseX = sx + Math.cos(forward) * travel, horseY = Math.sin(forward) * travel;
     box(ctx, sx - slot * .47, -gateDepth - 4 * scale, slot * .94, gateDepth + 5 * scale, '#132a3b32');
     for (const side of [-1, 1]) {
@@ -335,7 +378,7 @@ export function drawRacingStartingGate(ctx: CanvasRenderingContext2D, w: number,
       ctx.fillStyle = '#91a5a7'; ctx.fillRect(wall - .6 * scale, -gateDepth, 1.2 * scale, gateDepth + scale);
       for (let bar = 0; bar < 4; bar++) { ctx.strokeStyle = '#d3ddcc66'; ctx.lineWidth = .8 * scale; ctx.beginPath(); ctx.moveTo(wall - 1.1 * scale, -gateDepth + (bar + 1) * gateDepth / 5); ctx.lineTo(wall + 1.1 * scale, -gateDepth + (bar + 1) * gateDepth / 5); ctx.stroke(); }
     }
-    topHorse(ctx, candidate, index, horseX, horseY, forward, scale, clock, reduced, launch);
+    topHorse(ctx, candidate, index, horseX, horseY, forward, scale, clock, reduced, launch, racingGateLegPose(elapsed, index, approach, preview, reduced));
     // Split front doors pivot sideways together at 5500 ms; no stall has an earlier release.
     for (const side of [-1, 1]) {
       const hingeX = sx + side * slot * .43, tipX = hingeX - side * slot * .42 * (1 - opened), tipY = opened * slot * .31;

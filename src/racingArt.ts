@@ -13,7 +13,7 @@ const path = (ctx: CanvasRenderingContext2D, draw: () => void, fill: string | Ca
   ctx.beginPath(); draw(); ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = .7; ctx.stroke(); }
 };
 
-export type RaceHorseMotion = { gait?: 'idle' | 'walk' | 'gallop'; phase?: number; settle?: number; victory?: number; jump?: number; stumble?: number; crouch?: number };
+export type RaceHorseMotion = { gait?: 'idle' | 'walk' | 'gallop'; phase?: number; settle?: number; victory?: number; jump?: number; stumble?: number; crouch?: number; check?: number };
 
 /** A grounded four-beat stride, with the rider's pelvis and boots tied to the saddle. */
 export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidate, index: number, x: number, y: number, scale: number, clock: number, speed: number, reduced: boolean, cheer = false, lean = 0, motion: RaceHorseMotion = {}) {
@@ -36,7 +36,8 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   const phase = reduced ? 0 : wrap(motion.phase ?? clock / period + index * .193);
   const cycle = phase * Math.PI * 2;
   const effort = mode === 'walk' ? 1 : clamp(speed, .65, 1.4);
-  const strideLength = mode === 'walk' ? 18 : 26 * (.90 + effort * .07);
+  const check = reduced ? 0 : clamp(motion.check ?? 0, 0, 1);
+  const strideLength = (mode === 'walk' ? 18 : 26 * (.90 + effort * .07)) * (1 - check * .18);
   const stance = mode === 'walk' ? .62 : .20;
   const breath = reduced ? 0 : Math.sin(clock / 960 + index * .83) * .18;
   const jump = reduced ? 0 : clamp(motion.jump ?? 0, 0, 1), stumble = reduced ? 0 : motion.stumble ?? 0, crouch = reduced ? 0 : clamp(motion.crouch ?? 0, 0, 1);
@@ -114,15 +115,15 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   ctx.fillStyle = '#ffffff77'; ctx.fillRect(-14, -36, 29, 2); raceLabel(ctx, String(index + 1).padStart(2, '0'), -6, -26, 10, '#111e2c', true);
   path(ctx, () => { ctx.moveTo(-11, -40); ctx.bezierCurveTo(-5, -44, 4, -43, 8, -39); ctx.lineTo(7, -36); ctx.lineTo(-10, -36); ctx.closePath(); }, '#2b2430', '#d6b985');
   const pelvis = { x: -3, y: -43 - activity * .55 };
-  const shoulder = { x: mix(-2, 11, activity) + crouch * 5 - stumble * 3, y: mix(-59, -53, activity) - activity * Math.sin(cycle + .3) * .35 + crouch * 3 };
+  const shoulder = { x: mix(-2, 11, activity) + crouch * 5 - stumble * 3 - check * 9, y: mix(-59, -53, activity) - activity * Math.sin(cycle + .3) * .35 + crouch * 3 - check * 3 };
   const boot = { x: 5, y: -23 }, knee = joint(pelvis, boot, 12.5, 10.5, 1);
   bone(pelvis, knee, 5.2, '#e3e0d8'); bone(knee, boot, 4.4, '#e3e0d8');
   ctx.strokeStyle = '#b1a07e'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.moveTo(-1, -39); ctx.lineTo(6, -23); ctx.stroke();
   ctx.strokeStyle = '#d3bd8a'; ctx.lineWidth = 1.1; ctx.beginPath(); ctx.ellipse(7, -22.5, 4, 1.8, 0, 0, Math.PI * 2); ctx.stroke();
   bone({ x: boot.x - 2, y: boot.y }, { x: boot.x + 5, y: boot.y }, 3.8, '#142135');
   const victory = reduced ? (cheer ? 1 : 0) : ease(clamp(motion.victory ?? (cheer ? 1 : 0), 0, 1));
-  const farHand = { x: mix(15, 24, activity), y: mix(-46, -43, activity) };
-  const nearHand = { x: mix(mix(16, 25, activity), 13, victory), y: mix(mix(-45, -43, activity), -78, victory) };
+  const farHand = { x: mix(15, 24, activity) - check * 9, y: mix(-46, -43, activity) - check * 2 };
+  const nearHand = { x: mix(mix(16, 25, activity) - check * 9, 13, victory), y: mix(mix(-45, -43, activity) - check * 2, -78, victory) };
   const bridle = rotate({ x: 49 - 23, y: -40 + 29 }, nod);
   ctx.strokeStyle = '#e1c496'; ctx.lineWidth = .9; ctx.beginPath(); ctx.moveTo(bridle.x + 23, bridle.y - 29); ctx.quadraticCurveTo(34, -42, farHand.x, farHand.y); ctx.stroke();
   const riderArm = (a: Point, hand: Point, far: boolean) => {

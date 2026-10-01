@@ -2,9 +2,10 @@ import type { Candidate } from './election';
 
 export const LADDER_DURATION = 44_000;
 export const LADDER_RUNGS = 24;
+export const LADDER_ROOF_STEAL_CHANCE = .05;
 export type LadderEventKind = 'loose-rung' | 'trapdoor' | 'wind' | 'pendulum' | 'spring' | 'bird' | 'paint' | 'sticky' | 'rope-tangle' | 'balloon' | 'false-sign' | 'bucket' | 'banana' | 'zipline' | 'lights-out' | 'safety-net' | 'leap-grapple' | 'crumbling-step' | 'rocket-boots';
 export type LadderMotionType = 'slide' | 'drop' | 'swing' | 'launch' | 'rotate' | 'conveyor' | 'portal' | 'pounce';
-export type LadderPose = 'idle' | 'climb' | 'bridge' | 'balance' | 'fall' | 'hang' | 'clamber' | 'win' | 'arrived' | 'slide' | 'drop' | 'swing' | 'launch' | 'rotate' | 'ride' | 'transfer';
+export type LadderPose = 'idle' | 'climb' | 'bridge' | 'balance' | 'fall' | 'hang' | 'clamber' | 'win' | 'arrived' | 'slide' | 'drop' | 'swing' | 'launch' | 'rotate' | 'ride' | 'transfer' | 'run';
 export type LadderEventStage = 'setup' | 'action' | 'resolve';
 export type LadderTransferStage = 'takeoff' | 'flight' | 'catch' | 'pull';
 export type LadderInteraction = { kind: 'throw'; role: 'thrower' | 'victim'; phase: number; stage: 'approach' | 'grip' | 'throw' | 'flight' | 'catch'; partnerId: string };
@@ -14,9 +15,10 @@ export type LadderBridge = { id: string; row: number; start: number; end: number
 export type LadderEvent = LadderStory & { id: string; actorId: string; partnerId: string; actors: string[]; setup: number; action: number; resolve: number; end: number; row: number; fromLane: number; toLane: number; fromRow: number; toRow: number; landingRow: number; partnerLandingRow: number; bridgeId: string; pivotLane: number; pivotRow: number };
 export type LadderActiveEvent = LadderEvent & { stage: LadderEventStage; phase: number; age: number };
 export type LadderWave = { id: string; index: number; row: number; start: number; end: number; bridgeIds: string[]; eventId?: string };
-export type LadderPathSegment = { id: string; kind: 'climb' | 'bridge' | 'event'; start: number; end: number; fromLane: number; toLane: number; fromRow: number; toRow: number; bridgeId?: string; eventId?: string; transferRole?: 'primary' | 'partner' };
+export type LadderPathSegment = { id: string; kind: 'climb' | 'bridge' | 'event' | 'roof'; start: number; end: number; fromLane: number; toLane: number; fromRow: number; toRow: number; bridgeId?: string; eventId?: string; transferRole?: 'primary' | 'partner' };
 export type LadderPath = { id: string; index: number; startLane: number; doorLane: number; startAt: number; arrivalAt: number; segments: LadderPathSegment[] };
-export type LadderTimeline = { duration: number; laneCount: number; rungCount: number; ids: string[]; doorOrder: string[]; bridges: LadderBridge[]; waves: LadderWave[]; paths: Record<string, LadderPath>; events: LadderEvent[] };
+export type LadderRoofFinish = { actorId: string; otherId: string; targetLane: number; entryLane: number; runStart: number; claimAt: number };
+export type LadderTimeline = { duration: number; laneCount: number; rungCount: number; ids: string[]; doorOrder: string[]; ladderOrder: string[]; bridges: LadderBridge[]; waves: LadderWave[]; paths: Record<string, LadderPath>; events: LadderEvent[]; roofFinish?: LadderRoofFinish };
 export type LadderActorFrame = { id: string; index: number; lane: number; height: number; rungProgress: number; pose: LadderPose; phase: number; fromLane?: number; toLane?: number; fromRow?: number; toRow?: number; bridgeId?: string; eventId?: string; eventStage?: LadderEventStage; supportRow?: number; fallDepth?: number; tilt: number; arrived: boolean; doorLane?: number; winner: boolean; motionType?: LadderMotionType; motionPhase?: number; actionProgress?: number; transferProgress?: number; transferStage?: LadderTransferStage; transferRole?: 'primary' | 'partner'; gripLane?: number; gripRow?: number; catchRow?: number; landingRow?: number; pivotLane?: number; pivotRow?: number; depthOffset?: number; interaction?: LadderInteraction };
 export type LadderFrame = { elapsed: number; actors: LadderActorFrame[]; activeEvents: LadderActiveEvent[]; winnerId?: string; complete: boolean };
 
@@ -68,13 +70,22 @@ function flightProgress(type: LadderMotionType, value: number) {
 }
 
 /** Destinations are already uniformly drawn. Every route change below conserves that draw. */
-export function buildLadderTimeline(candidates: readonly Candidate[], order: readonly string[], duration = LADDER_DURATION, storySeed = 1): LadderTimeline {
+export function buildLadderTimeline(candidates: readonly Candidate[], order: readonly string[], duration = LADDER_DURATION, storySeed = 1, finishTarget?: number): LadderTimeline {
   if (!Number.isFinite(duration) || duration < 20_000) throw new RangeError('Ladder duration must be at least 20 seconds');
   const ids = candidates.map(candidate => candidate.id), laneCount = ids.length;
   if (laneCount > 10 || new Set(ids).size !== laneCount) throw new RangeError('Ladder supports up to 10 unique participants');
   const doorOrder = order.length ? [...order] : [...ids];
   if (doorOrder.length !== laneCount || new Set(doorOrder).size !== laneCount || doorOrder.some(id => !ids.includes(id))) throw new RangeError('Every destination must contain one participant');
-  const timeline: LadderTimeline = { duration, laneCount, rungCount: LADDER_RUNGS, ids, doorOrder, bridges: [], waves: [], paths: Object.create(null) as Record<string, LadderPath>, events: [] };
+  if (finishTarget !== undefined && laneCount && (!Number.isInteger(finishTarget) || finishTarget < 0 || finishTarget >= laneCount)) throw new RangeError('Select an existing treasure');
+  const ladderOrder = [...doorOrder], finishRandom = seeded(storySeed ^ 0x726f6f66);
+  let roofFinish: LadderRoofFinish | undefined;
+  if (laneCount > 1 && finishTarget !== undefined && finishRandom() < LADDER_ROOF_STEAL_CHANCE) {
+    const adjacent = [finishTarget - 1, finishTarget + 1].filter(lane => lane >= 0 && lane < laneCount);
+    const entryLane = adjacent[Math.floor(finishRandom() * adjacent.length)];
+    roofFinish = { actorId: doorOrder[finishTarget], otherId: doorOrder[entryLane], targetLane: finishTarget, entryLane, runStart: 0, claimAt: 0 };
+    [ladderOrder[finishTarget], ladderOrder[entryLane]] = [ladderOrder[entryLane], ladderOrder[finishTarget]];
+  }
+  const timeline: LadderTimeline = { duration, laneCount, rungCount: LADDER_RUNGS, ids, doorOrder, ladderOrder, bridges: [], waves: [], paths: Object.create(null) as Record<string, LadderPath>, events: [], roofFinish };
   if (!laneCount) return timeline;
   const unit = duration / LADDER_DURATION, random = seeded(storySeed), occupants = [...ids], pairWaves: { leftLane: number; rightLane: number; actors: [string, string] }[][] = [];
   const addPairs = (lanes: [number, number][]) => {
@@ -91,14 +102,14 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
     }
     for (const parity of [0, 1, 0]) addWave(Array.from({ length: Math.floor((laneCount - parity) / 2) }, (_, index) => parity + index * 2));
     if (laneCount === 2) { addWave([0]); addWave([0]); }
-    const ranks = new Map(doorOrder.map((id, index) => [id, index]));
+    const ranks = new Map(ladderOrder.map((id, index) => [id, index]));
     for (let pass = 0; pass < laneCount; pass++) {
       const lanes: number[] = [];
       for (let lane = pass % 2; lane + 1 < laneCount; lane += 2) if (ranks.get(occupants[lane])! > ranks.get(occupants[lane + 1])!) lanes.push(lane);
       addWave(lanes);
     }
   }
-  if (occupants.some((id, index) => id !== doorOrder[index])) throw new Error('Ladder bridge permutation is incomplete');
+  if (occupants.some((id, index) => id !== ladderOrder[index])) throw new Error('Ladder bridge permutation is incomplete');
   const normalTypes: LadderMotionType[] = ['swing', 'launch', 'drop', 'rotate', 'conveyor', 'slide', 'portal'];
   pairWaves.forEach((pairs, index) => {
     // Leave room below for a rope swing and above for a body-height leap.
@@ -190,10 +201,12 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
   }
   const remainingWork = new Map<string, number>();
   const finalClimbTails = new Map<string, number>();
+  const roofDuration = (id: string) => roofFinish ? id === roofFinish.actorId ? 1300 * unit : id === roofFinish.otherId ? 1400 * unit : 0 : 0;
   for (const id of ids) {
     const last = timeline.bridges.filter(bridge => bridge.actorIds.includes(id)).at(-1);
     if (!last) continue;
-    const climb = Math.max(600 * unit, (LADDER_RUNGS - landingFor(last, id)) * 300 * unit);
+    const finishDelay = id === roofFinish?.actorId ? 1000 * unit + roofDuration(roofFinish.otherId) : 0;
+    const climb = Math.max(600 * unit, (LADDER_RUNGS - landingFor(last, id)) * 300 * unit) + roofDuration(id) + finishDelay;
     finalClimbTails.set(last.id, Math.max(finalClimbTails.get(last.id) ?? 0, climb));
   }
   const arrivalHeadroom = 1700 * unit;
@@ -261,8 +274,9 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
   for (let index = 0; index < laneCount; index++) {
     const id = ids[index], startAt = (3000 + index % 4 * 45) * unit;
     const ownBridges = timeline.bridges.filter(item => item.actorIds.includes(id)), last = ownBridges.at(-1);
-    const finalClimbMinimum = last ? Math.max(600 * unit, (LADDER_RUNGS - landingFor(last, id)) * 300 * unit) : 0;
-    const arrivalAt = Math.max((39_500 + random() * 1700) * unit, last ? last.end + finalClimbMinimum : 0);
+    const finalClimbMinimum = last ? Math.max(600 * unit, (LADDER_RUNGS - landingFor(last, id)) * 300 * unit) : 0, runDuration = roofDuration(id);
+    const ordinaryArrival = (39_500 + random() * 1700) * unit;
+    const arrivalAt = Math.max(id === roofFinish?.actorId ? 38_000 * unit : ordinaryArrival, last ? last.end + finalClimbMinimum + runDuration : 0);
     const path: LadderPath = { id, index, startLane: index, doorLane: doorOrder.indexOf(id), startAt, arrivalAt, segments: [] };
     let lane = index, row = 0, at = startAt;
     const append = (kind: LadderPathSegment['kind'], start: number, end: number, nextLane: number, nextRow: number, extra: Partial<LadderPathSegment> = {}) => {
@@ -278,9 +292,28 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
       append(event ? 'event' : 'bridge', bridge.start, bridge.end, nextLane, role === 'primary' ? bridge.landingRow : bridge.partnerLandingRow, { bridgeId: bridge.id, eventId: event?.id, transferRole: role });
       at = bridge.end;
     }
-    append('climb', at, arrivalAt, lane, LADDER_RUNGS);
+    append('climb', at, arrivalAt - runDuration, lane, LADDER_RUNGS);
+    if (runDuration) append('roof', arrivalAt - runDuration, arrivalAt, path.doorLane, LADDER_RUNGS);
     if (lane !== path.doorLane) throw new Error('Participant path does not reach its assigned door');
     timeline.paths[id] = path;
+  }
+  if (roofFinish) {
+    const winner = timeline.paths[roofFinish.actorId], other = timeline.paths[roofFinish.otherId], roof = winner.segments.at(-1)!;
+    roofFinish.runStart = roof.start; roofFinish.claimAt = winner.arrivalAt;
+    // The runner gets the gold while the climber on that ladder is still below
+    // the edge. The climber then crosses the terrace to their original chest.
+    const otherRoof = other.segments.at(-1)!, otherClimb = other.segments.at(-2)!;
+    otherRoof.start = Math.max(otherRoof.start, winner.arrivalAt + 1000 * unit);
+    otherClimb.end = otherRoof.start; otherRoof.end = otherRoof.start + roofDuration(other.id); other.arrivalAt = otherRoof.end;
+    // Hold below the edge while the nearby runner grabs the gold. Without this
+    // pause the terrace's top-out pose would make both look already arrived.
+    const holdRow = Math.max(otherClimb.fromRow, LADDER_RUNGS - 2.6);
+    const riseStart = otherRoof.start - (LADDER_RUNGS - holdRow) * 300 * unit;
+    const approachEnd = Math.min(riseStart, Math.max(roof.start, otherClimb.start + (holdRow - otherClimb.fromRow) * 300 * unit));
+    other.segments.splice(other.segments.length - 2, 1,
+      { ...otherClimb, end: approachEnd, toRow: holdRow },
+      { ...otherClimb, id: otherClimb.id + '-wait', start: approachEnd, end: riseStart, fromRow: holdRow, toRow: holdRow },
+      { ...otherClimb, id: otherClimb.id + '-edge', start: riseStart, fromRow: holdRow });
   }
   return timeline;
 }
@@ -314,10 +347,13 @@ function transferFrame(timeline: LadderTimeline, segment: LadderPathSegment, ela
         transferStage = phase < .9 ? 'flight' : 'catch';
       } else {
         if (phase >= .32 && phase < .48) row += .5 * smooth((phase - .32) / .16);
-        else if (phase >= .48 && phase < .6) row += .5 + 1.25 * smooth((phase - .48) / .12);
+        else if (phase >= .48 && phase < .6) row += .5 + .4 * smooth((phase - .48) / .12);
         else if (phase >= .6) {
-          progress = flightProgress('drop', (phase - .6) / .3);
-          row += 1.75 + (catchRoot - segment.fromRow - 1.75) * progress;
+          // Release gives the thrown body horizontal momentum immediately.
+          // Gravity bends its height into a parabola; it does not accelerate
+          // sideways as if an invisible rail were dragging it toward the catch.
+          progress = clamp((phase - .6) / .3, 0, 1);
+          row += .9 + progress - (1 + segment.fromRow + .9 - catchRoot) * progress * progress;
         }
         pose = phase < .32 ? 'balance' : phase < .9 ? 'drop' : 'hang';
         transferStage = phase < .32 ? 'takeoff' : phase < .9 ? 'flight' : 'catch';
@@ -370,6 +406,10 @@ export function ladderFrame(timeline: LadderTimeline, elapsed: number, targetLan
     if (arrived) return { ...base, lane: path.doorLane, height: 1, rungProgress: LADDER_RUNGS, pose: path.doorLane === targetLane ? 'win' as const : 'arrived' as const, doorLane: path.doorLane, winner: path.doorLane === targetLane, supportRow: LADDER_RUNGS, gripLane: path.doorLane, gripRow: LADDER_RUNGS };
     const segment = path.segments.find(part => time >= part.start && time < part.end);
     if (!segment) return base;
+    if (segment.kind === 'roof') {
+      const phase = clamp((time - segment.start) / (segment.end - segment.start), 0, 1);
+      return { ...base, lane: segment.fromLane + (segment.toLane - segment.fromLane) * smooth(phase), height: 1, rungProgress: LADDER_RUNGS, pose: 'run' as const, phase, fromLane: segment.fromLane, toLane: segment.toLane, fromRow: LADDER_RUNGS, toRow: LADDER_RUNGS, supportRow: LADDER_RUNGS };
+    }
     if (segment.kind === 'bridge' || segment.kind === 'event') {
       const transfer = transferFrame(timeline, segment, time);
       return { ...base, lane: transfer.lane, height: transfer.row / LADDER_RUNGS, rungProgress: transfer.row, pose: transfer.pose, phase: transfer.phase, fromLane: segment.fromLane, toLane: segment.toLane, fromRow: segment.fromRow, toRow: segment.toRow, bridgeId: segment.bridgeId, eventId: segment.eventId, eventStage: transfer.stage, supportRow: transfer.gripRow, gripLane: transfer.gripLane, gripRow: transfer.gripRow, catchRow: transfer.catchRow, fallDepth: Math.max(0, segment.fromRow - transfer.row), tilt: transfer.tilt, motionType: transfer.type, motionPhase: transfer.phase, actionProgress: transfer.actionProgress, transferStage: transfer.transferStage, transferProgress: transfer.progress, transferRole: transfer.role, landingRow: transfer.landingRow, pivotLane: transfer.pivotLane, pivotRow: transfer.pivotRow, depthOffset: transfer.depthOffset, interaction: transfer.interaction };

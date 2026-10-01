@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { citizenLegAngles, citizenStride } from './citizenLocomotion';
 
 export type Pose = 'idle' | 'walk' | 'run' | 'brake' | 'finish' | 'wave' | 'vote' | 'cheer' | 'clap' | 'encourage' | 'disappointed' | 'nervous' | 'surprised' | 'bow';
 const skinColors = [0xf2c09b, 0xd9a078, 0xf6d2b1, 0xb98062];
@@ -15,6 +16,9 @@ export class PixelCitizen {
   gestureProgress = 0;
   locomotionSpeed = 1;
   movementDirection = 1;
+  /** Optional distance-driven gait for actors moving through a real scene. */
+  locomotionDistance?: number;
+  locomotionVelocity?: number;
   private figure: Phaser.GameObjects.Container;
   private head: Phaser.GameObjects.Container;
   private leftArm: Limb;
@@ -25,6 +29,9 @@ export class PixelCitizen {
   private brows: Phaser.GameObjects.Rectangle[];
   private mouth: Phaser.GameObjects.Rectangle;
   private shadow: Phaser.GameObjects.Ellipse;
+  private profileHair: Phaser.GameObjects.Rectangle;
+  private profileNose: Phaser.GameObjects.Rectangle;
+  private profileAmount = 0;
   private offset: number;
   private tempo: number;
   private personality: number;
@@ -100,6 +107,8 @@ export class PixelCitizen {
     rect(this.head, 6, -7, 2, 5, hair);
     if (index % 2 === 0) rect(this.head, -4, -8, 8, 2, hair);
     if (index % 5 === 2) rect(this.head, -6, -13, 5, 2, hair);
+    this.profileHair = rect(this.head, -7, -5, 4, 9, hair).setAlpha(0);
+    this.profileNose = rect(this.head, 7, -1, 3, 3, skin).setAlpha(0);
     // Preserve the resting pixel bounds while scaling and rotating around each feature's center.
     this.eyes = [rect(this.head, -3, 0, 2, 2, 0x182137).setOrigin(0.5), rect(this.head, 4, 0, 2, 2, 0x182137).setOrigin(0.5)];
     this.brows = [rect(this.head, -3, -3.5, 4, 1, hair).setOrigin(0.5), rect(this.head, 4, -3.5, 4, 1, hair).setOrigin(0.5)];
@@ -132,6 +141,7 @@ export class PixelCitizen {
     const breath = Math.sin(clock / 540);
     const p = this.personality;
     const target: Motion = { y: breath * 0.4, angle: Math.sin(clock / 1100) * 0.6, head: Math.sin(clock / 730) * 1.5, sx: 1, sy: 1, la: 4 + breath * 2, ra: -4 - breath * 2, le: 3, re: -3, ll: 0, rl: 0, lk: 0, rk: 0, mouth: 1, brows: 0 };
+    const groundedStride = this.locomotionDistance === undefined || reduced || !['walk', 'run'].includes(this.pose) ? undefined : citizenStride(this.locomotionDistance, p, smooth(((this.locomotionVelocity ?? 35) - 18) / 38));
     if (this.pose === 'walk' || this.pose === 'run') {
       const running = this.pose === 'run';
       const swing = Math.sin(stride * (running ? 1.35 : 1));
@@ -148,6 +158,15 @@ export class PixelCitizen {
       target.sx = 1 + Math.abs(swing) * 0.012; target.sy = 1 - Math.abs(swing) * 0.012;
       target.mouth = running ? 1.5 + Math.max(0, swing) * 0.6 : 1;
       target.brows = running ? -0.5 : 0;
+      if (groundedStride) {
+        const swing = Math.sin(groundedStride.phase * Math.PI * 2);
+        target.y = groundedStride.bounce;
+        target.angle = running ? 5.5 : 2;
+        target.head = -target.angle * .55;
+        target.la = swing * (running ? 27 : 17); target.ra = -target.la;
+        target.le = target.re = running ? -46 : -18;
+        target.sx = target.sy = 1;
+      }
     } else if (this.pose === 'brake') {
       const progress = clamp(this.gestureProgress);
       const step = Math.sin(stride * 1.7);
@@ -249,12 +268,27 @@ export class PixelCitizen {
     const blend = reduced ? 1 : 1 - Math.exp(-delta / (this.pose === 'run' || this.pose === 'brake' ? 38 : 65));
     (Object.keys(target) as (keyof Motion)[]).forEach(key => { this.motion[key] += (target[key] - this.motion[key]) * blend; });
     const m = this.motion;
+    if (groundedStride) {
+      const legs = groundedStride.feet.map((foot, leg) => {
+        const hipX = leg ? 4 : -5;
+        return citizenLegAngles({ x: hipX + foot.x, y: foot.y }, { x: hipX, y: -14 }, m.angle, m.y);
+      });
+      m.ll = legs[0].upper; m.lk = legs[0].lower;
+      m.rl = legs[1].upper; m.rk = legs[1].lower;
+    }
     this.figure.setY(m.y).setAngle(m.angle).setScale(m.sx, m.sy); this.head.setAngle(m.head);
     this.leftArm.upper.setAngle(m.la); this.rightArm.upper.setAngle(m.ra);
     this.leftArm.lower.setAngle(m.le); this.rightArm.lower.setAngle(m.re);
     this.leftLeg.upper.setAngle(m.ll); this.rightLeg.upper.setAngle(m.rl);
     this.leftLeg.lower.setAngle(m.lk); this.rightLeg.lower.setAngle(m.rk);
     this.mouth.setScale(1, m.mouth);
+    const profile = this.locomotionDistance !== undefined && ['walk', 'run', 'brake'].includes(this.pose) ? 1 : 0;
+    this.profileAmount += (profile - this.profileAmount) * (reduced ? 1 : 1 - Math.exp(-delta / 100));
+    this.profileHair.setAlpha(this.profileAmount);
+    this.profileNose.setAlpha(this.profileAmount);
+    this.eyes[0].setAlpha(1 - this.profileAmount);
+    this.brows[0].setAlpha(1 - this.profileAmount);
+    this.mouth.setX(.5 + this.profileAmount * 4);
     this.brows.forEach((brow, index) => { brow.y = -3.5 + m.brows; brow.angle = this.pose === 'nervous' ? (index ? -8 : 8) : 0; });
     const blinkAt = clock % (3100 + p * 470); const blink = reduced || blinkAt < 2950 + p * 470 ? 1 : 0.12;
     this.eyes.forEach(eye => { eye.scaleY += (blink - eye.scaleY) * Math.min(1, delta / 24); });

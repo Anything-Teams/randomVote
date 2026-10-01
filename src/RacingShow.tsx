@@ -5,7 +5,7 @@ import { activeRacingIncident, buildRacingTimeline, createRacingIncidents, racin
 import { drawRaceDust, drawRaceHorse, drawRaceStadium, raceBox, raceLabel } from './racingArt';
 import { drawRacingCourse, drawRacingStartingGate, drawRacingTopView } from './racingCourse';
 import { createRacingCamera, placeRacingField, racingFocusIds, type RacingCamera } from './racingCamera';
-import { drawRacingIncidentEffects, racingIncidentMotion } from './racingEffects';
+import { drawRacingIncidentEffects, placeRacingDuel, racingIncidentMotion } from './racingEffects';
 import { drawRacingObstacles, placeRacingObstacles, racingObstacleJump } from './racingObstacles';
 import './racing.css';
 
@@ -70,27 +70,31 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
   const placements = placeRacingField(scene.camera, props.candidates, timeline, elapsed, w, h, props.paused || reduced ? 0 : delta, reset || reduced);
   drawRaceStadium(ctx, w, h, clock, reduced, true, false, { center: scene.camera.center, pixelsPerLap: w * .65 / scene.camera.span });
   // Distance follows the nose; individual sprite scales must not change the finish crossing.
-  const locations = placements.map(item => ({ ...item, x: item.x - 57 * item.scale, y: item.y + racingLaneShift(incident, item.id, elapsed) * h * .035 })).sort((a, b) => a.y - b.y);
+  const baseLocations = placements.map(item => ({ ...item, x: item.x - 57 * item.scale, y: item.y + racingLaneShift(incident, item.id, elapsed) * h * .035 }));
   const obstacles = placeRacingObstacles(timeline, scene.camera, placements, w);
+  const locations = placeRacingDuel(incident, baseLocations, obstacles, elapsed).sort((a, b) => a.y - b.y);
+  const motions = new Map(locations.map(item => {
+    const jump = reduced ? 0 : Math.max(0, ...obstacles.filter(obstacle => obstacle.actorId === item.id).map(obstacle => racingObstacleJump(obstacle, item)));
+    return [item.id, { ...racingIncidentMotion(incident, item.id, elapsed, reduced), jump }];
+  }));
   if (phase === 'straight' || phase === 'photo') {
     const finishX = w * .5 + (1 - scene.camera.center) / scene.camera.span * w * .65;
     for (let stripe = h * .42; stripe < h; stripe += 8) for (let column = 0; column < 2; column++) { ctx.fillStyle = (Math.floor(stripe / 8) + column) % 2 ? '#142333' : '#eee4c9'; ctx.fillRect(finishX + column * 5, stripe, 5, 8); }
     ctx.strokeStyle = '#dfd9be'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(finishX, h * .13); ctx.lineTo(finishX, h * .42); ctx.stroke();
     if (phase === 'photo') raceLabel(ctx, 'FINISH · 실제 통과 순서', 14, h * .37, clamp(w / 65, 8, 13), '#f2ddb0');
   }
+  // Names belong behind every horse and rider, including when two opponents overlap.
+  locations.forEach(item => horseTag(ctx, props.candidates[item.index].name, props.candidates[item.index].color, item.x, item.y - (motions.get(item.id)?.jump ?? 0) * 24 * item.scale, w, h, w < 520 || h < 250));
   drawRacingIncidentEffects(ctx, incident, locations, elapsed, reduced, 'ground');
   const groundObjects = [...obstacles].sort((a, b) => a.y - b.y);
   let nextGroundObject = 0;
-  const jumps = new Map<string, number>();
   locations.forEach(item => {
     // Course objects share the horses' depth order, including foreground obstacles.
     while (nextGroundObject < groundObjects.length && groundObjects[nextGroundObject].y <= item.y) {
       drawRacingObstacles(ctx, [groundObjects[nextGroundObject++]], w, elapsed, reduced, 'ground');
     }
     const candidate = props.candidates[item.index], before = readRacingTravel(timeline, item.id, elapsed - 100), effort = clamp((item.distance - before) * 335, .45, 1.35);
-    const obstacle = obstacles.find(itemObstacle => itemObstacle.actorId === item.id);
-    const motion = { ...racingIncidentMotion(incident, item.id, elapsed, reduced), jump: !reduced && obstacle ? racingObstacleJump(obstacle, item) : 0 };
-    jumps.set(item.id, motion.jump);
+    const motion = motions.get(item.id)!;
     drawRaceDust(ctx, item.index, item.x, item.y, item.scale, clock, reduced, (motion.jump ?? 0) > .08 ? 0 : effort);
     const standing = standings.find(standing => standing.id === item.id);
     const velocityRatio = standing?.finished ? Math.exp(-(elapsed - standing.finishTime) / 1100) : 1;
@@ -101,8 +105,6 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
   drawRacingObstacles(ctx, groundObjects.slice(nextGroundObject), w, elapsed, reduced, 'ground');
   drawRacingIncidentEffects(ctx, incident, locations, elapsed, reduced, 'air');
   drawRacingObstacles(ctx, obstacles, w, elapsed, reduced, 'air');
-  // A jumping horse carries its tag upwards so the name does not cover the course object.
-  locations.forEach(item => horseTag(ctx, props.candidates[item.index].name, props.candidates[item.index].color, item.x, item.y - (jumps.get(item.id) ?? 0) * 24 * item.scale, w, h, w < 520 || h < 250));
   // The corner map preserves the full field while the main camera follows the race.
   const mw = Math.min(180, w * .25), mh = Math.min(104, h * .23);
   ctx.save(); ctx.translate(w - mw - 9, 9); drawRacingCourse(ctx, mw, mh, clock, reduced); drawRacingTopView(ctx, mw, mh, props.candidates, standings, clock, reduced, racingFocusIds(timeline, elapsed)); ctx.restore();

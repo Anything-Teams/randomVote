@@ -1,4 +1,4 @@
-import { arenaAction, arenaBeat, arenaChargeState, type ArenaRound } from './arenaLogic';
+import { arenaAction, arenaBeat, arenaChargeState, arenaEdgeTargets, type ArenaRound } from './arenaLogic';
 
 export type ArenaStoryState = {
   kind: string;
@@ -23,7 +23,7 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
   const turned = step === 2;
   const result = beat === 'result';
   const a = round.aggressor, v = round.victim, h = round.helper;
-  const kinds = { team: '협공', betrayal: '배신', bait: '돌진 회피', counter: '역습', brace: '버티기', lift: '들배지기', final: '마지막 승부' };
+  const kinds = { team: '협공', betrayal: '배신', bait: '돌진 회피', edge: '가장자리 밀기', counter: '역습', brace: '버티기', lift: '들배지기', final: '마지막 승부' };
   const state: ArenaStoryState = {
     kind: round.tactic, label: kinds[round.tactic], action: '', left: [a], right: [v],
     relation: '↔', relationLabel: '힘겨루기', steps: ['접근', '맞잡기', '승부수'], step,
@@ -55,6 +55,15 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
       state.action = ['빈틈을 보입니다. 상대는 무게를 낮추고 첫발을 준비합니다.', '발을 박차고 점점 빨라집니다. 피할 선수는 상대를 끝까지 봅니다.', '가까워진 순간 옆으로 빠집니다! 돌진은 빈 공간을 지나갑니다.', round.exchange ? '발을 고쳐 딛고 모래판 끝에서 급히 멈춥니다.' : '돌진을 멈추지 못했습니다. 경계선을 넘어 아래로 굴러떨어집니다.'][state.step];
       break;
     }
+    case 'edge': {
+      const edge = arenaEdgeTargets(round, elapsed, { x: 675, y: 490 });
+      state.step = edge.stage === 'approach' ? 0 : edge.stage === 'contest' ? 1 : edge.stage === 'push' ? 2 : 3;
+      state.relation = '→'; state.relationLabel = '경계로 밀어내기';
+      state.leftLabel = '미는 선수'; state.rightLabel = '끝에서 버티는 선수';
+      state.steps = ['가장자리 견제', '맞잡고 버티기', '발을 딛고 밀기', '뒷발이 장외로'];
+      state.action = ['경계 가까이에서 서로를 살피며 퇴로를 좁힙니다.', '손을 맞잡고 발을 바꿔 딛습니다. 끝의 선수는 중심을 뒤로 낮춰 버팁니다.', '앞발을 단단히 딛고 밀어붙입니다. 상대가 한 발씩 경계로 밀립니다.', '버티던 뒷발이 경계를 넘었습니다! 모래판 아래로 넘어집니다.'][state.step];
+      break;
+    }
     case 'counter':
       state.relationLabel = turned ? '되치기' : '밀기를 받아냄';
       state.steps = ['밀려나기', '중심 낮추기', '되치기'];
@@ -71,7 +80,7 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
       if (beat === 'turn' && frame.liftProgress === 0) state.action = '잡은 손에 힘을 주고, 무릎을 굽혀 들어 올릴 준비를 합니다.';
       break;
   }
-  if (beat === 'impact' && round.tactic !== 'bait') state.action = '중심이 무너졌습니다! 모래판 밖으로 넘어갑니다.';
+  if (beat === 'impact' && round.tactic !== 'bait' && round.tactic !== 'edge') state.action = '중심이 무너졌습니다! 모래판 밖으로 넘어갑니다.';
   if (result) state.action = round.exchange ? round.tactic === 'team' ? '공동공격 실패! 상대가 버텨 빠져나옵니다. 동맹도 함께 물러나 다시 빈틈을 봅니다.' : round.tactic === 'betrayal' ? '배신 뒤의 역습도 버텼습니다! 서로 손을 풀고 모두 모래판을 지켰습니다.' : round.tactic === 'bait' ? '돌진을 멈춰 세웠습니다! 서로 거리를 벌리고 다음 빈틈을 봅니다.' : '버텼습니다! 서로 손을 풀고 다시 빈틈을 봅니다.' : round.final ? '마지막 상대가 장외에 착지했습니다. 우승 확정!' : '장외에 착지했습니다. 순위가 확정되고 난투는 계속됩니다.';
   return state;
 }

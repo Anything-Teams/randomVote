@@ -8,8 +8,8 @@ async function source(path) {
 }
 const { buildRacingTimeline, createRacingIncidents, readRacingDistance } = await source('src/racingNarrative.ts');
 const { createRacingCamera, placeRacingField } = await source('src/racingCamera.ts');
-const { racingObstacleDistance, placeRacingObstacles, racingObstacleJump } = await source('src/racingObstacles.ts');
-const { racingTopLegPose } = await source('src/racingCourse.ts');
+const { racingObstacleDistance, racingCourseObstacles, placeRacingObstacles, racingObstacleJump } = await source('src/racingObstacles.ts');
+const { racingTopLegPose, racingGateWalk, racingGateLegPose } = await source('src/racingCourse.ts');
 const { racingGroundMarks } = await source('src/racingArt.ts');
 const players = Array.from({ length: 10 }, (_, index) => ({ id: String(index), name: `선수 ${index}`, color: '#abcdef' }));
 
@@ -80,4 +80,54 @@ test('rail posts and ground marks retain course distances when the racing camera
   assert.equal(next.distance, first.distance, 'a rail post remains at one course location through zoom');
   assert.ok(Math.abs(next.x - (width * .5 + (first.distance - far.center) * far.pixelsPerLap)) < 1e-9);
   assert.ok(next.x < first.x, 'rail posts move left at the same projection as the approaching obstacle');
+});
+
+test('gate entry advances by planted steps and lands every last foot before waiting', () => {
+  let planted = 0, swung = 0;
+  for (let index = 0; index < 10; index++) {
+    let previous;
+    for (let at = 0; at <= 3000; at += 16) {
+      const walk = racingGateWalk(at, index, 44), legs = racingGateLegPose(at, index, 44);
+      if (previous) for (let leg = 0; leg < legs.length; leg++) assert.ok(Math.hypot(legs[leg].hoof.x - previous.legs[leg].hoof.x, legs[leg].hoof.y - previous.legs[leg].hoof.y) < 1.8, 'the last steps land without a snap');
+      if (previous && walk.distance > previous.distance) for (let leg = 0; leg < legs.length; leg++) {
+        if (legs[leg].support && previous.legs[leg].support) {
+          const hoof = walk.distance + legs[leg].hoof.y, prior = previous.distance + previous.legs[leg].hoof.y;
+          assert.ok(Math.abs(hoof - prior) < 1e-9, 'the planted hoof stays fixed while the body advances');
+          planted++;
+        } else swung++;
+      }
+      previous = { ...walk, legs };
+    }
+    const resting = racingTopLegPose(0, index, false, true), arrived = racingGateLegPose(3000, index, 44);
+    assert.equal(racingGateWalk(3000, index, 44).distance, 44);
+    assert.ok(arrived.every(leg => leg.support), 'no foot is held in the air after entry');
+    for (let leg = 0; leg < arrived.length; leg++) for (const point of ['root', 'knee', 'hoof']) assert.deepEqual(arrived[leg][point], resting[leg][point], 'all four feet reach their standing positions');
+    assert.deepEqual(arrived, racingGateLegPose(5400, index, 44), 'standing feet stay planted until the start');
+  }
+  assert.ok(planted > 1000 && swung > 500, 'both stance and swing are exercised through the complete entry');
+});
+
+test('static and reduced-motion gate previews begin with all four feet planted', () => {
+  for (let index = 0; index < 10; index++) for (const [preview, reduced] of [[true, false], [false, true]]) {
+    const resting = racingTopLegPose(0, index, false, true), initial = racingGateLegPose(0, index, 44, preview, reduced);
+    assert.ok(initial.every(leg => leg.support));
+    for (let leg = 0; leg < initial.length; leg++) for (const point of ['root', 'knee', 'hoof']) assert.deepEqual(initial[leg][point], resting[leg][point]);
+    for (const elapsed of [700, 1400, 3000, 5400]) assert.deepEqual(racingGateLegPose(elapsed, index, 44, preview, reduced), initial, 'preview geometry never captures a half stride');
+  }
+});
+
+test('every race includes three separated course obstacles on different horses', () => {
+  for (const count of [2, 6, 10]) for (let seed = 0; seed < 20; seed++) {
+    const list = players.slice(0, count), order = list.map(player => player.id).reverse();
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
+    const obstacles = racingCourseObstacles(timeline);
+    assert.equal(obstacles.length, 3);
+    assert.equal(new Set(obstacles.map(obstacle => obstacle.id)).size, 3);
+    assert.equal(new Set(obstacles.map(obstacle => obstacle.kind)).size, 2, 'both water and a low hay hurdle are present');
+    for (let index = 1; index < obstacles.length; index++) {
+      assert.ok(obstacles[index].encounter - obstacles[index - 1].encounter > 6500, 'challenges leave time for racing duels');
+      assert.notEqual(obstacles[index].actorId, obstacles[index - 1].actorId, 'different racers take the next challenge');
+    }
+    for (const obstacle of obstacles) assert.equal(obstacle.distance, readRacingDistance(timeline, obstacle.actorId, obstacle.encounter));
+  }
 });

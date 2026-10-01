@@ -2,7 +2,8 @@ import { readRacingDistance, type RacingIncident, type RacingTimeline } from './
 import type { RacingCamera } from './racingCamera';
 import type { RacingEffectPlacement } from './racingEffects';
 
-export type RacingObstacle = { kind: 'hay-jump' | 'puddle'; actorId: string; distance: number; encounter: number; x: number; y: number; scale: number };
+export type RacingObstacle = { id: string; kind: 'hay-jump' | 'puddle'; actorId: string; distance: number; encounter: number; x: number; y: number; scale: number };
+export type RacingCourseObstacle = Omit<RacingObstacle, 'x' | 'y' | 'scale'>;
 
 /** An obstacle stays at one course distance, even before its story or after the landing. */
 export function racingObstacleDistance(timeline: RacingTimeline, incident: RacingIncident) {
@@ -10,13 +11,35 @@ export function racingObstacleDistance(timeline: RacingTimeline, incident: Racin
   return { encounter, distance: readRacingDistance(timeline, incident.actorId, encounter) };
 }
 
+/** Three spaced course challenges give different horses a turn without changing the finish plan. */
+export function racingCourseObstacles(timeline: RacingTimeline): RacingCourseObstacle[] {
+  if (!timeline.ids.length) return [];
+  const hash = timeline.incidents.map(item => item.kind + item.actorId).join('|').split('').reduce((value, letter) => (value * 31 + letter.charCodeAt(0)) >>> 0, 7);
+  const scale = (timeline.finish - timeline.start) / 33_500, first = timeline.incidents[0];
+  const firstIsObstacle = first?.kind === 'hay-jump' || first?.kind === 'puddle';
+  const smallField = timeline.ids.length <= 3;
+  const encounters = [
+    first ? smallField && !firstIsObstacle ? first.end + 350 * scale : racingObstacleDistance(timeline, first).encounter : timeline.start + 7750 * scale,
+    smallField && timeline.incidents[1] ? timeline.incidents[1].end + 350 * scale : timeline.start + 16_500 * scale,
+    timeline.start + 25_300 * scale,
+  ];
+  let previousActor = '';
+  return encounters.map((encounter, index) => {
+    const story = timeline.incidents.find(item => encounter >= item.start && encounter <= item.end);
+    const quiet = timeline.ids.filter(id => id !== previousActor && id !== story?.actorId && id !== story?.rivalId);
+    const available = quiet.length ? quiet : timeline.ids.filter(id => id !== previousActor);
+    const actorId = index === 0 && firstIsObstacle ? first.actorId : (available.length ? available : timeline.ids)[(hash + index * 3) % (available.length || timeline.ids.length)];
+    const kind: RacingObstacle['kind'] = index === 0 && first?.kind === 'hay-jump' ? 'hay-jump' : index === 0 && first?.kind === 'puddle' ? 'puddle' : (hash + index) % 2 ? 'puddle' : 'hay-jump';
+    previousActor = actorId;
+    return { id: actorId + ':' + encounter, kind, actorId, encounter, distance: readRacingDistance(timeline, actorId, encounter) };
+  });
+}
+
 export function placeRacingObstacles(timeline: RacingTimeline, camera: Pick<RacingCamera, 'center' | 'span'>, placements: RacingEffectPlacement[], width: number): RacingObstacle[] {
-  return timeline.incidents.flatMap(incident => {
-    if (incident.kind !== 'hay-jump' && incident.kind !== 'puddle') return [];
-    const actor = placements.find(item => item.id === incident.actorId);
+  return racingCourseObstacles(timeline).flatMap(obstacle => {
+    const actor = placements.find(item => item.id === obstacle.actorId);
     if (!actor) return [];
-    const position = racingObstacleDistance(timeline, incident);
-    return [{ kind: incident.kind, actorId: incident.actorId, ...position, x: width * .5 + (position.distance - camera.center) / camera.span * width * .65, y: actor.y, scale: actor.scale }];
+    return [{ ...obstacle, x: width * .5 + (obstacle.distance - camera.center) / camera.span * width * .65, y: actor.y, scale: actor.scale }];
   });
 }
 

@@ -1,5 +1,6 @@
 import type { RaceHorseMotion } from './racingArt';
 import type { RacingIncident } from './racingNarrative';
+import type { RacingObstacle } from './racingObstacles';
 
 export type RacingEffectPlacement = { id: string; x: number; y: number; scale: number };
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
@@ -13,11 +14,35 @@ export function racingIncidentMotion(incident: RacingIncident | undefined, id: s
   const p = phaseAt(incident, elapsed), kind = incident.kind, actor = id === incident.actorId;
   if (kind === 'hay-jump' || kind === 'puddle') return actor ? { crouch: pulse(p, .28, .77) * .72 } : {};
   if (kind === 'gust') return { stumble: pulse(p, .16, .68) * (actor ? .3 : .55), crouch: pulse(p, .13, .76) * (actor ? .75 : .6) };
+  if (kind === 'blocked') return actor
+    ? { check: pulse(p, .02, .34) * .9, crouch: pulse(p, .32, .9) * .85 }
+    : { check: pulse(p, .1, .43) * .4, crouch: pulse(p, .41, .91) * .7 };
+  if (['draft', 'lead-change', 'inside', 'outside', 'rail', 'chase', 'last-kick', 'patience'].includes(kind)) return actor
+    ? { check: kind === 'patience' || kind === 'draft' ? pulse(p, .04, .33) * .5 : 0, crouch: pulse(p, .26, .91) * .85 }
+    : { check: pulse(p, .2, .51) * .35, crouch: pulse(p, .43, .93) * .72 };
   if (!actor) return {};
   if (kind === 'balance') return { stumble: pulse(p, .08, .56) * Math.sin(clamp((p - .08) / .48) * Math.PI * 3) * .9, crouch: pulse(p, .08, .66) * .6 };
   if (kind === 'fatigue') return { stumble: pulse(p, .1, .76) * .28, crouch: pulse(p, .38, .84) * .25 };
-  if (kind === 'blocked') return { crouch: pulse(p, .05, .4) * .6, stumble: pulse(p, .13, .37) * .22 };
   return { crouch: pulse(p, .27, .88) * (kind === 'inside' || kind === 'last-kick' || kind === 'lead-change' ? .8 : .45) };
+}
+
+/** Both opponents converge smoothly, guard the line, then separate as the pass completes. */
+export function placeRacingDuel<T extends RacingEffectPlacement>(incident: RacingIncident | undefined, placements: T[], obstacles: RacingObstacle[], elapsed: number): T[] {
+  if (!incident || incident.kind === 'hay-jump' || incident.kind === 'puddle' || elapsed < incident.start || elapsed > incident.end) return placements;
+  const actor = placements.find(item => item.id === incident.actorId), rival = placements.find(item => item.id === incident.rivalId);
+  if (!actor || !rival) return placements;
+  const p = phaseAt(incident, elapsed), sign = actor.y >= rival.y ? 1 : -1, scale = Math.min(actor.scale, rival.scale);
+  const center = (actor.y + rival.y) / 2, separation = 12 * scale;
+  const sidestep = smooth((p - .28) / .25), defence = smooth((p - .4) / .28);
+  let join = smooth(p / .28) * (1 - smooth((p - .78) / .22));
+  // Give the pair space for a physical course jump instead of pulling the horse across it.
+  const courseClearance = Math.max(0, ...obstacles.flatMap(obstacle => [actor, rival].filter(item => item.id === obstacle.actorId).map(item => 1 - smooth((Math.abs(obstacle.x - item.x) / Math.max(.05, item.scale) - 90) / 150))));
+  join *= 1 - courseClearance;
+  return placements.map(item => {
+    const target = item.id === actor.id ? center + sign * (separation + sidestep * 25 * scale)
+      : item.id === rival.id ? center - sign * separation + sign * defence * 8 * scale : item.y;
+    return item.id === actor.id || item.id === rival.id ? { ...item, y: item.y + (target - item.y) * join } : item;
+  });
 }
 
 /** Projected origins match drawRaceHorse: hooves at y, the nose at x + 57 * scale. */

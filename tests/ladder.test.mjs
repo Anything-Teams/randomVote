@@ -6,10 +6,127 @@ async function load(entry) {
   const result = await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { buildLadderTimeline, ladderFrame, LADDER_STORIES, LADDER_RUNGS } = await load('src/ladderLogic.ts');
+const { buildLadderTimeline, ladderFrame, LADDER_STORIES, LADDER_RUNGS, LADDER_ROOF_STEAL_CHANCE } = await load('src/ladderLogic.ts');
 const { createSportsOrder } = await load('src/sports.ts');
 const { createLadderGeometry, ladderArtActors, sampleLadderRig, ladderSuspension, drawLadderCrossing } = await load('src/game/ladderArt.ts');
 const participants = Array.from({ length: 10 }, (_, index) => ({ id: `person-${index}`, name: `참가자 ${index + 1}`, color: '#83c7de' }));
+
+test('the rare adjacent-ladder dash preserves every assigned treasure and the arrival budget', () => {
+  assert.equal(LADDER_ROOF_STEAL_CHANCE, .05);
+  for (let count = 2; count <= 10; count++) for (const seed of [4, 19, 35, 56, 73]) for (let target = 0; target < count; target++) {
+    const candidates = participants.slice(0, count), order = candidates.map(person => person.id).reverse();
+    const timeline = buildLadderTimeline(candidates, order, 44_000, seed, target), finish = timeline.roofFinish;
+    assert.ok(finish, 'the replay seeds exercise the rare branch');
+    assert.equal(finish.actorId, order[target]);
+    assert.equal(Math.abs(finish.entryLane - target), 1, 'the runner climbs the neighboring ladder');
+    const roof = timeline.paths[finish.actorId].segments.at(-1);
+    assert.equal(roof.kind, 'roof');
+    assert.equal(roof.fromLane, finish.entryLane);
+    assert.equal(roof.toLane, target);
+    const middle = ladderFrame(timeline, (roof.start + roof.end) / 2, target);
+    assert.equal(middle.actors.find(actor => actor.id === finish.actorId).pose, 'run');
+    assert.ok(middle.actors.find(actor => actor.id === finish.otherId).rungProgress < 22, 'the rival is still visibly below the terrace while the runner dashes');
+    assert.equal(middle.winnerId, undefined, 'running toward the treasure does not reveal the result before contact');
+    assert.equal(ladderFrame(timeline, finish.claimAt, target).winnerId, order[target]);
+    for (let selected = 0; selected < count; selected++) assert.equal(ladderFrame(timeline, 44_000, selected).winnerId, order[selected], 'all selected outcomes retain the original uniformly drawn assignment');
+    for (const path of Object.values(timeline.paths)) {
+      assert.ok(path.arrivalAt <= 41_200.02, 'the extra roof run stays within the existing arrival limit');
+      for (const segment of path.segments) {
+        assert.ok(segment.end >= segment.start);
+        for (const boundary of [segment.start, segment.end]) {
+          const before = ladderFrame(timeline, boundary - .001, target).actors.find(actor => actor.id === path.id);
+          const after = ladderFrame(timeline, boundary + .001, target).actors.find(actor => actor.id === path.id);
+          assert.ok(Math.abs(before.lane - after.lane) < .001 && Math.abs(before.rungProgress - after.rungProgress) < .001, 'the runner, rival pause and edge climb never teleport');
+        }
+      }
+    }
+    assert.ok(ladderFrame(timeline, 44_000, target).complete);
+  }
+  let rare = 0;
+  const candidates = participants.slice(0, 5), order = candidates.map(person => person.id);
+  for (let seed = 0; seed < 2000; seed++) if (buildLadderTimeline(candidates, order, 44_000, seed, 0).roofFinish) rare++;
+  assert.ok(rare >= 60 && rare <= 140, 'the independently seeded 5% branch remains rare across a broad replay sample');
+});
+
+test('roof runners lean forward, plant their boots and turn into the award without a limb snap', () => {
+  const candidates = participants.slice(0, 5), order = candidates.map(person => person.id).reverse();
+  for (const target of [0, 4]) {
+    const timeline = buildLadderTimeline(candidates, order, 44_000, 4, target), finish = timeline.roofFinish;
+    const geometry = createLadderGeometry(800, 600, 5), read = time => ladderFrame(timeline, time, target);
+    const rigAt = (id, time) => {
+      const actor = ladderArtActors(timeline, read(time), candidates, time, geometry, false, read).find(item => item.id === id);
+      return { actor, rig: sampleLadderRig(actor, geometry, time) };
+    };
+    const roof = timeline.paths[finish.actorId].segments.at(-1), direction = Math.sign(roof.toLane - roof.fromLane);
+    const middle = rigAt(finish.actorId, (roof.start + roof.end) / 2);
+    assert.ok((middle.rig.head.x - middle.rig.hip.x) * direction > 0, 'the upper body leans toward the direction of the dash');
+    let planted = 0;
+    for (let time = roof.start + 300; time < roof.end - 16; time += 16) {
+      const { actor, rig } = rigAt(finish.actorId, time), next = rigAt(finish.actorId, time + 1);
+      if (actor.transition || next.actor.transition) continue;
+      for (const side of [0, 1]) if (rig.footContact[side] && next.rig.footContact[side]) {
+        assert.ok(Math.abs(rig.feet[side].y - geometry.top) < .001, 'a planted boot touches the actual terrace');
+        assert.ok(Math.hypot(next.rig.feet[side].x - rig.feet[side].x, next.rig.feet[side].y - rig.feet[side].y) < geometry.scale * .015, 'the support boot stays fixed while the pelvis passes it');
+        planted++;
+      }
+    }
+    assert.ok(planted > 10);
+    for (const boundary of [roof.start, roof.end]) {
+      const before = rigAt(finish.actorId, boundary - .001).rig, after = rigAt(finish.actorId, boundary + .001).rig;
+      for (const part of ['hands', 'elbows', 'feet']) for (const side of [0, 1]) assert.ok(Math.hypot(after[part][side].x - before[part][side].x, after[part][side].y - before[part][side].y) < geometry.scale * .01, `${part} turn smoothly between the final climb, dash and treasure pose`);
+    }
+  }
+});
+
+test('a thrown climber leaves the grip with momentum and follows gravity rather than a sideways easing rail', () => {
+  const candidates = participants.slice(0, 5), timeline = buildLadderTimeline(candidates, candidates.map(person => person.id).reverse(), 44_000, 1);
+  const event = timeline.events.find(item => item.motion.type === 'pounce');
+  const victimAt = phase => ladderFrame(timeline, event.action + (event.resolve - event.action) * phase, 0).actors.find(actor => actor.id === event.partnerId);
+  const samples = [.62, .67, .72, .77, .82].map(victimAt);
+  const horizontal = samples.slice(1).map((actor, index) => actor.lane - samples[index].lane);
+  assert.ok(horizontal.every(step => Math.abs(step - horizontal[0]) < 1e-8), 'a real throw has horizontal momentum immediately after release');
+  const vertical = samples.slice(1).map((actor, index) => actor.rungProgress - samples[index].rungProgress);
+  assert.ok(vertical.every((step, index) => index === 0 || step < vertical[index - 1]), 'gravity continuously turns the upward launch into a fall');
+});
+
+test('a throw spotlight shows actual contact without a destination arrow or target ring', () => {
+  const candidates = participants.slice(0, 5), timeline = buildLadderTimeline(candidates, candidates.map(person => person.id).reverse(), 44_000, 1);
+  const event = timeline.events.find(item => item.motion.type === 'pounce'), geometry = createLadderGeometry(800, 600, 5);
+  const time = event.action + (event.resolve - event.action) * .2, read = age => ladderFrame(timeline, age, 0);
+  const actor = ladderArtActors(timeline, read(time), candidates, time, geometry, false, read).find(item => item.id === event.actorId);
+  const touched = [], context = new Proxy({}, { get: (_, key) => (...args) => touched.push([key, args]), set: () => true });
+  drawLadderCrossing(context, actor, geometry, time, false, true);
+  assert.ok(!touched.some(([key]) => key === 'ellipse'), 'a spotlight cannot mark the future destination');
+  let from;
+  for (const [key, values] of touched) {
+    if (key === 'moveTo') from = values;
+    if (key === 'lineTo' && from) assert.ok(Math.hypot(values[0] - from[0], values[1] - from[1]) < geometry.scale * 20, 'a throw uses local momentum streaks rather than a route drawn between ladders');
+  }
+});
+
+test('the final lifting grips stay within real arm reach before the throw releases', () => {
+  const candidates = participants.slice(0, 5), timeline = buildLadderTimeline(candidates, candidates.map(person => person.id).reverse(), 44_000, 1);
+  const event = timeline.events.find(item => item.motion.type === 'pounce'), read = time => ladderFrame(timeline, time, 0);
+  for (const [width, height] of [[640, 500], [1550, 700], [720, 920]]) {
+    const geometry = createLadderGeometry(width, height, 5);
+    for (const phase of [.54, .57, .59, .599]) {
+      const time = event.action + (event.resolve - event.action) * phase;
+      const actors = ladderArtActors(timeline, read(time), candidates, time, geometry, false, read), thrower = actors.find(actor => actor.id === event.actorId);
+      const victim = actors.find(actor => actor.id === event.partnerId), a = sampleLadderRig(thrower, geometry, time), b = sampleLadderRig(victim, geometry, time);
+      const direction = Math.sign(thrower.toLane - thrower.fromLane), belt = { x: b.hip.x + direction * 5.8 * geometry.scale, y: b.hip.y - geometry.scale };
+      assert.ok(Math.hypot(a.hands[0].x - b.hands[1].x, a.hands[0].y - b.hands[1].y) < .01, 'the wrist grip is held until release, including tall canvases');
+      assert.ok(Math.hypot(a.hands[1].x - belt.x, a.hands[1].y - belt.y) < .01, 'the other hand holds the near belt rather than reaching through the body');
+      for (const side of [0, 1]) assert.ok(Math.hypot(a.hands[side].x - a.shoulders[side].x, a.hands[side].y - a.shoulders[side].y) < geometry.scale * 15, 'the lift uses bent physical arms rather than overstretched reaching');
+    }
+  }
+});
+
+test('a briefly collapsed canvas keeps ladder spacing and treasure glow radii positive', () => {
+  for (const count of [2, 5, 10]) for (const width of [1, 8, 19]) {
+    const geometry = createLadderGeometry(width, 1, count);
+    assert.ok(geometry.laneGap > 0 && geometry.scale > 0, 'initial layout measurements must not create negative drawing radii');
+  }
+});
 
 test('the actual bridge paths preserve every uniformly drawn door assignment', () => {
   const candidates = participants.slice(0, 5), orders = [];

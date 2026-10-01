@@ -8,9 +8,10 @@ import './ladder.css';
 
 export type LadderShowProps = SportsStageProps & { targetLane: number; onTargetChange?: (lane: number) => void; storySeed?: number };
 const clamp = (value: number, low = 0, high = 1) => Math.max(low, Math.min(high, value));
-const poseNames = { idle: '준비', climb: '오르는 중', bridge: '옆길 이동', balance: '중심 잡기', drop: '옆줄로 추락', fall: '옆줄로 추락', hang: '한 손으로 버티기', clamber: '몸 끌어올리기', slide: '앉아서 미끄럼', swing: '줄 타고 건너기', launch: '공중 점프', rotate: '회전 발판', ride: '벨트 이동', transfer: '연결다리 건너기', win: '보물 획득', arrived: '상자 도착' };
+const poseNames = { idle: '준비', climb: '오르는 중', run: '보물로 달려가기', bridge: '옆길 이동', balance: '중심 잡기', drop: '옆줄로 추락', fall: '옆줄로 추락', hang: '한 손으로 버티기', clamber: '몸 끌어올리기', slide: '앉아서 미끄럼', swing: '줄 타고 건너기', launch: '공중 점프', rotate: '회전 발판', ride: '벨트 이동', transfer: '연결다리 건너기', win: '보물 획득', arrived: '상자 도착' };
 const deviceNames = { slide: '미끄럼 통로', swing: '줄타기', launch: '공중 점프', drop: '옆줄 추락·붙잡기', pounce: '뛰어들어 던지기', rotate: '회전 발판', conveyor: '이동 벨트', portal: '열리는 연결다리' };
 const interactionNames = { approach: '옆줄로 뛰어들기', grip: '상대를 붙잡기', throw: '들어 던지기', flight: '옆줄로 던져짐', catch: '손끝으로 버티기' };
+const contactBeats: Partial<Record<LadderActiveEvent['kind'], string>> = { 'loose-rung': '발판이 돌아간다!', trapdoor: '발판이 열렸다!', wind: '바람이 밀어낸다!', pendulum: '추가 다리를 돌린다!', spring: '발판을 눌렀다!', bird: '새가 문을 열었다!', paint: '페인트가 쏟아졌다!', sticky: '손잡이가 움직인다!', 'rope-tangle': '안전줄을 붙잡았다!', balloon: '풍선이 몸을 띄운다!', 'false-sign': '옆 통로가 열렸다!', bucket: '물이 쏟아졌다!', banana: '발이 미끄러졌다!', zipline: '손잡이를 잡았다!', 'lights-out': '불이 꺼졌다!', 'safety-net': '그물이 튕겨낸다!', 'leap-grapple': '옆줄로 뛰어들어!', 'crumbling-step': '발판이 무너진다!', 'rocket-boots': '부츠가 점화됐다!' };
 function actorStatus(actor: LadderActorFrame | undefined, preview?: boolean) {
   if (actor?.winner) return '당첨';
   if (actor?.arrived) return `${actor.doorLane! + 1}번 상자`;
@@ -101,8 +102,8 @@ export default function LadderShow(props: LadderShowProps) {
     if (props.candidates.length < 2) return null;
     const valid = [...new Set(props.order)].filter(id => props.candidates.some(candidate => candidate.id === id));
     const order = props.preview ? props.candidates.map(candidate => candidate.id) : [...valid, ...props.candidates.map(candidate => candidate.id).filter(id => !valid.includes(id))];
-    return buildLadderTimeline(props.candidates, order, props.duration, props.storySeed ?? seed.current!);
-  }, [ids, orderKey, props.duration, props.preview, props.storySeed]);
+    return buildLadderTimeline(props.candidates, order, props.duration, props.storySeed ?? seed.current!, props.targetLane);
+  }, [ids, orderKey, props.duration, props.preview, props.storySeed, props.targetLane]);
   const [reduced, setReduced] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const canvas = useRef<HTMLCanvasElement>(null), geometryRef = useRef<LadderGeometry | null>(null), sampledAt = useRef(0);
   const latest = useRef({ props, timeline, reduced }); latest.current = { props, timeline, reduced };
@@ -136,13 +137,14 @@ export default function LadderShow(props: LadderShowProps) {
   const crossing = frame?.actors.find(actor => actor.id === story?.actorId && actor.motionType && actor.eventStage !== 'setup') ?? frame?.actors.find(actor => actor.motionType && actor.eventStage !== 'setup');
   const spotlight = frame?.actors.find(actor => actor.id === story?.actorId);
   const interaction = spotlight?.interaction, grapple = story?.kind === 'leap-grapple';
-  const storyBeat = !story || props.elapsed >= story.end ? undefined : story.stage === 'setup' ? 'takeoff' : story.stage === 'resolve' ? 'pull' : interaction?.stage === 'grip' || interaction?.stage === 'throw' || interaction?.stage === 'flight' ? 'grip' : interaction?.stage === 'catch' || spotlight?.transferStage === 'catch' ? 'catch' : 'flight';
+  const storyBeat = !story || props.elapsed >= story.end ? undefined : story.stage === 'setup' || story.stage === 'action' && story.phase < .13 ? 'takeoff' : story.stage === 'resolve' ? 'pull' : interaction?.stage === 'grip' || interaction?.stage === 'throw' || interaction?.stage === 'flight' ? 'grip' : interaction?.stage === 'catch' || spotlight?.transferStage === 'catch' ? 'catch' : 'flight';
   const flightLabel = grapple ? interaction?.stage === 'flight' ? '옆줄로 던져졌다!' : '옆줄로 뛰어들어!' : story?.kind === 'wind' ? '바람에 날려!' : story?.motion.type === 'launch' ? '도약!' : story?.motion.type === 'swing' ? '줄을 타고!' : story?.motion.type === 'drop' ? '손을 뻗어!' : '옆줄로!';
-  const beatLabel = storyBeat === 'takeoff' ? '발판을 딛고' : storyBeat === 'flight' ? flightLabel : storyBeat === 'grip' ? interaction?.stage === 'flight' ? '옆줄로 던져졌다!' : interaction?.stage === 'throw' ? '들어 던지기!' : '상대를 붙잡았다!' : storyBeat === 'catch' ? '손끝으로 버티기' : storyBeat === 'pull' ? '몸을 끌어올려!' : undefined;
+  const beatLabel = storyBeat === 'takeoff' ? (story ? contactBeats[story.kind] : undefined) ?? '발판을 딛고' : storyBeat === 'flight' ? flightLabel : storyBeat === 'grip' ? interaction?.stage === 'flight' ? '옆줄로 던져졌다!' : interaction?.stage === 'throw' ? '들어 던지기!' : '상대를 붙잡았다!' : storyBeat === 'catch' ? '손끝으로 버티기' : storyBeat === 'pull' ? '몸을 끌어올려!' : undefined;
   const partner = props.candidates.find(candidate => candidate.id === story?.partnerId);
   const pastStories = props.preview ? [] : timeline?.events.filter(event => props.elapsed >= event.action).slice(-3) ?? [];
-  const title = winner ? `${winner.name} · 황금 보물 획득!` : person && story ? `${person.name}${grapple && partner ? ` ↔ ${partner.name}` : ''} · ${story.title}` : props.preview ? '하늘 보물 쟁탈전' : props.elapsed < 3000 ? '구름 위 보물로 출발!' : props.elapsed > 35500 ? '보물상자가 바로 앞!' : '모두 한 칸씩, 위로!';
-  const detail = winner ? `${targetLane + 1}번 상자의 황금 보물을 차지한 ${winner.name}님이 당첨됐습니다.` : story ? storyDetail(story, spotlight, person, partner, storyBeat === 'catch') : props.preview ? '황금 보물 위치를 고르세요. 누가 어떤 길을 갈지는 시작한 뒤에 드러납니다.' : props.elapsed < 3000 ? '손잡이를 움켜쥐고, 구름 위로 올라갑니다.' : props.elapsed > 35500 ? `${targetLane + 1}번 상자에 누가 먼저 닿을까요?` : '서로의 움직임을 살피며 사다리를 오릅니다.';
+  const roofRunner = !props.preview && timeline?.roofFinish && props.elapsed >= timeline.roofFinish.runStart && props.elapsed < timeline.roofFinish.claimAt ? props.candidates.find(candidate => candidate.id === timeline.roofFinish!.actorId) : undefined;
+  const title = winner ? `${winner.name} · 황금 보물 획득!` : roofRunner ? `${roofRunner.name} · 옆줄에서 먼저 올라왔다!` : person && story ? `${person.name}${grapple && partner ? ` ↔ ${partner.name}` : ''} · ${story.title}` : props.preview ? '하늘 보물 쟁탈전' : props.elapsed < 3000 ? '구름 위 보물로 출발!' : props.elapsed > 35500 ? '보물상자가 바로 앞!' : '모두 한 칸씩, 위로!';
+  const detail = winner ? `${targetLane + 1}번 상자의 황금 보물을 차지한 ${winner.name}님이 당첨됐습니다.` : roofRunner ? `정상에 먼저 발을 딛은 ${roofRunner.name}님이 황금 상자로 달려갑니다! 바로 옆 선수는 아직 마지막 손잡이를 잡고 있어요.` : story ? storyDetail(story, spotlight, person, partner, storyBeat === 'catch') : props.preview ? '황금 보물 위치를 고르세요. 누가 어떤 길을 갈지는 시작한 뒤에 드러납니다.' : props.elapsed < 3000 ? '손잡이를 움켜쥐고, 구름 위로 올라갑니다.' : props.elapsed > 35500 ? `${targetLane + 1}번 상자에 누가 먼저 닿을까요?` : '서로의 움직임을 살피며 사다리를 오릅니다.';
   const selectDoor = (event: MouseEvent<HTMLCanvasElement>) => {
     if (!props.preview || !props.onTargetChange || !geometryRef.current) return;
     const box = event.currentTarget.getBoundingClientRect(), geometry = geometryRef.current, x = event.clientX - box.left, y = event.clientY - box.top;

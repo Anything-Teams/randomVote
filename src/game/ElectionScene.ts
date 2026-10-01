@@ -1,8 +1,9 @@
 import Phaser from 'phaser';
 import type { Candidate, ElectionEvent } from '../election';
-import { COUNT_START, WINNER_START, STORY_DURATION, STORY_RESOLVE_AT, countBeat, storyBeat, resolvedEvents, tallyVotes, type ShowPhase, type StoryOutcome } from '../show';
+import { COUNT_START, WINNER_START, STORY_DURATION, STORY_RESOLVE_AT, countBeat, countProgress, storyBeat, resolvedEvents, tallyVotes, type ShowPhase, type StoryOutcome } from '../show';
 import { PixelCitizen, type Pose } from './PixelCitizen';
 import { COUNT_FINISH_START, COUNT_FINISH_LINE_X, countingFinishAt, countingFinishScale } from './countingFinish';
+import { advanceCountingRunner, countingRunnerTarget, type CountingRunner } from './citizenLocomotion';
 
 export const STAGE_WIDTH = 1280;
 export const STAGE_HEIGHT = 720;
@@ -27,7 +28,7 @@ export type StageState = {
   paused?: boolean;
 };
 type Voter = { citizen: PixelCitizen; ballot: Phaser.GameObjects.Rectangle; offset: number; duration: number; lastDrop: number };
-type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; receivedVotes: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; support: Phaser.GameObjects.Text; bar: Phaser.GameObjects.Rectangle; cap: Phaser.GameObjects.Rectangle; finishLine: Phaser.GameObjects.Container; displayed: number; previous: number; previousRank: number; reactedAt: number; voteAt: number; width: number; height: number; movingUntil: number; direction: number; finishStartX?: number; finishCrossed?: boolean; eliminationShare?: number; eliminationWidth?: number };
+type RaceSlot = { candidate: Candidate; panel: Phaser.GameObjects.Container; citizen: PixelCitizen; percentage: Phaser.GameObjects.Text; receivedVotes: Phaser.GameObjects.Text; badge: Phaser.GameObjects.Text; position: Phaser.GameObjects.Text; glow: Phaser.GameObjects.Rectangle; frame: Phaser.GameObjects.Rectangle; support: Phaser.GameObjects.Text; bar: Phaser.GameObjects.Rectangle; cap: Phaser.GameObjects.Rectangle; finishLine: Phaser.GameObjects.Container; displayed: number; previous: number; previousRank: number; reactedAt: number; voteAt: number; width: number; height: number; movingUntil: number; direction: number; runner: CountingRunner; travel: number; finishStartX?: number; finishCrossed?: boolean; eliminationShare?: number; eliminationWidth?: number };
 type VoteMote = { rectangle: Phaser.GameObjects.Rectangle; candidateId: string; age: number; startX: number; startY: number; life: number };
 type StoryActor = { candidate: Candidate; citizen: PixelCitizen; name: Phaser.GameObjects.Text; plate: Phaser.GameObjects.Rectangle; side: number; scale: number };
 type StoryCut = { event: ElectionEvent; layer: Phaser.GameObjects.Container; dimmer: Phaser.GameObjects.Rectangle; title: Phaser.GameObjects.Text; stageLabel: Phaser.GameObjects.Text; evidence: Phaser.GameObjects.Text; dialogue: Phaser.GameObjects.Container; detail: Phaser.GameObjects.Text; verdict: Phaser.GameObjects.Container; actors: StoryActor[]; props: Phaser.GameObjects.Container[]; stamp: Phaser.GameObjects.Text; lamp: Phaser.GameObjects.Arc; darkness: Phaser.GameObjects.Rectangle; beam: Phaser.GameObjects.Graphics; impactFired: boolean; verdictStarted: boolean };
@@ -474,7 +475,10 @@ export class ElectionScene extends Phaser.Scene {
         this.tweens.add({ targets: panel, alpha: 1, duration: 380, delay: index * 27, ease: 'Cubic.out' });
       }
       const value = state.percentages[candidate.id] ?? 0;
-      this.race.push({ candidate, panel, citizen, percentage, receivedVotes, badge, position, glow, frame, support, bar, cap, finishLine, displayed: value, previous: value, previousRank: index, reactedAt: -10000, voteAt: -10000, width, height, movingUntil: 0, direction: 0 });
+      const runner = { x: countingRunnerTarget(state.progress, value, this.countingAverage), velocity: 0 };
+      citizen.root.setX(runner.x);
+      citizen.locomotionDistance = 0;
+      this.race.push({ candidate, panel, citizen, percentage, receivedVotes, badge, position, glow, frame, support, bar, cap, finishLine, displayed: value, previous: value, previousRank: index, reactedAt: -10000, voteAt: -10000, width, height, movingUntil: 0, direction: 0, runner, travel: 0 });
     });
     this.root.sort('depth');
   }
@@ -949,14 +953,14 @@ export class ElectionScene extends Phaser.Scene {
       const labelLeft = slot.width + 7 - Math.max(slot.percentage.width, slot.receivedVotes.width);
       slot.citizen.root.setScale(Phaser.Math.Linear(originalScale, countingFinishScale(originalScale, labelLeft), finishOpening));
       const previousX = slot.citizen.root.x;
-      let citizenX = 252 + Math.max(width, 32) + 3;
+      let citizenX = previousX;
       let finishAge = -1;
       if (finishRun && !eliminated) {
-        // The tally stays an exact graph. Its actor leaves the marker for one final,
-        // shared finish line instead of freezing when the last percentages settle.
+        // Share can fall while votes are counted. Only the graph retreats; the
+        // runner keeps its forward momentum towards the shared finish line.
         const startShare = state.finishStartPercentages?.[slot.candidate.id];
-        const startWidth = startShare === undefined ? width : Math.round(COUNT_BAR_WIDTH * Phaser.Math.Clamp((startShare - Math.max(0, finishStartAverage - 2)) / 4, 0.012, 1));
-        slot.finishStartX ??= startShare === undefined ? citizenX : 252 + Math.max(startWidth, 32) + 3;
+        const fixtureStart = startShare === undefined ? citizenX : countingRunnerTarget(countProgress(COUNT_FINISH_START), startShare, finishStartAverage);
+        slot.finishStartX ??= Math.max(previousX, fixtureStart);
         const finishRank = Math.max(0, finishOrder.findIndex(candidate => candidate.id === slot.candidate.id));
         const finish = countingFinishAt(slot.finishStartX, finishRank, finishOrder.length, state.elapsed);
         finishAge = finish.age;
@@ -966,10 +970,19 @@ export class ElectionScene extends Phaser.Scene {
           slot.finishCrossed = true;
           this.burst(slot.panel.x + COUNT_FINISH_LINE_X + 3, slot.panel.y + slot.height - 7, colorOf(slot.candidate), 4, 90);
         }
-      } else slot.finishLine.setAlpha(0);
+      } else {
+        slot.finishLine.setAlpha(0);
+        if (!eliminated) {
+          advanceCountingRunner(slot.runner, countingRunnerTarget(state.progress, raw, this.countingAverage), delta / 1000, state.reducedMotion);
+          citizenX = slot.runner.x;
+        }
+      }
       slot.citizen.root.setX(citizenX).setAlpha(eliminated ? 0.23 : 1);
       const velocity = (citizenX - previousX) / Math.max(1, delta) * 1000;
-      slot.citizen.movementDirection = finishRun ? 1 : Math.abs(velocity) > 3 ? Math.sign(velocity) : slot.direction || 1;
+      slot.travel += Math.max(0, citizenX - previousX) / Math.abs(slot.citizen.root.scaleX);
+      slot.citizen.locomotionDistance = slot.travel;
+      slot.citizen.locomotionVelocity = Math.max(0, velocity) / Math.abs(slot.citizen.root.scaleX);
+      slot.citizen.movementDirection = 1;
       slot.citizen.locomotionSpeed = 0.82 + Math.min(0.68, Math.abs(velocity) / 160) + index % 3 * 0.04;
       slot.position.setText(eliminated ? '×' : String(rank + 1)).setColor(rank === 0 ? '#fbd975' : '#a6c5cc');
       slot.badge.setText(eliminated ? '후보 탈락' : slot.height > 62 ? finishRun ? finishAge >= 0 ? '결승선 통과' : '마지막 질주' : rank === 0 ? '선두' : slot.direction > 0 && time < slot.movingUntil ? '표가 몰립니다' : '추격 중' : '').setColor(eliminated ? '#e88073' : '#9cbdc8');
@@ -981,9 +994,8 @@ export class ElectionScene extends Phaser.Scene {
       const waiting = Math.floor((time + index * 711) / (1800 + index % 3 * 180)) % 7;
       slot.citizen.gestureProgress = Phaser.Math.Clamp(finishAge / 500, 0, 1);
       slot.citizen.pose = eliminated ? 'bow'
-        : finishRun ? finishAge < 0 ? 'run' : finishAge < 500 ? 'brake' : 'finish'
-        : late ? 'run'
-        : time < slot.movingUntil || Math.abs(velocity) > 4 ? index % 2 ? 'walk' : 'run'
+        : finishRun && finishAge >= 0 ? finishAge < 500 ? 'brake' : 'finish'
+        : velocity > .3 ? slot.citizen.locomotionVelocity > 36 ? 'run' : 'walk'
         : reaction && reaction.until > time ? reaction.pose
         : waiting === 1 ? 'wave' : waiting === 4 && index % 3 === 0 ? 'bow' : index % 4 === 1 ? 'nervous' : 'idle';
       if (gaining && !eliminated && !state.reducedMotion && time - slot.voteAt > 460 + index * 29) {

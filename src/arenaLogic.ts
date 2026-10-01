@@ -1,6 +1,6 @@
 import type { Candidate } from './election';
 
-export type ArenaTactic = 'team' | 'bait' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final';
+export type ArenaTactic = 'team' | 'bait' | 'edge' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final';
 export type ArenaRound = { id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
 export type ArenaPoint = { x: number; y: number };
 export type ArenaMovingBody = ArenaPoint & { facing: number; motorX?: number; motorY?: number };
@@ -21,6 +21,7 @@ const clamp = (n: number) => Math.max(0, Math.min(1, n));
 const ease = (n: number) => { const t = clamp(n); return t * t * (3 - 2 * t); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
 const soloTactics: Exclude<ArenaTactic, 'team' | 'betrayal' | 'final'>[] = ['bait', 'counter', 'brace', 'lift'];
+const eliminationTactics: ArenaTactic[] = ['bait', 'counter', 'edge', 'brace', 'lift'];
 
 /** Shared ground movement keeps acceleration, braking and a zero-delta pause consistent. */
 export function arenaMove(body: ArenaMovingBody, target: ArenaPoint, seconds: number, speed = 116): void {
@@ -64,8 +65,18 @@ export function arenaChargeTargets(round: ArenaRound, elapsed: number, center: A
   return { ...state, side, target: { x: center.x + side * (30 + state.dodge * 23), y: center.y + across * state.dodge * 43 }, charger: { x: mix(center.x - side * 102, endX, state.charge), y: center.y } };
 }
 
+/** Both wrestlers travel together toward the rim; the loser never gets lifted. */
+export function arenaEdgeTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
+  const p = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
+  const side = center.x >= 500 ? 1 : -1;
+  const rim = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((center.y - 416) / 112) ** 2));
+  const pressure = ease((p - .48) / .52), shift = Math.sin(ease((p - .28) / .20) * Math.PI * 2) * 3 * (1 - pressure);
+  const victimX = mix(center.x + side * 26, rim - side * 3, pressure) + side * shift;
+  return { side, pressure, stage: p < .28 ? 'approach' : p < .48 ? 'contest' : p < .9 ? 'push' : 'tip', aggressor: { x: victimX - side * 53, y: center.y }, victim: { x: victimX, y: center.y } };
+}
+
 export function arenaExitDirection(round: ArenaRound, origin: ArenaPoint, outIndex: number): number {
-  return round.tactic === 'bait' ? origin.x < 500 ? -1 : 1 : round.final ? 1 : outIndex % 2 ? 1 : -1;
+  return round.tactic === 'bait' || round.tactic === 'edge' ? origin.x < 500 ? -1 : 1 : round.final ? 1 : outIndex % 2 ? 1 : -1;
 }
 
 /** Body contacts and commentary share an actual attack, rather than only an alliance label. */
@@ -102,15 +113,23 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
       ax = -30 - charge.dodge * 23; ay = charge.dodge * 43; vx = 102 - charge.charge * 188;
       ap = charge.dodge > 0 ? 'dodge' : 'guard'; vp = charge.stage === 'prepare' ? charge.preparation > 0 ? 'brace' : 'guard' : 'run';
       action.lift = 0; action.liftedId = undefined; action.attackers = [v]; action.targetId = a;
+    } else if (round.tactic === 'edge') {
+      ap = p < .28 ? 'guard' : p < .48 ? 'grapple' : 'push'; vp = p < .28 ? 'guard' : 'brace';
+      ax = -27; vx = 26;
+      action.lift = 0; action.liftedId = undefined;
     } else if (round.tactic === 'counter' || round.tactic === 'brace') {
       const press = Math.sin(clamp((p - .30) / .22) * Math.PI / 2) * 12;
       const shift = p < .52 ? press : press * (1 - beat.weightProgress); ax -= shift; vx -= shift;
       ap = p < .52 ? 'brace' : 'lift'; vp = p < .52 ? 'push' : 'brace';
     } else { ap = p < .52 ? 'grapple' : 'lift'; }
+    if (round.tactic !== 'bait' && round.tactic !== 'edge' && p >= .30 && p < .72) {
+      const shift = Math.sin((p - .30) / .42 * Math.PI * 2) * 3.5 * (1 - beat.liftProgress);
+      ax += shift; vx += shift;
+    }
     action.actors = [actor(a, 'aggressor', ax, ay, ap, phase, round.tactic === 'bait' ? undefined : v, '공격'), actor(v, 'victim', vx, vy, vp, phase, round.tactic === 'bait' ? undefined : a, '대응')];
   }
   if (release) { action.lift *= 1 - ease((elapsed - round.impact) / Math.max(1, (round.end - round.impact) * .24)); action.actors.forEach(part => { part.pose = part.id === action.targetId ? 'dodge' : 'guard'; part.gripId = undefined; }); }
-  else if (post) action.actors.forEach(part => { if (part.id !== v) { part.pose = round.tactic === 'bait' ? 'dodge' : elapsed - round.impact < 350 * (round.resolve - round.impact) / 1100 ? 'throw' : 'guard'; part.gripId = undefined; } });
+  else if (post) action.actors.forEach(part => { if (part.id !== v) { part.pose = round.tactic === 'bait' ? 'dodge' : round.tactic === 'edge' ? 'push' : elapsed - round.impact < 350 * (round.resolve - round.impact) / 1100 ? 'throw' : 'guard'; part.gripId = undefined; } });
   if (action.stage === 'approach') action.actors.forEach(part => { if (round.tactic !== 'bait' || part.pose !== 'brace') part.pose = 'guard'; part.gripId = undefined; });
   return action;
 }
@@ -155,6 +174,20 @@ export function arenaGuardTarget(origin: ArenaPoint, index: number, elapsed: num
   return { x: origin.x + Math.sin((elapsed + index * 371) / 750) * 5, y: origin.y + Math.sin((elapsed + index * 173) / 590) * 2.3 };
 }
 
+/** An unpaired fighter follows nearby action and gives a moving bout room to pass. */
+export function arenaNearbyResponse(origin: ArenaPoint, fighting: readonly ArenaPoint[], index: number) {
+  const nearest = [...fighting].sort((a, b) => Math.hypot(a.x - origin.x, (a.y - origin.y) * 1.5) - Math.hypot(b.x - origin.x, (b.y - origin.y) * 1.5))[0];
+  if (!nearest) return undefined;
+  const dx = nearest.x - origin.x, dy = nearest.y - origin.y, gap = Math.hypot(dx, dy);
+  if (gap > 220) return undefined;
+  const nx = gap < 1 ? index % 2 ? 1 : -1 : dx / gap, ny = dy / Math.max(1, gap);
+  const advance = Math.max(-34, Math.min(24, gap - 132)), around = (index % 2 ? 1 : -1) * (gap < 170 ? 25 : 12);
+  const target = { x: origin.x + nx * advance + ny * around, y: origin.y + ny * advance - nx * around * .65 };
+  const radius = Math.hypot((target.x - 500) / 292, (target.y - 416) / 103);
+  if (radius > 1) { target.x = 500 + (target.x - 500) / radius; target.y = 416 + (target.y - 416) / radius; }
+  return { target, facing: dx < 0 ? -1 : 1, pose: gap < 100 ? 'dodge' as const : 'guard' as const, threat: nearest };
+}
+
 /** Independent bouts need enough sand between them to read as separate duels. */
 export function arenaContactPoint(origin: ArenaPoint, occupied: readonly ArenaPoint[], edge = false): ArenaPoint {
   // Five clear patches fit the full ten-person field. Each new encounter
@@ -189,13 +222,13 @@ export function arenaRounds(order: string[], duration = 44_000): ArenaRound[] {
     const aggressor = pool[(seed + index * 7 + index * index) % pool.length];
     const helpers = pool.filter(id => id !== aggressor);
     const possibleHelper = helpers.length ? helpers[((seed >>> 5) + index * 3) % helpers.length] : undefined;
-    const tactic = possibleHelper && index === allianceAt ? (seed % 2 ? 'team' : 'betrayal') : soloTactics[(seed + index) % soloTactics.length];
+    const tactic = possibleHelper && index === allianceAt ? (seed % 2 ? 'team' : 'betrayal') : eliminationTactics[(seed + index) % eliminationTactics.length];
     const span = Math.min(5 * unit, spacing);
     const start = 2.6 * unit + (index + 1) * spacing - span;
     const impact = start + span - 1.55 * unit;
     return { id: `arena-${index}`, index, tactic, aggressor, helper: tactic === 'team' || tactic === 'betrayal' ? possibleHelper : undefined, victim, start, impact, resolve: impact + 1.1 * unit, end: start + span, final: false };
   });
-  const finalTactic = order.length <= 4 && seed % 3 === 1 ? 'bait' : 'final';
+  const finalTactic = order.length <= 4 ? seed % 3 === 1 ? 'bait' : seed % 3 === 2 ? 'edge' : 'final' : 'final';
   rounds.push({ id: 'arena-final', index: preliminaries, tactic: finalTactic, aggressor: order[0], victim: order[1], start: 33.2 * unit, impact: 38.2 * unit, resolve: 39.3 * unit, end: duration, final: true });
   return rounds;
 }
@@ -293,6 +326,14 @@ export function arenaChargeFall(age: number, origin: ArenaPoint, landing: ArenaP
   return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: 0, phase: 1, stage: 'walk' };
 }
 
+/** A pushed wrestler loses the back step at the rim, then drops below the sand. */
+export function arenaEdgeFall(age: number, origin: ArenaPoint, landing: ArenaPoint, direction = 1, unit = 1): ArenaChargeFallFrame {
+  const frame = arenaChargeFall(age, origin, landing, direction, unit, direction * 70 / Math.max(.001, unit));
+  if (frame.stage === 'overrun') frame.angle = direction * .24 * ease(frame.phase);
+  else if (frame.stage === 'fall') frame.angle = direction * mix(.24, Math.PI * .83, ease(frame.phase));
+  return frame;
+}
+
 export function arenaNarration(round: ArenaRound | undefined, candidates: Candidate[], order: string[], elapsed: number, preview = false) {
   const actor = (id: string | undefined) => {
     const index = candidates.findIndex(candidate => candidate.id === id);
@@ -323,12 +364,17 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
     const detail = charge.stage === 'prepare' ? `${a}가 빈틈을 보입니다. ${v}는 무게를 낮추고 첫발을 준비합니다.` : charge.stage === 'charge' ? `${v}가 발을 박차고 가속합니다. ${a}는 가까워지는 상대를 끝까지 봅니다.` : charge.stage === 'dodge' ? `${a}가 옆으로 빠집니다! ${v}는 빈 공간을 향해 그대로 달려갑니다.` : `${v}가 돌진의 관성을 이기지 못합니다. 경계를 넘어 모래판 아래로 굴러떨어집니다.`;
     return { title, detail };
   }
+  if (round.tactic === 'edge' && elapsed < round.resolve) {
+    const edge = arenaEdgeTargets(round, elapsed, { x: 675, y: 490 });
+    return { title: edge.stage === 'approach' ? '경계에서 서로를 견제한다' : edge.stage === 'contest' ? '끝에서 맞잡았다 · 뒷발로 버틴다' : edge.stage === 'push' ? '한 발씩 밀린다 · 경계가 가깝다!' : '뒷발이 빠졌다! 아래로 넘어간다', detail: elapsed >= round.impact ? `${v}의 뒷발이 경계를 넘었습니다. 들어 올리지 않고 모래판 아래로 밀려 떨어집니다.` : edge.stage === 'push' || edge.stage === 'tip' ? `${a}가 앞발을 딛고 밀어붙입니다. ${v}는 손을 놓지 않고 발을 바꿔 딛으며 버팁니다.` : `${a} · ${v}, 가장자리에서 거리를 좁힙니다. 손을 맞잡고 몸을 낮춰 서로의 힘을 살핍니다.` };
+  }
   if (round.exchange && elapsed >= round.impact) return { title: '버텼다! 다시 빈틈을 살핍니다', detail: `${a} · ${v}, 모두 모래판을 지켰습니다. 손을 풀고 다음 빈틈을 봅니다.` };
-  if (elapsed >= round.resolve) return { title: round.final ? `${a}, 오늘의 장사!` : `장외! ${v} · ${order.indexOf(round.victim) + 1}위 확정`, detail: round.final ? `${round.tactic === 'bait' ? '마지막 돌진을 피했습니다. 상대가 관성으로 장외에 넘어졌습니다.' : '버티던 마지막 상대를 뒤집었습니다.'} ${order.length >= 3 ? '1·2·3위 선수들이' : '1·2위 선수들이'} 시상대에서 인사합니다.` : `${v}, 모래판 밖에 착지했습니다. 나머지 선수들의 난투는 계속됩니다.` };
-  const titles: Record<ArenaTactic, string> = { team: '협공 · 한 명은 길을 막고, 한 명은 민다', bait: '미끼 · 돌진을 기다렸다가 옆으로 피한다', counter: '역습 · 밀리던 쪽이 중심을 낮춘다', betrayal: '배신 · 등을 맡긴 순간 방향을 바꾼다', brace: '버티기 · 발을 박고 힘을 되돌린다', lift: '들배지기 · 체중을 싣고 들어 올린다', final: '마지막 두 명 · 최후의 버티기' };
+  if (elapsed >= round.resolve) return { title: round.final ? `${a}, 오늘의 장사!` : `장외! ${v} · ${order.indexOf(round.victim) + 1}위 확정`, detail: round.final ? `${round.tactic === 'bait' ? '마지막 돌진을 피했습니다. 상대가 관성으로 장외에 넘어졌습니다.' : round.tactic === 'edge' ? '끝까지 버티던 상대를 경계 밖으로 밀어냈습니다.' : '버티던 마지막 상대를 뒤집었습니다.'} ${order.length >= 3 ? '1·2·3위 선수들이' : '1·2위 선수들이'} 시상대에서 인사합니다.` : `${v}, 모래판 밖에 착지했습니다. 나머지 선수들의 난투는 계속됩니다.` };
+  const titles: Record<ArenaTactic, string> = { team: '협공 · 한 명은 길을 막고, 한 명은 민다', bait: '미끼 · 돌진을 기다렸다가 옆으로 피한다', edge: '가장자리 승부 · 발을 딛고 밀어낸다', counter: '역습 · 밀리던 쪽이 중심을 낮춘다', betrayal: '배신 · 등을 맡긴 순간 방향을 바꾼다', brace: '버티기 · 발을 박고 힘을 되돌린다', lift: '들배지기 · 체중을 싣고 들어 올린다', final: '마지막 두 명 · 최후의 버티기' };
   const details: Record<ArenaTactic, string> = {
     team: `${h}, ${v}의 퇴로를 막습니다. ${a}, 앞에서 함께 밀어냅니다.`,
     bait: `${a}, 틈을 보입니다. ${v}의 돌진을 옆으로 피해 관성을 이용합니다.`,
+    edge: `${a}, 경계 가까이에서 손을 맞잡고 밀어붙입니다. ${v}는 발을 바꿔 딛으며 끝에서 버팁니다.`,
     counter: `${a}, 낮게 파고들어 샅바를 잡습니다. ${v}의 밀기를 되칩니다.`,
     betrayal: `${v} · ${h}, 공동공격 뒤 ${h}가 손을 놓습니다. ${a}가 앞에서 역습합니다.`,
     brace: `${a}, ${v}의 밀기를 두 발로 버텨냅니다. 힘을 반대로 돌립니다.`,
