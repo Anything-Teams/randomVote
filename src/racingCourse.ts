@@ -11,6 +11,7 @@ const arcTables = new Map<string, { distances: number[]; total: number }>();
 function geometry(w: number, h: number) {
   return { cx: w * .49, cy: h * .55, rx: w * .365, ry: h * .29, trackX: Math.min(w * .092, h * .46), trackY: Math.min(h * .115, w * .03) };
 }
+const courseSkew = (w: number, h: number) => Math.min(.13, h / Math.max(1, w) * .20);
 function ellipse(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, ry: number, fill: string | CanvasGradient) {
   ctx.beginPath(); ctx.ellipse(x, y, Math.max(.1, rx), Math.max(.1, ry), 0, 0, TAU); ctx.fillStyle = fill; ctx.fill();
 }
@@ -45,7 +46,8 @@ export function racingCoursePoint(w: number, h: number, distance: number, laneIn
   const radiusX = rx + lane * trackX * .76, radiusY = ry + lane * trackY * .76;
   // Arc length, rather than angle, keeps the short ends from slowing the field to a crawl.
   const theta = courseAngle(radiusX, radiusY, Number.isFinite(distance) ? distance : 0);
-  return { x: cx + Math.cos(theta) * radiusX, y: cy + Math.sin(theta) * radiusY, angle: Math.atan2(Math.cos(theta) * radiusY, -Math.sin(theta) * radiusX) };
+  const x = cx + Math.cos(theta) * radiusX, skew = courseSkew(w, h), vx = -Math.sin(theta) * radiusX, vy = Math.cos(theta) * radiusY;
+  return { x, y: cy + Math.sin(theta) * radiusY + (x - cx) * skew, angle: Math.atan2(vy + vx * skew, vx) };
 }
 
 function gardenTree(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, seed: number) {
@@ -97,6 +99,7 @@ function courseArchitecture(ctx: CanvasRenderingContext2D, w: number, h: number)
     ctx.strokeStyle = '#8091938c'; ctx.lineWidth = pixel * .6; ctx.strokeRect(sx - w * .019, h * .34, w * .042, h * .37);
   }
   // Concourse, embankment and the shaded outer retaining wall sit below the pale double rail.
+  ctx.save(); ctx.transform(1, courseSkew(w, h), 0, 1, 0, -cx * courseSkew(w, h));
   ellipse(ctx, cx, cy + trackY * .24, rx + trackX * .76, ry + trackY * .87, '#0b1728');
   ellipse(ctx, cx, cy + trackY * .08, rx + trackX * .72, ry + trackY * .77, '#425352');
   ellipse(ctx, cx, cy + trackY * .08, rx + trackX * .61, ry + trackY * .67, '#182d32');
@@ -142,6 +145,7 @@ function courseArchitecture(ctx: CanvasRenderingContext2D, w: number, h: number)
   for (let square = 0; square < 10; square++) for (let row = 0; row < 2; row++) { ctx.fillStyle = (square + row) % 2 ? '#1c2b34' : '#eee1b8'; ctx.fillRect(lineLeft + square * lineWidth / 10, cy + row * tileH, lineWidth / 10 + .1, tileH); }
   const markerX = cx + rx + trackX * .59; box(ctx, markerX, cy - h * .012, Math.max(3, w * .012), h * .024, '#d6bd76'); if (h > 80) label(ctx, 'F', markerX + Math.max(3, w * .012) / 2, cy, Math.min(7, h * .025), '#172b32');
   for (let stall = 0; stall < 10; stall++) { ctx.fillStyle = '#6f9292'; ctx.fillRect(lineLeft + stall * lineWidth / 10, cy - h * .038, lineWidth / 10 * .16, h * .028); }
+  ctx.restore();
   const lights = [[w * .074, h * .24], [w * .917, h * .21], [w * .12, h * .9], [w * .88, h * .895]];
   for (const [lx, ly] of lights) {
     ctx.fillStyle = '#07182366'; ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx + w * .043, ly + h * .065); ctx.lineTo(lx + w * .047, ly + h * .068); ctx.closePath(); ctx.fill();
@@ -231,8 +235,10 @@ export function drawRacingTopView(ctx: CanvasRenderingContext2D, w: number, h: n
     const lane = index + (roam * (candidates.length - 1) - index) * flow;
     const position = racingCoursePoint(w, h, distance, index, candidates.length);
     const baseLane = (index + .5) / candidates.length - .5, shift = (lane - index) / candidates.length * .76;
-    const theta = Math.atan2((position.y - course.cy) / (course.ry + baseLane * course.trackY * .76), (position.x - course.cx) / (course.rx + baseLane * course.trackX * .76));
-    position.x += Math.cos(theta) * course.trackX * shift; position.y += Math.sin(theta) * course.trackY * shift;
+    const skew = courseSkew(w, h), rawY = position.y - (position.x - course.cx) * skew;
+    const theta = Math.atan2((rawY - course.cy) / (course.ry + baseLane * course.trackY * .76), (position.x - course.cx) / (course.rx + baseLane * course.trackX * .76));
+    const lateralX = Math.cos(theta) * course.trackX * shift;
+    position.x += lateralX; position.y += Math.sin(theta) * course.trackY * shift + lateralX * skew;
     // Lateral room is cosmetic; each nose keeps the original arc-length progress and finish line.
     return { candidate, index, position, running: distance < 1 };
   });
@@ -274,8 +280,12 @@ export function drawRacingStartingGate(ctx: CanvasRenderingContext2D, w: number,
   ctx.fillStyle = '#28543e'; ctx.fillRect(0, 0, w * .057, h); ctx.fillStyle = '#234535'; ctx.fillRect(w * .943, 0, w * .057, h);
   for (let stripe = 0; stripe < 16; stripe++) { const x = w * (.058 + stripe * .055); ctx.strokeStyle = stripe % 2 ? '#5b473225' : '#d3b37c28'; ctx.lineWidth = Math.max(1, w * .002); ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + w * .025, h); ctx.stroke(); }
   for (let grain = 0; grain < 145; grain++) { const px = w * (.07 + (grain * .618033 % 1) * .86), py = (grain * 37.7 % h); ctx.fillStyle = grain % 3 ? '#473b2528' : '#ecd49d29'; ctx.fillRect(px, py, 1.2, .7); }
-  const margin = w * .073, width = w - margin * 2, count = Math.max(1, candidates.length), slot = width / count;
-  const scale = Math.max(.1, Math.min(slot / 15, h / 86)), frontY = h * .63, tilt = -.045;
+  const frontY = h * .68, railSlope = w * .025 / h, railLeft = w * .063, railRight = w * .937;
+  const tilt = Math.atan2(Math.min(h * .15, w * .045), railRight - railLeft), centerX = (railLeft + railRight) / 2 + railSlope * frontY;
+  // Solve the start line against both sloping rails, rather than extending it past the track.
+  const lineWidth = (railRight - railLeft) / (Math.cos(tilt) - railSlope * Math.sin(tilt));
+  const width = lineWidth * .76 / .98, count = Math.max(1, candidates.length), slot = width / count;
+  const scale = Math.max(.1, Math.min(slot / 15, h / 86)), forward = Math.PI / 2 - Math.atan(railSlope) - tilt;
   for (const side of [0, 1]) {
     const edge = side ? w * .963 : w * .016;
     for (let seat = 0; seat < 12; seat++) {
@@ -287,27 +297,28 @@ export function drawRacingStartingGate(ctx: CanvasRenderingContext2D, w: number,
     ctx.fillStyle = '#f3e2b1'; ctx.fillRect(edge - w * .012, h * .025, w * .024, Math.max(1, h * .009));
   }
   // Rails extend beyond the gate, visibly leading down the course rather than into a floating grid.
-  for (const rx of [w * .063, w * .937]) {
+  for (const rx of [railLeft, railRight]) {
     ctx.strokeStyle = '#263932'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(rx + 1, 0); ctx.lineTo(rx + w * .025, h); ctx.stroke();
     ctx.strokeStyle = '#eee5c2'; ctx.lineWidth = Math.max(1.1, w / 230); ctx.beginPath(); ctx.moveTo(rx, 0); ctx.lineTo(rx + w * .025, h); ctx.stroke();
     for (let post = 0; post < 8; post++) { const py = post * h / 7; ctx.fillStyle = '#ecdfb8'; ctx.fillRect(rx + w * .025 * py / h - 1, py, 2, 3); }
   }
   const light = ctx.createLinearGradient(0, 0, w, 0); light.addColorStop(0, '#ffedb61a'); light.addColorStop(.5, '#ffedb600'); light.addColorStop(1, '#d8edfb20'); ctx.fillStyle = light; ctx.fillRect(0, 0, w, h);
-  ctx.translate(w / 2, frontY); ctx.rotate(tilt);
+  ctx.translate(centerX, frontY); ctx.rotate(tilt);
   const left = -width / 2, font = clamp(Math.min(slot * .27, h * .085), 7, 12), gateDepth = 36 * scale;
   box(ctx, left - slot * .025, -gateDepth - font * 1.8, width + slot * .05, Math.max(2, scale * 2.2), '#3e5a69', '#9daea7');
-  ctx.strokeStyle = '#eee3bc'; ctx.lineWidth = Math.max(1, h * .009); ctx.beginPath(); ctx.moveTo(left - slot * .1, 1); ctx.lineTo(left + width + slot * .1, 1); ctx.stroke();
+  ctx.strokeStyle = '#eee3bc'; ctx.lineWidth = Math.max(1, h * .009); ctx.beginPath(); ctx.moveTo(-lineWidth / 2, 0); ctx.lineTo(lineWidth / 2, 0); ctx.stroke();
   const launch = preview ? 0 : reduced ? Number(elapsed >= 5500) : smooth((elapsed - 5500) / 1150), opened = preview ? 0 : smooth((elapsed - 5500) / 430);
   candidates.forEach((candidate, index) => {
     const sx = left + slot * (index + .5), incoming = preview || reduced ? 1 : smooth((elapsed - index * 55) / 1700);
-    const horseY = -17 * scale - (1 - incoming) * Math.min(h * .2, 17 * scale) + launch * h * .82;
+    const travel = -17.4 * scale - (1 - incoming) * Math.min(h * .12, 12 * scale) + launch * h * .82;
+    const horseX = sx + Math.cos(forward) * travel, horseY = Math.sin(forward) * travel;
     box(ctx, sx - slot * .47, -gateDepth - 4 * scale, slot * .94, gateDepth + 5 * scale, '#132a3b32');
     for (const side of [-1, 1]) {
       const wall = sx + side * slot * .48; ctx.fillStyle = '#152c3d'; ctx.fillRect(wall - 1.3 * scale, -gateDepth, 2.6 * scale, gateDepth + 3 * scale);
       ctx.fillStyle = '#91a5a7'; ctx.fillRect(wall - .6 * scale, -gateDepth, 1.2 * scale, gateDepth + scale);
       for (let bar = 0; bar < 4; bar++) { ctx.strokeStyle = '#d3ddcc66'; ctx.lineWidth = .8 * scale; ctx.beginPath(); ctx.moveTo(wall - 1.1 * scale, -gateDepth + (bar + 1) * gateDepth / 5); ctx.lineTo(wall + 1.1 * scale, -gateDepth + (bar + 1) * gateDepth / 5); ctx.stroke(); }
     }
-    topHorse(ctx, candidate, index, sx, horseY, Math.PI / 2, scale, clock, reduced, !preview && elapsed >= 5500);
+    topHorse(ctx, candidate, index, horseX, horseY, forward, scale, clock, reduced, !preview && elapsed >= 5500);
     // Split front doors pivot sideways together at 5500 ms; no stall has an earlier release.
     for (const side of [-1, 1]) {
       const hingeX = sx + side * slot * .43, tipX = hingeX - side * slot * .42 * (1 - opened), tipY = opened * slot * .31;
@@ -317,7 +328,7 @@ export function drawRacingStartingGate(ctx: CanvasRenderingContext2D, w: number,
     const signW = Math.min(slot * .84, font * 2.4), signY = -gateDepth - font * .95;
     box(ctx, sx - signW / 2, signY - font * .64, signW, font * 1.28, '#102435', candidate.color); label(ctx, String(index + 1).padStart(2, '0'), sx, signY, font, '#f5e5ba');
     const ready = !preview && elapsed >= 3900, lamp = clamp(scale, .8, 2); ellipse(ctx, sx + signW / 2 + 4, signY, lamp, lamp, ready ? '#d6bf78' : '#8ba49a');
-    if (!reduced && elapsed > 5500) for (let particle = 0; particle < 4; particle++) { const age = (clock / 380 + index * .1 + particle / 4) % 1; ellipse(ctx, sx + Math.sin(particle * 2 + index) * age * scale * 4, horseY - (15 + age * 15) * scale, (1 + age) * scale, scale * .6, '#e0bd7929'); }
+    if (!reduced && elapsed > 5500) for (let particle = 0; particle < 4; particle++) { const age = (clock / 380 + index * .1 + particle / 4) % 1; ellipse(ctx, horseX + Math.sin(particle * 2 + index) * age * scale * 4, horseY - (15 + age * 15) * scale, (1 + age) * scale, scale * .6, '#e0bd7929'); }
   });
   if (!candidates.length) label(ctx, '이름을 적으면 출발 준비를 시작해요', 0, -h * .18, Math.max(8, Math.min(14, w / 28)), '#f3e4bf');
   ctx.restore();

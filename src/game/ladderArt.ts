@@ -1,0 +1,476 @@
+import type { Candidate } from '../election';
+import type { LadderActorFrame, LadderFrame, LadderTimeline } from '../ladderLogic';
+
+export type LadderPose = 'idle' | 'climb' | 'bridge' | 'balance' | 'fall' | 'hang' | 'clamber' | 'win' | 'arrived';
+type Point = { x: number; y: number };
+export type LadderArtActor = { id: string; index: number; lane: number; height: number; rungProgress: number; pose: LadderPose; phase: number; fromLane?: number; toLane?: number; supportRow?: number; gripRow?: number; footRow?: number; fallDepth?: number; tilt?: number; eventStage?: string; eventKind?: string; floating?: boolean; arrived: boolean; doorLane?: number; candidate: Candidate; transition?: { from: LadderArtActor; progress: number; shift: Point; clock: number }; };
+export type LadderArtBridge = { id: string; row: number; leftLane: number; rightLane: number };
+export type LadderArtEvent = { id: string; kind: string; actorId: string; row: number; lane: number; phase: number; stage: 'setup' | 'action' | 'recovery'; };
+export type LadderGeometry = { width: number; height: number; laneCount: number; rungCount: number; left: number; right: number; top: number; bottom: number; laneGap: number; rungGap: number; scale: number; subdivisions: number; laneX: (lane: number) => number; rowY: (row: number) => number; };
+export type LadderRig = { hip: Point; shoulders: [Point, Point]; elbows: [Point, Point]; hands: [Point, Point]; knees: [Point, Point]; feet: [Point, Point]; head: Point; angle: number; facing: number; scale: number; handContact: [boolean, boolean]; footContact: [boolean, boolean]; };
+const clamp = (value: number, low = 0, high = 1) => Math.max(low, Math.min(high, value));
+const ease = (value: number) => { const p = clamp(value); return p * p * (3 - 2 * p); };
+const mix = (a: number, b: number, p: number) => a + (b - a) * p;
+const wrap = (value: number) => (value % 1 + 1) % 1;
+const rotate = (point: Point, angle: number): Point => ({ x: point.x * Math.cos(angle) - point.y * Math.sin(angle), y: point.x * Math.sin(angle) + point.y * Math.cos(angle) });
+const colors = ['#e7ac81', '#c48b64', '#f2c397', '#a87151'];
+const hair = ['#172639', '#50382c', '#754d38', '#253a48'];
+function tint(color: string, amount: number) {
+  const rgb = Number.parseInt(color.slice(1), 16);
+  return '#' + [rgb >>> 16, rgb >>> 8 & 255, rgb & 255].map(value => Math.round(Math.min(255, value * amount)).toString(16).padStart(2, '0')).join('');
+}
+function joint(a: Point, b: Point, upper: number, lower: number, bend: number): Point {
+  const dx = b.x - a.x, dy = b.y - a.y, raw = Math.hypot(dx, dy);
+  const distance = clamp(raw, Math.abs(upper - lower) + .001, upper + lower - .001);
+  const along = (upper * upper - lower * lower + distance * distance) / (2 * distance);
+  const height = Math.sqrt(Math.max(0, upper * upper - along * along));
+  return { x: a.x + dx / (raw || 1) * along + dy / (raw || 1) * height * bend, y: a.y + dy / (raw || 1) * along - dx / (raw || 1) * height * bend };
+}
+function reachable(origin: Point, target: Point, length: number): Point {
+  const ratio = Math.min(1, length / Math.max(.01, Math.hypot(target.x - origin.x, target.y - origin.y)));
+  return { x: mix(origin.x, target.x, ratio), y: mix(origin.y, target.y, ratio) };
+}
+function rectangle(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string) { ctx.fillStyle = color; ctx.fillRect(x, y, w, h); }
+function line(ctx: CanvasRenderingContext2D, a: Point, b: Point, width: number, color: string) {
+  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'square'; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+}
+function label(ctx: CanvasRenderingContext2D, value: string, x: number, y: number, size: number, color: string, maxWidth?: number) {
+  ctx.font = `800 ${size}px "Malgun Gothic", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = color;
+  if (maxWidth) ctx.fillText(value, x, y, maxWidth); else ctx.fillText(value, x, y);
+}
+
+export function createLadderGeometry(width: number, height: number, laneCount: number, rungCount = 24): LadderGeometry {
+  const count = Math.max(2, laneCount), margin = clamp(width * .055, 11, 44);
+  const laneGap = (width - margin * 2) / (count + .55), left = (width - laneGap * (count - 1)) / 2;
+  const top = clamp(height * .23, 25, 105), bottom = Math.max(top + 15, height - clamp(height * .065, 9, 28));
+  const rungGap = (bottom - top) / rungCount;
+  const scale = Math.max(.12, Math.min(1.8, laneGap / 24, rungGap / 8.5));
+  const subdivisions = Math.max(1, Math.ceil(rungGap / (scale * 8.6)));
+  return { width, height, laneCount: count, rungCount, left, right: left + laneGap * (count - 1), top, bottom, laneGap, rungGap, scale, subdivisions, laneX: lane => left + laneGap * lane, rowY: row => bottom - row / rungCount * (bottom - top) };
+}
+
+/** Reconstruct pose transitions from timeline boundaries, including a direct final seek. */
+export function ladderArtActors(timeline: LadderTimeline, frame: LadderFrame, candidates: Candidate[], elapsed: number, geometry: LadderGeometry, reduced: boolean, readFrame: (time: number) => LadderFrame): LadderArtActor[] {
+  const initial = reduced ? readFrame(0) : undefined;
+  const adapt = (actor: LadderActorFrame): LadderArtActor => {
+    const event = timeline.events.find(item => item.id === actor.eventId);
+    const gripRow = event?.motion.type === 'fall' ? event.row - event.motion.fallRows + 2 : event && (actor.pose === 'hang' || actor.pose === 'clamber') ? Math.min(24, event.row + 2) : actor.supportRow;
+    return { ...actor, candidate: candidates[actor.index], gripRow, footRow: actor.pose === 'balance' ? event?.row : undefined, eventKind: event?.kind, floating: event?.motion.type === 'boost' };
+  };
+  return frame.actors.map(current => {
+    if (reduced) return adapt(current.arrived ? current : initial!.actors[current.index]);
+    const actor = adapt(current), path = timeline.paths[actor.id];
+    const boundaries = [path.startAt, path.arrivalAt, ...path.segments.map(segment => segment.start)];
+    timeline.events.filter(event => event.actorId === actor.id).forEach(event => {
+      boundaries.push(event.action, event.resolve, event.end);
+      if (event.motion.type === 'fall') boundaries.push(event.action + (event.resolve - event.action) * 5 / 9);
+    });
+    const boundary = Math.max(-Infinity, ...boundaries.filter(time => time <= elapsed));
+    const next = Math.min(Infinity, ...boundaries.filter(time => time > boundary + .001));
+    const duration = Math.min(250, (next - boundary) * .6);
+    if (elapsed >= boundary && elapsed < boundary + duration) {
+      const previous = readFrame(Math.max(0, boundary - .001)).actors.find(item => item.id === actor.id)!;
+      actor.transition = { from: adapt(previous), progress: (elapsed - boundary) / duration, clock: boundary, shift: { x: geometry.laneX(actor.lane) - geometry.laneX(previous.lane), y: geometry.rowY(actor.rungProgress) - geometry.rowY(previous.rungProgress) } };
+    }
+    return actor;
+  });
+}
+
+/** Hands and soles sample fixed world rungs; no frame cache is needed to seek or pause. */
+function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: number, reduced = false): LadderRig {
+  const scale = geometry.scale, personality = actor.index % 4;
+  const rung = geometry.rungGap / geometry.subdivisions / scale, step = actor.rungProgress * geometry.subdivisions;
+  const base = { x: geometry.laneX(actor.lane), y: geometry.rowY(actor.rungProgress) };
+  let angle = 0, facing = actor.toLane !== undefined && actor.fromLane !== undefined && actor.toLane < actor.fromLane ? -1 : 1;
+  let hip = { x: 0, y: -13 }, hands: [Point, Point] = [{ x: -8, y: -16 }, { x: 8, y: -16 }], feet: [Point, Point] = [{ x: -3.8, y: 0 }, { x: 3.8, y: 0 }];
+  let handContact: [boolean, boolean] = [false, false], footContact: [boolean, boolean] = [true, true];
+  const motor = reduced ? 0 : step;
+  if (actor.pose === 'climb') {
+    const gripOffset = Math.max(3, Math.round(31 / rung));
+    hands = [0, 1].map(side => {
+      const progress = (motor + side) / 2, cycle = wrap(progress), start = Math.floor(progress) * 2 - side;
+      const swing = clamp((cycle - .62) / .38);
+      const row = start + gripOffset + 2 * ease(swing);
+      handContact[side] = cycle < .62;
+      return { x: (side ? 1 : -1) * (6 + Math.sin(swing * Math.PI) * 2.2), y: -(row - motor) * rung };
+    }) as [Point, Point];
+    feet = [0, 1].map(side => {
+      const progress = (motor + 1 - side) / 2, cycle = wrap(progress), start = Math.floor(progress) * 2 - (1 - side);
+      const swing = clamp((cycle - .52) / .48), row = start + 1 + 2 * ease(swing);
+      footContact[side] = cycle < .52;
+      return { x: (side ? 1 : -1) * (4.2 + Math.sin(swing * Math.PI) * 1.2), y: -(row - motor) * rung - Math.sin(swing * Math.PI) * .8 };
+    }) as [Point, Point];
+    hip.x = Math.sin(motor * Math.PI) * .35; angle = Math.sin(motor * Math.PI) * .017;
+  } else if (actor.pose === 'bridge') {
+    const distance = Math.abs(actor.lane - (actor.fromLane ?? actor.lane)) * geometry.laneGap / scale;
+    const stride = 18, motorDistance = reduced ? 0 : distance;
+    feet = [0, 1].map(side => {
+      const cycle = wrap(motorDistance / stride + side * .5), swing = clamp((cycle - .62) / .38);
+      footContact[side] = cycle < .62;
+      return { x: cycle < .62 ? stride * (.5 - cycle) : mix(stride * (.5 - .62), stride * .5, ease(swing)), y: -Math.sin(swing * Math.PI) * 2.4 };
+    }) as [Point, Point];
+    const sway = Math.sin(motorDistance / stride * Math.PI * 2);
+    hip.y = -11.8 + Math.abs(sway) * .35; hip.x = .2;
+    hands = [{ x: -10, y: -17 + sway * 1.4 }, { x: 12, y: -18 - sway * 1.4 }];
+    angle = -.035; facing = actor.toLane! < actor.fromLane! ? -1 : 1;
+  } else if (actor.pose === 'balance') {
+    const wobble = reduced ? 0 : Math.sin(actor.phase * Math.PI * 3) * Math.sin(actor.phase * Math.PI);
+    hip = { x: wobble * 1.6, y: -12 }; hands = [{ x: -14, y: -22 - wobble * 2 }, { x: 14, y: -22 + wobble * 2 }];
+    const footY = (geometry.rowY(actor.footRow ?? Math.round(actor.rungProgress * geometry.subdivisions) / geometry.subdivisions) - base.y) / scale;
+    feet = [{ x: -3, y: footY }, { x: 4, y: footY }]; angle = wobble * .10;
+    if (actor.eventKind === 'bird' || actor.eventKind === 'paint') hands[1] = { x: 2.5, y: -31 };
+    if (actor.eventKind === 'pendulum') { hip.y = -10; hands = [{ x: -6, y: -18 }, { x: 6, y: -18 }]; }
+    if (actor.eventKind === 'false-sign') hands[1] = { x: 12, y: -28 };
+  } else if (actor.pose === 'fall') {
+    const p = reduced ? .5 : actor.phase;
+    const catchAmount = ease((p - .22) / (.555555 - .22));
+    const grab = geometry.rowY(actor.gripRow ?? Math.floor(actor.rungProgress) + 2), handY = (grab - base.y) / scale;
+    angle = Math.sin(p * Math.PI) * (.19 + personality * .018) * (personality % 2 ? -1 : 1) * (1 - catchAmount);
+    hip.y = mix(-13, handY + 20, catchAmount);
+    hands = [{ x: mix(-11, -5.8, catchAmount), y: mix(-29, handY, catchAmount) }, { x: mix(12, 8, catchAmount), y: mix(-26, handY + 6, catchAmount) }];
+    feet = [{ x: mix(-6, -4, catchAmount), y: mix(-3, -1, catchAmount) }, { x: mix(7, 6, catchAmount), y: mix(-6, -4, catchAmount) }];
+    footContact = [false, false];
+  } else if (actor.pose === 'hang') {
+    const sway = reduced ? 0 : Math.sin(actor.phase * Math.PI * 2) * Math.sin(actor.phase * Math.PI) * .13;
+    const grab = geometry.rowY(actor.gripRow ?? actor.supportRow ?? Math.min(24, Math.ceil(actor.rungProgress) + 2));
+    const handY = (grab - base.y) / scale;
+    hip = { x: Math.sin(sway) * 4, y: handY + 20 }; angle = sway;
+    hands = [{ x: -5.8, y: handY }, { x: 8, y: handY + 6 + Math.sin(actor.phase * Math.PI) * 2 }];
+    feet = [{ x: -4, y: -1 }, { x: 6, y: -4 }]; handContact = [true, false]; footContact = [false, false];
+    if (actor.floating) {
+      const climb = rawLadderRig({ ...actor, pose: 'climb', transition: undefined }, geometry, clock, reduced);
+      hip = { x: 0, y: -13 }; angle = 0;
+      hands = climb.hands.map(point => ({ x: (point.x - base.x) / scale, y: (point.y - base.y) / scale })) as [Point, Point];
+      handContact = climb.handContact;
+    }
+    if (actor.eventKind === 'rope-tangle') hands[1] = { x: 6, y: -1 };
+  } else if (actor.pose === 'clamber') {
+    const p = ease(actor.phase), support = geometry.rowY(actor.gripRow ?? actor.supportRow ?? Math.ceil(actor.rungProgress) + 2);
+    const handY = (support - base.y) / scale;
+    hip.y = mix(actor.floating ? -13 : handY + 20, -13, p); hip.x = (1 - p) * .2; angle = 0;
+    hands = [{ x: -6, y: handY }, { x: 6, y: handY }];
+    feet = [{ x: -4, y: -1 }, { x: 6, y: -4 }];
+    handContact = [actor.phase < .5, actor.phase < .5]; footContact = [false, false];
+    const settling = ease((actor.phase - .48) / .52);
+    const climb = rawLadderRig({ ...actor, pose: 'climb', transition: undefined }, geometry, clock, reduced);
+    const local = (point: Point): Point => ({ x: (point.x - base.x) / scale, y: (point.y - base.y) / scale });
+    hands = hands.map((point, side) => { const to = local(climb.hands[side]); return { x: mix(point.x, to.x, settling), y: mix(point.y, to.y, settling) }; }) as [Point, Point];
+    feet = feet.map((point, side) => { const to = local(climb.feet[side]); return { x: mix(point.x, to.x, settling), y: mix(point.y, to.y, settling) - Math.sin(settling * Math.PI) * 1.2 }; }) as [Point, Point];
+    if (settling > .999) { handContact = climb.handContact; footContact = climb.footContact; }
+    if (actor.floating) { hands = climb.hands.map(local) as [Point, Point]; handContact = climb.handContact; }
+  } else if (actor.pose === 'win') {
+    const breath = reduced ? 0 : Math.sin(clock / (650 + personality * 70)) * .18;
+    const wave = reduced ? 0 : Math.sin(clock / (470 + personality * 40)) * .7;
+    hip.y = -13 + breath; hands = [{ x: -8, y: -13 }, { x: 6 + wave, y: -35 }]; angle = 0;
+  } else {
+    const breath = reduced ? 0 : Math.sin((clock + actor.index * 433) / (650 + personality * 60)) * .12;
+    hip.y += breath;
+    hands = [{ x: -8, y: -12 }, { x: 8, y: -12 }];
+  }
+  angle += (actor.tilt ?? 0) * .5;
+  const toWorld = (point: Point) => { const p = rotate({ x: point.x * facing, y: point.y }, angle); return { x: base.x + p.x * scale, y: base.y + p.y * scale }; };
+  const hipWorld = toWorld(hip);
+  const shoulders = [{ x: hip.x - 4.2, y: hip.y - 10 }, { x: hip.x + 4.2, y: hip.y - 10 }].map(toWorld) as [Point, Point];
+  let handWorld = hands.map(toWorld) as [Point, Point];
+  let footWorld = feet.map(point => ({ x: base.x + point.x * facing * scale, y: base.y + point.y * scale })) as [Point, Point];
+  if (actor.floating && (actor.pose === 'hang' || actor.pose === 'clamber')) {
+    const climb = rawLadderRig({ ...actor, pose: 'climb', transition: undefined }, geometry, clock, reduced);
+    handWorld = climb.hands; handContact = climb.handContact;
+  }
+  if (actor.pose === 'climb') {
+    // Contact markers lie on actual rails and decorative rungs, independent of torso sway.
+    handWorld = hands.map(point => ({ x: base.x + point.x * scale, y: base.y + point.y * scale })) as [Point, Point];
+  }
+  if (!actor.floating && (actor.pose === 'hang' || actor.pose === 'clamber' && actor.phase < .5)) {
+    const grab = geometry.rowY(actor.gripRow ?? actor.supportRow ?? Math.min(24, Math.ceil(actor.rungProgress) + 2));
+    handWorld[0] = { x: geometry.laneX(actor.lane) - 6 * scale, y: grab };
+    if (actor.pose === 'clamber') handWorld[1] = { x: geometry.laneX(actor.lane) + 6 * scale, y: grab };
+  }
+  const handsReached = handWorld.map((point, side) => {
+    const target = reachable(shoulders[side], point, 12.9 * scale);
+    if (Math.hypot(target.x - point.x, target.y - point.y) > .001) handContact[side] = false;
+    return target;
+  }) as [Point, Point];
+  const hipSides = [{ x: hipWorld.x - 2.6 * scale, y: hipWorld.y }, { x: hipWorld.x + 2.6 * scale, y: hipWorld.y }];
+  footWorld = footWorld.map((point, side) => {
+    const target = reachable(hipSides[side], point, 16.2 * scale);
+    if (Math.hypot(target.x - point.x, target.y - point.y) > .001) footContact[side] = false;
+    return target;
+  }) as [Point, Point];
+  const elbows = handsReached.map((point, side) => joint(shoulders[side], point, 6.5 * scale, 6.5 * scale, side ? 1 : -1)) as [Point, Point];
+  const knees = footWorld.map((point, side) => joint(hipSides[side], point, 8.2 * scale, 8.2 * scale, actor.pose === 'bridge' ? facing : side ? -1 : 1)) as [Point, Point];
+  return { hip: hipWorld, shoulders, elbows, hands: handsReached, knees, feet: footWorld, head: toWorld({ x: hip.x, y: hip.y - 19 }), angle, facing, scale, handContact, footContact };
+}
+
+export function sampleLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: number, reduced = false): LadderRig {
+  const current = rawLadderRig(actor, geometry, clock, reduced), transition = reduced ? undefined : actor.transition;
+  if (!transition || transition.progress >= 1) return current;
+  const previous = rawLadderRig({ ...transition.from, transition: undefined }, geometry, transition.clock, false), p = ease(transition.progress);
+  const move = (a: Point, b: Point): Point => ({ x: mix(a.x + transition.shift.x, b.x, p), y: mix(a.y + transition.shift.y, b.y, p) });
+  const side = (index: number) => previous.facing === current.facing ? index : 1 - index;
+  const hip = move(previous.hip, current.hip), head = move(previous.head, current.head), angle = mix(previous.angle, current.angle, p);
+  const shoulders = current.shoulders.map((point, index) => move(previous.shoulders[side(index)], point)) as [Point, Point];
+  const hands = current.hands.map((point, index) => reachable(shoulders[index], move(previous.hands[side(index)], point), 12.9 * current.scale)) as [Point, Point];
+  const hipSides = [{ x: hip.x - 2.6 * current.scale, y: hip.y }, { x: hip.x + 2.6 * current.scale, y: hip.y }];
+  const feet = current.feet.map((point, index) => {
+    const foot = move(previous.feet[side(index)], point), from = previous.feet[side(index)];
+    if (Math.hypot(from.x + transition.shift.x - point.x, from.y + transition.shift.y - point.y) > current.scale * .8) foot.y -= Math.sin(p * Math.PI) * current.scale * 1.2;
+    return reachable(hipSides[index], foot, 16.2 * current.scale);
+  }) as [Point, Point];
+  const elbows = hands.map((point, index) => joint(shoulders[index], point, 6.5 * current.scale, 6.5 * current.scale, index ? 1 : -1)) as [Point, Point];
+  const knees = feet.map((point, index) => joint(hipSides[index], point, 8.2 * current.scale, 8.2 * current.scale, actor.pose === 'bridge' ? current.facing : index ? -1 : 1)) as [Point, Point];
+  const same = (a: Point, b: Point) => Math.hypot(a.x + transition.shift.x - b.x, a.y + transition.shift.y - b.y) < .001;
+  return { ...current, hip, head, angle, shoulders, hands, elbows, knees, feet, handContact: current.handContact.map((contact, index) => contact && same(previous.hands[side(index)], current.hands[index])) as [boolean, boolean], footContact: current.footContact.map((contact, index) => contact && same(previous.feet[side(index)], current.feet[index])) as [boolean, boolean] };
+}
+
+/** A separate clothed climbing rig; all exposed parts share the same skin palette. */
+export function drawLadderActor(ctx: CanvasRenderingContext2D, actor: LadderArtActor, geometry: LadderGeometry, clock: number, reduced = false, focused = false) {
+  const rig = sampleLadderRig(actor, geometry, clock, reduced), s = rig.scale;
+  const skin = colors[actor.index % colors.length], shade = tint(skin, .79), light = tint(skin, 1.12), uniform = actor.candidate.color;
+  const hipSides = [{ x: rig.hip.x - 2.6 * s, y: rig.hip.y }, { x: rig.hip.x + 2.6 * s, y: rig.hip.y }];
+  if (focused) { ctx.fillStyle = '#ffd77625'; ctx.beginPath(); ctx.ellipse(rig.hip.x, rig.hip.y - 8 * s, 15 * s, 25 * s, 0, 0, Math.PI * 2); ctx.fill(); }
+  rig.feet.forEach((foot, side) => {
+    line(ctx, hipSides[side], rig.knees[side], 4.9 * s, tint(uniform, side ? .72 : .59));
+    line(ctx, rig.knees[side], foot, 3.9 * s, '#283e50');
+    rectangle(ctx, foot.x - 2.4 * s, foot.y - 1.3 * s, 5.4 * s, 1.5 * s, '#152734');
+    rectangle(ctx, foot.x - 2.4 * s, foot.y - .1 * s, 5.4 * s, .7 * s, '#d9d6bc');
+  });
+  const arm = (side: number) => {
+    line(ctx, rig.shoulders[side], rig.elbows[side], 4.2 * s, uniform);
+    line(ctx, rig.elbows[side], rig.hands[side], 3.6 * s, skin);
+    rectangle(ctx, rig.hands[side].x - 1.7 * s, rig.hands[side].y - 1.5 * s, 3.4 * s, 2.7 * s, skin);
+    rectangle(ctx, rig.hands[side].x - .7 * s, rig.hands[side].y - 1.4 * s, 1.7 * s, .7 * s, light);
+  };
+  arm(0);
+  ctx.save(); ctx.translate(rig.hip.x, rig.hip.y); ctx.rotate(rig.angle); ctx.scale(s, s);
+  rectangle(ctx, -6.2, -12, 12.4, 13, uniform);
+  rectangle(ctx, -5.1, -10.5, 3.4, 1.6, tint(uniform, 1.12)); rectangle(ctx, 3.6, -9, 2.5, 8, tint(uniform, .72));
+  rectangle(ctx, -6.2, -1, 12.4, 2, '#1c3646'); rectangle(ctx, -.9, -.7, 1.8, 1.2, '#ddc387');
+  const back = actor.pose === 'climb' || actor.pose === 'hang';
+  if (back) {
+    rectangle(ctx, -3.4, -9, 6.8, 5.5, '#f1eadc'); rectangle(ctx, -2.2, -7.8, 4.4, 2.8, uniform);
+    rectangle(ctx, -4.1, -11, 1.3, 10, '#d7c9a0'); rectangle(ctx, 2.8, -11, 1.3, 10, '#d7c9a0');
+  } else rectangle(ctx, -3.4, -10, 6.8, 1.2, '#f1eadc');
+  ctx.restore();
+  const headWidth = [8.5, 9, 8, 9.5][actor.index % 4];
+  ctx.save(); ctx.translate(rig.head.x, rig.head.y); ctx.rotate(rig.angle * .5); ctx.scale(s, s);
+  rectangle(ctx, -2, 2.9, 4, 3, skin); rectangle(ctx, -headWidth / 2, -4, headWidth, 8, skin);
+  rectangle(ctx, -headWidth / 2 + 1.1, -3, headWidth - 3, 1.3, light); rectangle(ctx, headWidth / 2 - 1.5, -2, 1.5, 5.6, shade);
+  rectangle(ctx, -headWidth / 2 - .6, -5, headWidth + 1.2, 2.4, hair[actor.index % 4]);
+  rectangle(ctx, -headWidth / 2 - 1, -7, headWidth + 2, 3.2, '#ead38f'); rectangle(ctx, -headWidth / 2 - 1.7, -4.1, headWidth + 3.4, 1.1, '#6f6149');
+  rectangle(ctx, -2, -6.2, 2.4, .7, '#fff5d0');
+  if (!back || actor.pose === 'hang') {
+    rectangle(ctx, -2.7, -.7, 1.2, 1.3, '#172d3d'); rectangle(ctx, 1.8, -.7, 1.2, 1.3, '#172d3d');
+    rectangle(ctx, -.9, 2.4, 2.3, actor.pose === 'fall' || actor.pose === 'hang' ? 1.6 : .8, '#694e3a');
+  } else rectangle(ctx, -3, -2.8, 6, 3.4, hair[actor.index % 4]);
+  ctx.restore(); arm(1);
+}
+
+export function drawLadderName(ctx: CanvasRenderingContext2D, actor: LadderArtActor, geometry: LadderGeometry, focused = false) {
+  if (geometry.height < 175 || geometry.laneGap < 24 && !focused) return;
+  const rig = sampleLadderRig(actor, geometry, 0, true), width = clamp(geometry.laneGap - 3, 20, focused ? 94 : 72);
+  let name = actor.candidate.name; ctx.font = `800 ${focused ? 10 : 9}px "Malgun Gothic", sans-serif`;
+  while (ctx.measureText(name).width > width - 8 && Array.from(name).length > 1) name = Array.from(name).slice(0, -1).join('');
+  const x = clamp(rig.hip.x, width / 2 + 3, geometry.width - width / 2 - 3), y = Math.min(geometry.height - 12, rig.feet[0].y + 6);
+  rectangle(ctx, x - width / 2, y - 3, width, 12, '#112b3bda'); rectangle(ctx, x - width / 2, y + 8, width, 1.3, actor.candidate.color);
+  label(ctx, name, x, y + 3, focused ? 10 : 9, '#f4e9d5');
+}
+
+export function drawLadderScenery(ctx: CanvasRenderingContext2D, geometry: LadderGeometry, bridges: LadderArtBridge[], targetLane: number, clock: number, reduced: boolean, doorOccupants: Set<number>, preview = false) {
+  const { width: w, height: h, top, bottom, laneGap, left, right, scale: s } = geometry;
+  const time = reduced ? 0 : clock;
+  const sky = ctx.createLinearGradient(0, 0, 0, h); sky.addColorStop(0, '#122339'); sky.addColorStop(.58, '#294955'); sky.addColorStop(1, '#527579');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+  rectangle(ctx, w * .09, h * .095, clamp(h * .055, 4, 26), clamp(h * .055, 4, 26), '#e6d398');
+  for (let cloud = 0; cloud < 7; cloud++) {
+    const x = wrap(cloud * .187 + time / (125000 + cloud * 7500)) * (w + 130) - 65, y = h * (.06 + cloud % 3 * .058);
+    rectangle(ctx, x, y, 35 + cloud % 3 * 16, 4, '#bdc8ba25'); rectangle(ctx, x + 9, y - 3, 23 + cloud % 2 * 17, 3, '#d6d5bd18');
+  }
+  for (let depth = 0; depth < 3; depth++) {
+    const buildings = Math.ceil(w / (34 + depth * 18));
+    for (let i = -1; i <= buildings; i++) {
+      const bw = 32 + depth * 18, x = i * bw + depth * 11, bh = h * (.12 + (i * 13 + depth * 7 + 99) % 11 / 40), y = h - bh;
+      rectangle(ctx, x, y, bw - 3, bh, ['#23404d', '#1d3543', '#172e3b'][depth]);
+      rectangle(ctx, x + bw * .36, y - 6 - i % 3 * 4, bw * .21, 9, '#243c47');
+      for (let row = 0; row < bh / 8; row++) for (let column = 0; column < bw / 7 - 1; column++) {
+        if ((row * 3 + column * 7 + i * 11 + 200) % 5 < 2) rectangle(ctx, x + 4 + column * 7, y + 5 + row * 8, 2, 2, (row + column) % 2 ? '#d8b96f70' : '#83b5c25c');
+      }
+    }
+  }
+  const outer = Math.min(laneGap * .57, 48), towerLeft = Math.max(2, left - outer), towerRight = Math.min(w - 2, right + outer);
+  rectangle(ctx, towerLeft, top - 5, towerRight - towerLeft, bottom - top + 7, '#203a49');
+  const facade = ctx.createLinearGradient(towerLeft, 0, towerRight, 0); facade.addColorStop(0, '#334e5a'); facade.addColorStop(.5, '#1c3444'); facade.addColorStop(1, '#314d55');
+  ctx.fillStyle = facade; ctx.fillRect(towerLeft + 3, top, towerRight - towerLeft - 6, bottom - top);
+  for (let floor = 0; floor <= 6; floor++) {
+    const y = geometry.rowY(floor * 4);
+    rectangle(ctx, towerLeft, y, towerRight - towerLeft, 3, '#608086'); rectangle(ctx, towerLeft, y + 3, towerRight - towerLeft, 2, '#102938');
+    for (let lane = 0; lane < geometry.laneCount - 1; lane++) {
+      const x = geometry.laneX(lane) + laneGap / 2, ww = Math.max(3, laneGap * .38);
+      rectangle(ctx, x - ww / 2, y - geometry.rungGap * 3.4, ww, Math.max(3, geometry.rungGap * 2.4), '#122b3c');
+      rectangle(ctx, x - ww / 2 + 1, y - geometry.rungGap * 3.4 + 1, ww - 2, 2, '#79a6b040');
+      rectangle(ctx, x - ww / 2 + ww * .63, y - geometry.rungGap * 3.4, 1, geometry.rungGap * 2.4, '#7097a34c');
+    }
+    line(ctx, { x: towerLeft + 2, y: y }, { x: towerLeft + 2 + Math.min(16, outer), y: y - geometry.rungGap * 4 }, 1, '#6a93945c');
+    line(ctx, { x: towerRight - 2, y }, { x: towerRight - 2 - Math.min(16, outer), y: y - geometry.rungGap * 4 }, 1, '#6a93945c');
+  }
+  const railHalf = 6 * s, rungThickness = Math.max(.8, s * 1.2);
+  for (let lane = 0; lane < geometry.laneCount; lane++) {
+    const x = geometry.laneX(lane);
+    line(ctx, { x: x - railHalf - 1, y: top }, { x: x - railHalf - 1, y: bottom }, Math.max(1.6, 2.5 * s), '#102c3a');
+    line(ctx, { x: x + railHalf + 1, y: top }, { x: x + railHalf + 1, y: bottom }, Math.max(1.6, 2.5 * s), '#102c3a');
+    line(ctx, { x: x - railHalf, y: top }, { x: x - railHalf, y: bottom }, Math.max(1, 1.3 * s), '#93b8b6');
+    line(ctx, { x: x + railHalf, y: top }, { x: x + railHalf, y: bottom }, Math.max(1, 1.3 * s), '#7ca4a6');
+    for (let row = 0; row <= geometry.rungCount * geometry.subdivisions; row++) {
+      const y = geometry.rowY(row / geometry.subdivisions);
+      line(ctx, { x: x - railHalf, y }, { x: x + railHalf, y }, rungThickness, '#718e92');
+      rectangle(ctx, x - railHalf, y - rungThickness / 2, railHalf * 2, .55, '#cae0cbaa');
+    }
+    const pulleyY = top - 5; rectangle(ctx, x - 4 * s, pulleyY - 3 * s, 8 * s, 5 * s, '#536e79');
+    rectangle(ctx, x - 1 * s, pulleyY - 2 * s, 2 * s, 3 * s, '#c5b47b');
+  }
+  bridges.forEach(bridge => {
+    const x = geometry.laneX(bridge.leftLane), xx = geometry.laneX(bridge.rightLane), y = geometry.rowY(bridge.row);
+    line(ctx, { x, y: y + 2 }, { x: xx, y: y + 2 }, Math.max(3, 3.4 * s), '#162f3c');
+    line(ctx, { x, y }, { x: xx, y }, Math.max(1.4, 1.8 * s), '#deb56b');
+    for (let bolt = 0; bolt <= 4; bolt++) rectangle(ctx, mix(x, xx, bolt / 4) - .7, y - .7, 1.4, 1.4, '#f4d89a');
+    line(ctx, { x: x + 1, y: y + 2 }, { x: mix(x, xx, .5), y: y + Math.min(10, geometry.rungGap * .7) }, 1, '#628c91');
+    line(ctx, { x: mix(x, xx, .5), y: y + Math.min(10, geometry.rungGap * .7) }, { x: xx - 1, y: y + 2 }, 1, '#628c91');
+  });
+  // Crane, roof equipment and the gold destination remain part of the complete course.
+  const craneX = towerRight - Math.min(14, outer / 2), craneY = Math.max(8, top - 55 * s);
+  line(ctx, { x: craneX, y: top - 4 }, { x: craneX, y: craneY }, 3, '#ba9358');
+  line(ctx, { x: Math.max(2, craneX - 55 * s), y: craneY }, { x: Math.min(w - 2, craneX + 20 * s), y: craneY }, 3, '#bda16d');
+  for (let brace = 0; brace < 5; brace++) line(ctx, { x: craneX - brace * 10 * s, y: craneY - 1 }, { x: craneX - (brace + .6) * 10 * s, y: craneY + 4 * s }, 1, '#e0c381');
+  line(ctx, { x: craneX - 31 * s, y: craneY + 3 }, { x: craneX - 31 * s, y: top - 12 * s }, 1, '#abc0bd');
+  rectangle(ctx, towerLeft, top - 4, towerRight - towerLeft, 5, '#bfc6ae');
+  for (let lane = 0; lane < geometry.laneCount; lane++) {
+    const x = geometry.laneX(lane), chosen = lane === targetLane, doorWidth = Math.max(11, Math.min(laneGap * .66, 20 * s)), doorHeight = Math.max(14, 34 * s);
+    rectangle(ctx, x - doorWidth / 2 - 3, top - doorHeight - 2, doorWidth + 6, doorHeight + 3, chosen ? '#5c5238' : '#3a5560');
+    rectangle(ctx, x - doorWidth / 2, top - doorHeight, doorWidth, doorHeight, chosen ? '#f1d18c' : '#758f8e');
+    rectangle(ctx, x - doorWidth / 2 + 2, top - doorHeight + 2, doorWidth - 4, doorHeight - 3, doorOccupants.has(lane) ? '#284636' : chosen ? '#53473b' : '#213c4b');
+    rectangle(ctx, x + doorWidth / 2 - 4, top - doorHeight * .4, Math.max(1, s), Math.max(1, s * 2), '#efd392');
+    const numberY = top - doorHeight - Math.max(7, s * 5);
+    label(ctx, String(lane + 1).padStart(2, '0'), x, numberY, clamp(s * 8, 7, 12), chosen ? '#ffe59b' : '#acc9c7');
+    if (chosen) {
+      rectangle(ctx, x - doorWidth / 2 - 4, top - doorHeight - 3, doorWidth + 8, 2, '#ffdf8c');
+      rectangle(ctx, x - doorWidth / 2 - 4, top - doorHeight - 3, 2, doorHeight + 8, '#ffdf8c');
+      rectangle(ctx, x + doorWidth / 2 + 2, top - doorHeight - 3, 2, doorHeight + 8, '#ffdf8c');
+      rectangle(ctx, x - doorWidth / 2 - 4, top + 3, doorWidth + 8, 2, '#ffdf8c');
+      const glow = reduced ? .6 : .55 + Math.sin(time / 750) * .12;
+      ctx.globalAlpha = glow; rectangle(ctx, x - doorWidth / 2 - 7, top + 6, doorWidth + 14, 2, '#ffdf8c'); ctx.globalAlpha = 1;
+    }
+  }
+  rectangle(ctx, towerLeft - 3, bottom + 2, towerRight - towerLeft + 6, 6, '#8e977e');
+  for (let stripe = 0; stripe < (towerRight - towerLeft) / 8; stripe++) rectangle(ctx, towerLeft + stripe * 8, bottom + 3, 4, 2, stripe % 2 ? '#243944' : '#d7bc77');
+  for (let person = 0; person < Math.min(24, Math.floor(w / 18)); person++) {
+    const x = 9 + person * (w - 18) / Math.max(1, Math.min(24, Math.floor(w / 18)) - 1), y = h - 4;
+    rectangle(ctx, x - 1, y - 4, 2, 2, colors[person % 4]); rectangle(ctx, x - 2, y - 2, 4, 3, ['#9b6c66', '#a1bfa0', '#b6ab7e'][person % 3]);
+  }
+  if (w > 420 && h > 260) {
+    const bx = w * .17 + Math.sin(time / 18000) * w * .025, by = h * .12;
+    rectangle(ctx, bx - 17, by, 34, 7, '#d0c8a266'); rectangle(ctx, bx - 10, by - 4, 21, 5, '#e3d7a866'); rectangle(ctx, bx - 4, by + 8, 9, 3, '#617d8966');
+    line(ctx, { x: bx - 3, y: by + 7 }, { x: bx, y: by + 9 }, 1, '#bac8b87a');
+    label(ctx, 'LUCKY ROOF', bx, by + 3, 4.5, '#354d55');
+  }
+  if (preview && geometry.laneCount === 2 && w > 190) label(ctx, '옥상 행운문을 선택하세요', w / 2, bottom + 14, clamp(w / 40, 8, 12), '#dbe3c7', w - 20);
+}
+
+export function drawLadderEvent(ctx: CanvasRenderingContext2D, event: LadderArtEvent, geometry: LadderGeometry, clock: number, reduced: boolean, actor?: LadderArtActor) {
+  const x = geometry.laneX(event.lane), y = geometry.rowY(event.row), s = geometry.scale, p = reduced ? .5 : event.phase;
+  const active = event.stage === 'action', recovery = event.stage === 'recovery', tone = recovery ? '#9ad5b8' : '#f5c16c';
+  const rig = actor ? sampleLadderRig(actor, geometry, clock, reduced) : undefined;
+  const at = (xx: number, yy: number): Point => ({ x: x + xx * s, y: y + yy * s });
+  const rect = (xx: number, yy: number, w: number, h: number, color: string) => rectangle(ctx, x + xx * s, y + yy * s, w * s, h * s, color);
+  const stroke = (a: Point, b: Point, width: number, color: string) => line(ctx, a, b, Math.max(.6, width * s), color);
+  const pulse = active ? Math.sin(p * Math.PI) : 0;
+  ctx.save();
+  ctx.strokeStyle = tone; ctx.lineWidth = Math.max(1, s); ctx.beginPath(); ctx.ellipse(x, y - 16 * s, 15 * s, 24 * s, 0, 0, Math.PI * 2); ctx.stroke();
+  if (event.kind === 'wind') {
+    const fan = at(19, -26);
+    ctx.fillStyle = '#394f5a'; ctx.beginPath(); ctx.ellipse(fan.x, fan.y, 8 * s, 8 * s, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#c0cfc4'; ctx.lineWidth = Math.max(.8, s); ctx.stroke();
+    ctx.save(); ctx.translate(fan.x, fan.y); ctx.rotate(reduced ? .3 : clock / (active ? 160 : 510));
+    for (let blade = 0; blade < 4; blade++) { ctx.rotate(Math.PI / 2); rectangle(ctx, 0, -2 * s, 6 * s, 3 * s, '#8cabb0'); } ctx.restore();
+    rect(17, -18, 4, 8, '#607786'); rect(15, -10, 8, 2, '#e0b277');
+    for (let gust = 0; gust < 4; gust++) {
+      const shift = reduced ? 0 : wrap(clock / 650 + gust * .22) * 24;
+      line(ctx, { x: x - 26 * s + shift * s, y: y - (10 + gust * 7) * s }, { x: x - 9 * s + shift * s, y: y - (10 + gust * 7) * s }, Math.max(.6, s * .8), '#c5dddba0');
+    }
+  } else if (event.kind === 'loose-rung' || event.kind === 'trapdoor') {
+    rect(-7, -1.5, 14, 3, '#203a49');
+    const openAngle = event.kind === 'trapdoor' ? 1.48 : .65;
+    const rotation = active ? ease(Math.min(1, p * 1.8)) * openAngle : recovery ? (1 - ease(p)) * openAngle : -.025;
+    ctx.save(); ctx.translate(x - 7 * s, y); ctx.rotate(rotation); rectangle(ctx, 0, -1.2 * s, 14 * s, 2.4 * s, '#d2a56a'); rectangle(ctx, 4 * s, -1.2 * s, 1.2 * s, 2.4 * s, '#523e36'); ctx.restore();
+    if (active) for (let bit = 0; bit < 4; bit++) rect((bit - 2) * 2, p * p * (6 + bit * 4), 1.3, 1.3, '#bc9268');
+    if (event.kind === 'trapdoor' && rig) stroke(at(-9, -38), rig.hip, 1, '#d4c496');
+  } else if (event.kind === 'pendulum') {
+    const anchor = at(0, -47), swing = reduced ? .35 : Math.sin(clock / 440) * .67, bob = { x: anchor.x + Math.sin(swing) * 24 * s, y: anchor.y + Math.cos(swing) * 24 * s };
+    stroke(anchor, bob, 1.2, '#b7bda6'); rectangle(ctx, bob.x - 5 * s, bob.y - 5 * s, 10 * s, 10 * s, '#ad9382'); rectangle(ctx, bob.x - 3 * s, bob.y - 4 * s, 5 * s, 2 * s, '#dac7a4'); rectangle(ctx, bob.x - 5 * s, bob.y + 3 * s, 10 * s, 2 * s, '#645254');
+    rect(-4, -49, 8, 3, '#63828a');
+  } else if (event.kind === 'spring') {
+    const rise = active ? 10 * ease(p) : recovery ? 10 * (1 - ease(p)) : 0, footY = y - rise * s;
+    ctx.strokeStyle = '#c6d5c4'; ctx.lineWidth = Math.max(.8, s); ctx.beginPath(); ctx.moveTo(x, y + 7 * s);
+    for (let coil = 0; coil < 8; coil++) ctx.lineTo(x + (coil % 2 ? -4 : 4) * s, mix(y + 6 * s, footY + 1.5 * s, coil / 7)); ctx.stroke();
+    rectangle(ctx, x - 8 * s, footY - s, 16 * s, 2 * s, '#ecc778'); rect(-6, 7, 12, 2, '#728997');
+  } else if (event.kind === 'bird') {
+    const fly = active ? ease(p) * 25 : recovery ? 32 + p * 20 : 0, bx = x + (8 + fly) * s, by = y - (33 + Math.sin(p * Math.PI) * 13) * s;
+    rectangle(ctx, bx - 3 * s, by, 7 * s, 3 * s, '#e6ead7'); rectangle(ctx, bx + 2 * s, by - 2 * s, 3 * s, 3 * s, '#e6ead7'); rectangle(ctx, bx + 5 * s, by - s, 2 * s, s, '#d6bb6f'); rectangle(ctx, bx + 3 * s, by - s, s, s, '#132e3c');
+    const flap = reduced ? -2 : Math.sin(clock / 95) * 4; stroke({ x: bx - s, y: by + s }, { x: bx - 5 * s, y: by + flap * s }, 2, '#adbec0');
+    if (active) rect(4 + p * 12, -24 + p * 10, 1.8, .7, '#edeed3');
+  } else if (event.kind === 'paint' || event.kind === 'bucket') {
+    const watery = event.kind === 'bucket', liquid = watery ? '#9bd9dd' : '#d898b7';
+    ctx.save(); ctx.translate(x + 9 * s, y - 43 * s); ctx.rotate(active ? -.8 : recovery ? -.8 * (1 - p) : -.1);
+    rectangle(ctx, -4 * s, -3 * s, 8 * s, 7 * s, watery ? '#96a7aa' : '#c38a72'); rectangle(ctx, -4 * s, -3 * s, 8 * s, 1.3 * s, '#e2ccb1');
+    ctx.strokeStyle = '#c0cfbd'; ctx.lineWidth = Math.max(.5, s * .7); ctx.beginPath(); ctx.moveTo(-4 * s, -3 * s); ctx.quadraticCurveTo(0, -9 * s, 4 * s, -3 * s); ctx.stroke(); ctx.restore();
+    if (active) for (let drop = 0; drop < 13; drop++) {
+      const age = reduced ? (drop % 5) / 5 : wrap(clock / 850 + drop * .113), xx = 7 + Math.sin(drop * 2.3) * 6;
+      rect(xx, -39 + age * 42, watery ? .8 : 1.2, 1.8 + drop % 2, liquid);
+    }
+    if (recovery) for (let puddle = 0; puddle < 5; puddle++) rect(-7 + puddle * 3, 1, 2.4, .7, liquid);
+  } else if (event.kind === 'sticky') {
+    const grip = rig?.hands[0] ?? at(-6, -22), other = rig?.hip ?? at(0, -13);
+    rectangle(ctx, grip.x - 2.2 * s, grip.y - 1.3 * s, 4.4 * s, 2.4 * s, '#b0c96b');
+    if (active) { ctx.strokeStyle = '#c1d986'; ctx.lineWidth = Math.max(.5, s * .7); ctx.beginPath(); ctx.moveTo(grip.x, grip.y); ctx.quadraticCurveTo(grip.x + 3 * s, other.y - 5 * s, other.x - 3 * s, other.y - 7 * s); ctx.stroke(); }
+    rect(-11, -27, 4, 3, '#77904e'); rect(-10, -30, 2, 3, '#d4d89b');
+  } else if (event.kind === 'rope-tangle') {
+    const foot = rig?.feet[1] ?? at(6, 0), top = at(10, -36);
+    ctx.strokeStyle = '#e0c48d'; ctx.lineWidth = Math.max(.8, s); ctx.beginPath(); ctx.moveTo(top.x, top.y); ctx.quadraticCurveTo(x + 19 * s, y - 10 * s, foot.x, foot.y); ctx.stroke();
+    for (let loop = 0; loop < 3; loop++) { ctx.beginPath(); ctx.ellipse(foot.x + loop * s, foot.y - (2 + loop * 2) * s, (4 - (recovery ? p * 2 : 0)) * s, 1.3 * s, -.15, 0, Math.PI * 2); ctx.stroke(); }
+  } else if (event.kind === 'balloon') {
+    const anchor = rig?.hip ?? at(0, -13), bx = anchor.x + (8 + pulse * 6 + (recovery ? p * 17 : 0)) * s, by = anchor.y - (42 + pulse * 8 + (recovery ? p * 22 : 0)) * s;
+    ctx.fillStyle = '#d58d78'; ctx.beginPath(); ctx.ellipse(bx, by, 9 * s, 12 * s, 0, 0, Math.PI * 2); ctx.fill();
+    rectangle(ctx, bx - 4 * s, by - 7 * s, 3 * s, 7 * s, '#efb597'); rectangle(ctx, bx - s, by + 11 * s, 2 * s, 2 * s, '#e6c792');
+    stroke({ x: bx, y: by + 13 * s }, anchor, .8, '#e4cc96');
+  } else if (event.kind === 'false-sign') {
+    const sign = at(13, -30); ctx.save(); ctx.translate(sign.x, sign.y); ctx.rotate(active ? Math.sin(p * Math.PI * 2) * .2 : 0);
+    rectangle(ctx, -8 * s, -4 * s, 16 * s, 8 * s, '#d6c58d'); rectangle(ctx, -6 * s, -.7 * s, 9 * s, 1.4 * s, recovery ? '#315e51' : '#ad6454');
+    ctx.fillStyle = recovery ? '#315e51' : '#ad6454'; ctx.beginPath(); ctx.moveTo(5 * s, 0); ctx.lineTo(1 * s, -2.4 * s); ctx.lineTo(1 * s, 2.4 * s); ctx.fill(); ctx.restore();
+    stroke(at(13, -26), at(13, -15), 1.3, '#587885');
+  } else if (event.kind === 'banana') {
+    ctx.strokeStyle = '#f2d16e'; ctx.lineWidth = Math.max(1.2, s * 1.8); ctx.beginPath(); ctx.moveTo(x - 4 * s, y - s); ctx.quadraticCurveTo(x + s, y + 3 * s, x + 5 * s, y - 2 * s); ctx.stroke();
+    stroke(at(0, -1), at(-3, -4), 1.2, '#f2d16e'); stroke(at(0, -1), at(3, -4), 1.2, '#f2d16e'); rect(0, -4, 1, 1, '#8e7252');
+  } else if (event.kind === 'zipline') {
+    const hand = rig?.hands[0] ?? at(-6, -29); stroke(at(-15, -47), at(19, -40), 1, '#c6cebd');
+    stroke(at(2, -44), hand, .9, '#dfc68e'); rect(-1, -46, 5, 4, '#abbab1'); rect(0, -45, 2, 2, '#495a60');
+    if (active) for (let swing = 0; swing < 3; swing++) stroke(at(14 + swing * 3, -13 - swing * 3), at(16 + swing * 3, -16 - swing * 3), .7, '#b8d2c68a');
+  } else if (event.kind === 'lights-out') {
+    if (active) rect(-13, -44, 26, 49, '#071b2d9c');
+    rect(10, -33, 5, 8, '#405b64'); rect(11, -31, 3, 4, active ? '#e8ab65' : '#e8df9d');
+    ctx.fillStyle = '#f0b66624'; ctx.beginPath(); ctx.moveTo(x + 12 * s, y - 28 * s); ctx.lineTo(x - 8 * s, y + 2 * s); ctx.lineTo(x + 20 * s, y + 2 * s); ctx.fill();
+  } else if (event.kind === 'safety-net') {
+    const netY = geometry.rowY(Math.max(0, event.row - 3)) + 3 * s, sag = active ? Math.sin(p * Math.PI) * 4 * s : 1.5 * s;
+    ctx.strokeStyle = '#a6c9c1'; ctx.lineWidth = Math.max(.6, s * .65);
+    for (let thread = 0; thread < 6; thread++) { const xx = x + (thread - 2.5) * 4 * s; ctx.beginPath(); ctx.moveTo(xx, netY - 5 * s); ctx.lineTo(xx, netY + 4 * s + sag); ctx.stroke(); }
+    for (let thread = 0; thread < 4; thread++) { ctx.beginPath(); ctx.moveTo(x - 11 * s, netY + thread * 2 * s); ctx.quadraticCurveTo(x, netY + thread * 2 * s + sag, x + 11 * s, netY + thread * 2 * s); ctx.stroke(); }
+    stroke(at(-11, -2), { x: x - 11 * s, y: netY - 5 * s }, .9, '#d6c99c'); stroke(at(11, -2), { x: x + 11 * s, y: netY - 5 * s }, .9, '#d6c99c');
+  }
+  ctx.restore();
+}
+
+export function drawLadderConfetti(ctx: CanvasRenderingContext2D, geometry: LadderGeometry, elapsed: number, reduced: boolean) {
+  if (reduced) return;
+  for (let i = 0; i < 38; i++) {
+    const fall = wrap(elapsed / (2500 + i % 5 * 360) + i * .113), x = wrap(i * .618 + Math.sin(fall * 6 + i) * .035) * geometry.width;
+    rectangle(ctx, x, fall * geometry.height, 2 + i % 2, 2, ['#efd082', '#94cbb9', '#e99c82', '#97b8d4'][i % 4]);
+  }
+}

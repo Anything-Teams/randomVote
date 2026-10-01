@@ -1,6 +1,6 @@
 import { MAX_CANDIDATES, randomInt, type Candidate } from './election';
 
-export type GameMode = 'election' | 'racing' | 'arena';
+export type GameMode = 'election' | 'racing' | 'arena' | 'ladder';
 export const SPORT_DURATION = 44_000;
 export type SportsStageProps = {
   candidates: Candidate[];

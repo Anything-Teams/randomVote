@@ -6,6 +6,7 @@ export const PLAYBACK_SECONDS = {
   election: { min: SHOW_DURATION / 1000, max: SHOW_DURATION / 1000 },
   racing: { min: SPORT_DURATION / 1000, max: SPORT_DURATION / 1000 },
   arena: { min: 40, max: 62 },
+  ladder: { min: SPORT_DURATION / 1000, max: SPORT_DURATION / 1000 },
 } as const;
 
 export function basePlaybackDuration(mode: GameMode): number {

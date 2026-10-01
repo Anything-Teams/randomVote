@@ -7,6 +7,16 @@
 .game-instruction { padding: 11px 13px; border: 1px solid #d9dfd7; background: #f3f5eb; }
 .game-instruction b { font-size: 13px; }
 .game-instruction p { margin: 5px 0 0; font-size: 12px; line-height: 1.5; color: #687780; }
+.ladder-goal-selector { min-width: 0; padding: 0; border: 0; margin: 0; }
+.ladder-goal-selector legend { padding: 0; margin-bottom: 6px; }
+.goal-choice-grid { display: grid; grid-template-columns: repeat(var(--goal-columns), minmax(0, 1fr)); gap: 4px; }
+.goal-choice-grid button { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 5px 0; border: 1px solid #a8bbb6; background: #edf1e9; color: #344e55; font: 800 11px monospace; }
+.goal-choice-grid button[aria-pressed="true"] { background: #ffe49a; color: #162d3a; border-color: #b88936; box-shadow: 0 2px 0 #d89a45; }
+.goal-choice-grid button:hover { border-color: #b88936; }
+.goal-door-icon { width: 11px; height: 13px; border: 2px solid currentColor; box-shadow: inset -2px 0 0 #ffffff88; position: relative; }
+.goal-door-icon::after { content: ''; position: absolute; width: 2px; height: 2px; right: 1px; top: 4px; background: currentColor; }
+.ladder-goal-selector p { color: #687780; font-size: 11px; margin: 7px 0 0; line-height: 1.4; }
+.ladder-goal-selector p b { color: #95632e; }
 .sports-shell { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .sports-toolbar { display: flex; flex: none; justify-content: space-between; align-items: center; color: #b3c7ce; background: #14263a; padding: 8px 12px; border: 1px solid #3e5668; font-size: 11px; }
 .sports-toolbar b { margin-right: 10px; color: #fbd975; }
@@ -30,4 +40,17 @@
   .game-instruction { padding: 7px 9px; }
   .game-instruction b { font-size: 11px; }
   .game-instruction p { font-size: 10px; line-height: 1.4; }
+  .goal-choice-grid { gap: 3px; }
+  .goal-choice-grid button { font-size: 10px; padding: 4px 0; }
+  .ladder-goal-selector p { font-size: 10px; margin-top: 5px; }
+}
+@media (max-width: 480px) {
+  .brand > span:last-child { display: none; }
+  .game-picker { flex: 1; }
+  .game-picker button { flex: 1; min-width: 0; padding-inline: 6px; }
+  .goal-choice-grid { grid-template-columns: repeat(var(--goal-mobile-columns), minmax(0, 1fr)); }
+}
+@media (max-height: 500px) {
+  .goal-door-icon { display: none; }
+  .goal-choice-grid button { min-height: 28px; }
 }

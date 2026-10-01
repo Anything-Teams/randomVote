@@ -1,0 +1,93 @@
+.ladder-show { display: grid; grid-template-columns: minmax(0, 1fr) minmax(155px, 22%); gap: 10px; width: 100%; height: 100%; min-width: 0; min-height: 0; color: #f0ecd7; }
+.ladder-stage, .ladder-board { min-width: 0; min-height: 0; overflow: hidden; border: 1px solid #859a8266; border-radius: 12px; background: #182f3e; }
+.ladder-stage { display: flex; flex-direction: column; }
+.ladder-stage-header { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 10px; flex: 0 0 28px; background: #152b3c; border-bottom: 1px solid #75989766; }
+.ladder-stage-header > span { color: #91adae; font: 800 8px monospace; letter-spacing: .7px; white-space: nowrap; }
+.ladder-stage-header i { display: inline-block; width: 4px; height: 4px; border-radius: 50%; background: #e7c779; margin-right: 6px; }
+.ladder-stage-header strong { color: #ead5a2; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.ladder-stage-header b { display: inline-grid; place-items: center; min-width: 19px; height: 19px; margin-left: 3px; border-radius: 3px; color: #263943; background: #ecd08b; font: 900 12px monospace; }
+.ladder-canvas-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.ladder-canvas { display: block; width: 100%; height: 100%; }
+.ladder-preview .ladder-canvas { cursor: pointer; }
+.ladder-pause-label { position: absolute; bottom: 6px; right: 7px; padding: 3px 7px; border: 1px solid #c5cba877; border-radius: 4px; color: #e8dfc6; background: #142b38e8; font-size: 9px; font-weight: 800; }
+.ladder-story { flex: none; min-width: 0; padding: 7px 11px 9px; border-top: 1px solid #a1956c; background: linear-gradient(120deg, #243b45, #192e3d); }
+.ladder-story-top { display: flex; justify-content: space-between; align-items: center; gap: 5px; margin-bottom: 4px; }
+.ladder-story-top > span { color: #b8bd9c; font-size: 7px; letter-spacing: 1.2px; font-weight: 850; }
+.ladder-story ol { display: flex; align-items: center; gap: 9px; padding: 0; margin: 0; list-style: none; }
+.ladder-story li { font-size: 7px; color: #839da0; white-space: nowrap; }
+.ladder-story li::before { content: ''; display: inline-block; width: 3px; height: 3px; margin-right: 4px; background: #607b84; }
+.ladder-story li.is-current { color: #ffe1a0; font-weight: 850; }
+.ladder-story li.is-current::before { background: #ffe1a0; }
+.ladder-story strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: clamp(12px, 1.35vw, 19px); line-height: 1.18; color: #f4db9e; }
+.ladder-story p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 4px 0 0; color: #c3d5d0; font-size: clamp(9px, .9vw, 12px); line-height: 1.26; overflow-wrap: anywhere; }
+.ladder-story-result { background: linear-gradient(120deg, #504833, #213e44); }
+.ladder-board { display: flex; flex-direction: column; gap: 8px; padding: 11px; background: linear-gradient(155deg, #223a47, #182f3e); }
+.ladder-board > header { flex: none; }
+.ladder-board header > span { color: #a3b392; font: 800 8px monospace; letter-spacing: 1.2px; }
+.ladder-board h2 { margin: 5px 0 0; color: #f3e6c7; font-size: clamp(13px, 1.4vw, 19px); line-height: 1.16; }
+.ladder-board header p { margin: 4px 0 0; color: #e5cb92; font-size: 9px; line-height: 1.2; }
+.ladder-roster { flex: 1; display: grid; grid-template-rows: repeat(var(--ladder-count), minmax(0, 1fr)); min-height: 0; gap: 4px; }
+.ladder-person { display: grid; grid-template-columns: 23px minmax(0, 1fr) auto; grid-template-rows: minmax(0, 1fr) 11px; align-items: center; gap: 1px 5px; min-width: 0; min-height: 0; padding: 3px 5px; border: 1px solid #536b74; border-left: 2px solid var(--person-color); border-radius: 5px; background: #203946; }
+.ladder-person-icon { grid-row: 1 / -1; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 4px; background: var(--person-color); color: #172f3c; font: 900 10px monospace; }
+.ladder-person-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; min-width: 0; font-size: clamp(9px, .95vw, 12px); font-weight: 800; line-height: 1.13; }
+.ladder-person-status { grid-column: 3; grid-row: 1 / -1; max-width: 50px; color: #d6c897; font-size: 8px; line-height: 1.15; text-align: right; }
+.ladder-person-floor { grid-column: 2; font-size: 7px; color: #99b6b5; }
+.ladder-person.is-story { background: #3b493f; border-color: #d9c17c; }
+.ladder-person.is-lucky { background: #534930; border-color: #f7d180; }
+.ladder-person.is-lucky .ladder-person-status { color: #ffe092; font-size: 10px; font-weight: 900; }
+.ladder-person.is-arrived { background: #243e3d; }
+.ladder-board-note { flex: none; margin: 0; color: #9cb5b4; font-size: 8px; line-height: 1.35; }
+.ladder-empty { margin: auto; color: #bdcebf; text-align: center; font-size: 12px; line-height: 1.6; }
+.ladder-empty small { font-size: 9px; color: #8da9ad; }
+@media (max-width: 650px) and (min-height: 431px) {
+  .ladder-show { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 103px; gap: 6px; }
+  .ladder-board { padding: 5px 6px; gap: 4px; border-radius: 9px; }
+  .ladder-board > header { display: flex; align-items: center; gap: 5px; justify-content: space-between; }
+  .ladder-board header > span { display: none; }
+  .ladder-board h2 { margin: 0; font-size: 11px; }
+  .ladder-board header p { margin: 0; font-size: 8px; }
+  .ladder-roster { grid-template-columns: repeat(var(--ladder-columns), minmax(0, 1fr)); grid-template-rows: repeat(var(--ladder-rows), minmax(0, 1fr)); gap: 3px; }
+  .ladder-person { grid-template-columns: minmax(0, 1fr); grid-template-rows: 9px minmax(0, 1fr) 9px; padding: 2px 3px; gap: 1px; text-align: center; }
+  .ladder-person-icon { grid-column: 1; grid-row: 1; width: 14px; height: 9px; margin: auto; font-size: 7px; border-radius: 2px; }
+  .ladder-person-name { grid-row: 2; font-size: 8px; line-height: 1.05; }
+  .ladder-person-status { grid-column: 1; grid-row: 3; max-width: none; font-size: 7px; text-align: center; }
+  .ladder-person-floor, .ladder-board-note { display: none; }
+  .ladder-person.is-lucky .ladder-person-status { font-size: 8px; }
+}
+@media (max-height: 430px) and (min-width: 550px) {
+  .ladder-show { grid-template-columns: minmax(0, 1fr) 155px; gap: 6px; }
+  .ladder-board { padding: 5px; gap: 4px; border-radius: 8px; }
+  .ladder-board header > span, .ladder-board header p, .ladder-board-note { display: none; }
+  .ladder-board h2 { margin: 0; font-size: 11px; }
+  .ladder-roster { gap: 2px; }
+  .ladder-person { grid-template-columns: 13px minmax(0, 1fr) 31px; grid-template-rows: minmax(0, 1fr); gap: 3px; padding: 2px 3px; }
+  .ladder-person-icon { width: 13px; height: 12px; font-size: 7px; }
+  .ladder-person-name { display: block; font-size: 8px; white-space: nowrap; text-overflow: ellipsis; }
+  .ladder-person-status { font-size: 7px; }
+  .ladder-person-floor { display: none; }
+}
+@media (max-height: 430px) and (max-width: 549px) {
+  .ladder-show { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 83px; gap: 4px; }
+  .ladder-board { padding: 4px 5px; gap: 3px; }
+  .ladder-board > header, .ladder-board-note { display: none; }
+  .ladder-roster { grid-template-columns: repeat(var(--ladder-columns), minmax(0, 1fr)); grid-template-rows: repeat(var(--ladder-rows), minmax(0, 1fr)); gap: 2px; }
+  .ladder-person { display: flex; flex-direction: column; justify-content: center; padding: 1px 2px; gap: 1px; }
+  .ladder-person-icon { width: 12px; height: 9px; font-size: 6px; flex: none; }
+  .ladder-person-name { font-size: 7px; line-height: 1; }
+  .ladder-person-status { font-size: 6px; max-width: none; text-align: center; }
+  .ladder-person-floor { display: none; }
+}
+@media (max-width: 500px), (max-height: 500px) {
+  .ladder-stage-header { flex-basis: 21px; padding: 0 7px; }
+  .ladder-stage-header > span { font-size: 6px; letter-spacing: .2px; }
+  .ladder-stage-header strong { font-size: 8px; }
+  .ladder-stage-header b { min-width: 15px; height: 15px; font-size: 10px; }
+  .ladder-story { padding: 5px 7px 6px; }
+  .ladder-story-top { margin-bottom: 2px; }
+  .ladder-story-top > span { font-size: 6px; letter-spacing: .6px; }
+  .ladder-story ol { gap: 6px; }
+  .ladder-story li { font-size: 6px; }
+  .ladder-story strong { font-size: 11px; }
+  .ladder-story p { margin-top: 3px; font-size: 8px; line-height: 1.18; }
+}
+@media (prefers-reduced-motion: reduce) { .ladder-show * { transition: none; animation: none; } }
