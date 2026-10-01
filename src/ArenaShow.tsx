@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import type { Candidate } from './election';
 import type { SportsStageProps } from './sports';
-import { arenaBeat, arenaExchange, arenaNarration, arenaRanks, arenaRounds, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaRound } from './arenaLogic';
+import { arenaBeat, arenaExchange, arenaMove as move, arenaNarration, arenaPodium, arenaRanks, arenaRoamingTarget, arenaRounds, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
 import { createArenaFighterAnimation, drawArenaFighter, drawArenaName, type ArenaActor, type ArenaFighterAnimation, type ArenaPose } from './game/ArenaFighter';
 import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
 import './arena.css';
 
-type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number; motorX?: number; motorY?: number; animation?: ArenaFighterAnimation };
+type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number; motorX?: number; motorY?: number; animation?: ArenaFighterAnimation; roam?: { key: string; target: ArenaPoint; neighborId?: string } };
 type Contact = { center: ArenaPoint; side: number };
 type Exit = { round: ArenaRound; origin: ArenaPoint; landing: ArenaPoint; side: number; bench: ArenaPoint; lift: number; angle: number };
 type Simulation = { key: string; elapsed: number; epoch: number; bodies: Map<string, Body>; contacts: Map<string, Contact>; exits: Map<string, Exit> };
@@ -20,22 +20,6 @@ function validOrder(candidates: Candidate[], supplied: string[]) {
   const ids = new Set(candidates.map(candidate => candidate.id));
   const order = [...new Set(supplied)].filter(id => ids.has(id));
   return [...order, ...candidates.map(candidate => candidate.id).filter(id => !order.includes(id))];
-}
-
-function move(body: Body, target: ArenaPoint, seconds: number, speed = 116) {
-  if (seconds <= 0) return;
-  const dx = target.x - body.x, dy = target.y - body.y;
-  const distance = Math.hypot(dx, dy);
-  const acceleration = speed * 5.8, brake = speed * 7;
-  const wantedSpeed = Math.min(speed, Math.sqrt(2 * brake * Math.max(0, distance - .6)));
-  const wantedX = distance > .01 ? dx / distance * wantedSpeed : 0, wantedY = distance > .01 ? dy / distance * wantedSpeed : 0;
-  const changeX = wantedX - (body.motorX ?? 0), changeY = wantedY - (body.motorY ?? 0);
-  const change = Math.hypot(changeX, changeY), limit = Math.min(1, acceleration * seconds / Math.max(.001, change));
-  body.motorX = (body.motorX ?? 0) + changeX * limit; body.motorY = (body.motorY ?? 0) + changeY * limit;
-  const travelX = body.motorX * seconds, travelY = body.motorY * seconds;
-  if (distance < Math.hypot(travelX, travelY) && dx * travelX + dy * travelY > 0) { body.x = target.x; body.y = target.y; body.motorX = 0; body.motorY = 0; }
-  else { body.x += travelX; body.y += travelY; }
-  if (Math.abs(body.motorX) > 25) body.facing = body.motorX < 0 ? -1 : 1;
 }
 
 function text(ctx: CanvasRenderingContext2D, value: string, x: number, y: number, size: number, color = '#fff1d5', width = 850) {
@@ -51,6 +35,21 @@ function dust(ctx: CanvasRenderingContext2D, x: number, y: number, age: number, 
     ctx.fillRect(x + Math.cos(angle) * distance, y + Math.sin(angle) * distance * .25 - Math.sin(p * Math.PI) * 15, 5 + i % 4 * 2, 4);
   }
   ctx.globalAlpha = 1;
+}
+
+function podium(ctx: CanvasRenderingContext2D, places: ArenaPodiumPlace[], alpha: number) {
+  const colors = ['#d7b258', '#afbdc4', '#ba8860'];
+  ctx.save(); ctx.globalAlpha = alpha;
+  for (const place of [...places].sort((a, b) => b.rank - a.rank)) {
+    const left = place.x - 66, top = place.y, tone = colors[place.rank - 1];
+    ctx.fillStyle = '#172a31'; ctx.fillRect(left - 3, top + 7, 138, 551 - top);
+    ctx.fillStyle = tone; ctx.fillRect(left, top, 132, 7);
+    ctx.fillStyle = '#32434a'; ctx.fillRect(left, top + 7, 132, 542 - top);
+    ctx.fillStyle = tone; ctx.fillRect(left, top + 7, 3, 542 - top);
+    ctx.fillStyle = '#ffffff25'; ctx.fillRect(left + 2, top + 1, 128, 1);
+    text(ctx, `${place.rank}위`, place.x, 524, 22, tone, 100);
+  }
+  ctx.restore();
 }
 
 function relationship(ctx: CanvasRenderingContext2D, round: ArenaRound, elapsed: number, actors: Map<string, ChoreographedActor>, labels = false, bodies?: Map<string, Body>) {
@@ -96,7 +95,7 @@ function relationship(ctx: CanvasRenderingContext2D, round: ArenaRound, elapsed:
 
 function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed: number, clock: number, sim: Simulation, delta: number, reduced: boolean) {
   const order = validOrder(props.candidates, props.order);
-  const signature = `${props.preview}:${props.order.join(',')}:${props.candidates.map(candidate => candidate.id).join(',')}`;
+  const signature = `${props.preview}:${props.duration}:${props.order.join(',')}:${props.candidates.map(candidate => candidate.id).join(',')}`;
   const seek = elapsed < sim.elapsed - 150 || elapsed - sim.elapsed > 500;
   const reset = sim.key !== signature || seek;
   if (reset) { sim.key = signature; sim.epoch++; sim.bodies.clear(); sim.contacts.clear(); sim.exits.clear(); }
@@ -106,6 +105,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   const ranks = props.preview ? {} : arenaRanks(order, elapsed, props.duration);
   const current = props.preview ? undefined : rounds.find(round => elapsed >= round.start && elapsed < round.end);
   const won = !props.preview && !!rounds.length && elapsed >= rounds.at(-1)!.resolve;
+  const podiumPlaces = arenaPodium(order, props.duration), podiumById = new Map(podiumPlaces.map(place => [place.id, place]));
   const exchange = props.preview || won ? undefined : current ?? arenaExchange(order, elapsed, props.duration);
   const engaged = new Set(exchange ? [exchange.aggressor, exchange.victim, exchange.helper] : []);
   const upcoming = props.preview || won ? undefined : rounds.find(round => round.start > elapsed && round.start - elapsed < 900 * unit);
@@ -133,26 +133,34 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     const position = settled ? exit.bench : exit.landing;
     sim.bodies.set(round.victim, { ...position, gait: 0, facing: exit.side > 0 ? -1 : 1, vx: 0, vy: 0 });
   });
-  const homes = new Map(props.candidates.map((candidate, index) => [candidate.id, arenaStartingPoint(index, props.candidates.length)]));
-  const ambient = active.filter(id => !engaged.has(id) && !preparing.has(id));
+  // Starting positions only initialize a new body. Live navigation uses current contacts.
   active.forEach(id => {
     if (sim.exits.has(id)) return;
-    const index = props.candidates.findIndex(candidate => candidate.id === id), home = homes.get(id)!;
+    if (!sim.bodies.has(id)) {
+      const start = arenaStartingPoint(props.candidates.findIndex(candidate => candidate.id === id), props.candidates.length);
+      sim.bodies.set(id, { ...start, gait: 0, facing: start.x < 500 ? 1 : -1, vx: 0, vy: 0 });
+    }
+    if (engaged.has(id) || preparing.has(id) || won) sim.bodies.get(id)!.roam = undefined;
+  });
+  const ambient = won ? [] : active.filter(id => !engaged.has(id) && !preparing.has(id) && !sim.exits.has(id));
+  active.forEach(id => {
+    if (sim.exits.has(id)) return;
+    const index = props.candidates.findIndex(candidate => candidate.id === id), body = sim.bodies.get(id)!;
     const cycle = (elapsed / unit + index * 673) % 5600;
-    const neighborId = ambient.filter(other => other !== id).sort((left, right) => {
-      const a = homes.get(left)!, b = homes.get(right)!;
-      return Math.hypot(a.x - home.x, a.y - home.y) - Math.hypot(b.x - home.x, b.y - home.y);
+    const roaming = ambient.includes(id), available = roaming ? ambient.filter(other => other !== id) : [];
+    const neighborId = body.roam?.neighborId && available.includes(body.roam.neighborId) ? body.roam.neighborId : available.sort((left, right) => {
+      const a = sim.bodies.get(left)!, b = sim.bodies.get(right)!;
+      return Math.hypot(a.x - body.x, a.y - body.y) - Math.hypot(b.x - body.x, b.y - body.y);
     })[0];
-    const neighborHome = neighborId ? homes.get(neighborId)! : home;
-    const dx = neighborHome.x - home.x, dy = neighborHome.y - home.y, gap = Math.hypot(dx, dy);
-    const approach = props.preview || elapsed < 500 * unit ? 0 : Math.max(0, gap / 2 - 30) * ease((cycle - 600) / 1000);
-    const sidestep = cycle > 3650 && cycle < 4700 ? Math.sin((cycle - 3650) / 1050 * Math.PI) * 18 : 0;
-    const target = { x: home.x + dx / Math.max(1, gap) * approach + dy / Math.max(1, gap) * sidestep, y: home.y + dy / Math.max(1, gap) * approach - dx / Math.max(1, gap) * sidestep * .5 };
-    const body = sim.bodies.get(id) ?? { ...home, gait: 0, facing: home.x < 500 ? 1 : -1, vx: 0, vy: 0 };
-    sim.bodies.set(id, body);
-    const distance = Math.hypot(target.x - body.x, target.y - body.y);
-    if (!engaged.has(id) && !preparing.has(id) && !won) move(body, target, seconds, 105);
     const neighbor = neighborId ? sim.bodies.get(neighborId) : undefined;
+    const stage: ArenaRoamingStage = props.preview || elapsed < 500 * unit || cycle < 600 || cycle >= 4700 ? 'watch' : cycle < 1600 ? 'approach' : cycle < 3650 ? 'contact' : 'sidestep';
+    const key = `${Math.floor((elapsed / unit + index * 673) / 5600)}:${stage}:${neighborId ?? ''}`;
+    if (roaming && (!body.roam || body.roam.key !== key)) body.roam = { key, neighborId, target: arenaRoamingTarget(body, neighbor, index, stage) };
+    // Approach follows the opponent; a sidestep keeps its release anchor and cannot accumulate drift.
+    if (roaming && stage === 'approach') body.roam!.target = arenaRoamingTarget(body, neighbor, index, stage);
+    const target = roaming ? body.roam!.target : body;
+    const distance = Math.hypot(target.x - body.x, target.y - body.y);
+    if (roaming) move(body, target, seconds, 105);
     const touching = !!neighbor && Math.hypot(neighbor.x - body.x, neighbor.y - body.y) < 83;
     if (touching) body.facing = neighbor.x > body.x ? 1 : -1;
     const pose: ArenaPose = props.preview ? 'guard' : distance > 12 ? 'walk' : !touching || cycle < 1400 ? 'guard' : cycle < 2650 ? index % 2 ? 'brace' : 'grapple' : cycle < 3650 ? index % 2 ? 'brace' : 'push' : cycle < 4700 ? 'dodge' : 'guard';
@@ -267,7 +275,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     const flight = arenaThrow(age, exit.origin, exit.landing, exit.side, unit, { lift: exit.lift, angle: exit.angle });
     const index = props.candidates.findIndex(candidate => candidate.id === id);
     let pose: ArenaPose = flight.stage === 'flight' || flight.stage === 'roll' || flight.stage === 'hold' && exit.lift > 3 ? 'airborne' : flight.stage === 'land' ? 'land' : flight.stage === 'recover' ? 'recover' : flight.stage === 'hold' ? 'brace' : 'walk';
-    const toCelebration = won && (id === order[1] || id === order.at(-1)) && (id === order[1] ? flight.stage === 'walk' : elapsed - rounds.at(-1)!.resolve >= 2100 * unit);
+    const place = podiumById.get(id);
+    const toCelebration = won && !!place && elapsed >= place.readyAt && flight.stage === 'walk';
     if (flight.stage === 'walk') {
       if (!toCelebration) move(body, exit.bench, seconds, 94);
       if (Math.hypot(exit.bench.x - body.x, exit.bench.y - body.y) < 4) {
@@ -283,26 +292,28 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   }
   if (won) {
     const winnerId = order[0], winner = sim.bodies.get(winnerId)!;
-    const age = elapsed - rounds.at(-1)!.resolve;
-    if (reset || reduced) { winner.x = 500; winner.y = 443; }
-    else move(winner, { x: 500, y: 443 }, seconds, 126);
+    const winnerPlace = podiumById.get(winnerId)!;
+    if (reset || reduced) { winner.x = winnerPlace.x; winner.y = winnerPlace.y; winner.motorX = 0; winner.motorY = 0; }
+    else move(winner, winnerPlace, seconds, 126);
     const actor = actors.get(winnerId)!;
-    actor.x = winner.x; actor.y = winner.y; actor.facing = winner.facing; actor.pose = Math.hypot(winner.x - 500, winner.y - 443) > 8 ? 'walk' : 'cheer';
-    const supporters = [order[1], order.at(-1)].filter((id, index, list): id is string => !!id && list.indexOf(id) === index);
-    supporters.forEach((id, index) => {
-      const body = sim.bodies.get(id), actor = actors.get(id);
-      const exit = sim.exits.get(id);
-      const ready = id === order[1] ? exit && elapsed - exit.round.impact >= 2100 * unit : age >= 2100 * unit;
-      if (!body || !actor || !exit || !reduced && !ready) return;
-      const x = exit.side < 0 ? 435 : 565;
-      if (reset || reduced) { body.x = x; body.y = 470; }
-      else move(body, { x, y: 470 }, seconds, 190);
-      const distance = Math.hypot(body.x - x, body.y - 470);
-      if (distance < 8) body.facing = x < 500 ? 1 : -1;
+    actor.x = winner.x; actor.y = winner.y; actor.facing = winner.facing; actor.pose = Math.hypot(winner.x - winnerPlace.x, winner.y - winnerPlace.y) > 8 ? 'walk' : 'cheer';
+    podiumPlaces.slice(1).forEach(place => {
+      const body = sim.bodies.get(place.id), actor = actors.get(place.id);
+      const exit = sim.exits.get(place.id);
+      if (!body || !actor || !exit || !reduced && elapsed < place.readyAt) return;
+      if (reset || reduced) { body.x = place.x; body.y = place.y; body.motorX = 0; body.motorY = 0; }
+      else move(body, place, seconds, 190);
+      const distance = Math.hypot(body.x - place.x, body.y - place.y);
+      if (distance < 8) body.facing = place.x < winnerPlace.x ? 1 : -1;
       actor.x = body.x; actor.y = body.y; actor.angle = 0; actor.facing = body.facing;
-      actor.pose = distance < 8 ? index ? 'clap' : 'cheer' : distance > 100 ? 'run' : 'walk'; actor.phase = index ? .65 : .9;
+      actor.pose = distance < 8 ? 'clap' : distance > 100 ? 'run' : 'walk'; actor.phase = place.rank === 2 ? .35 : .78;
     });
     actor.scale = 2.04;
+    const settled = podiumPlaces.every(place => {
+      const body = sim.bodies.get(place.id);
+      return body && Math.hypot(body.x - place.x, body.y - place.y) < 8;
+    });
+    podium(ctx, podiumPlaces, settled ? 1 : .38);
     if (!reduced) for (let i = 0; i < 38; i++) { const fall = (clock * (.04 + i % 4 * .007) + i * 47) % 420; ctx.fillStyle = ['#ffda72', '#85cec3', '#e9a185'][i % 3]; ctx.fillRect(120 + i * 131 % 760, 130 + fall, 5, 4); }
   }
   for (const [id, actor] of actors) {

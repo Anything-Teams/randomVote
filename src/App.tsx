@@ -153,7 +153,7 @@ export default function App() {
   return (
     <div className={`site-shell ${status !== 'setup' ? 'show-mode' : ''}`}>
       <header className="site-header">
-        <div className="brand"><span className="brand-icon" aria-hidden="true"><span /></span><span>PIXEL<span className="brand-accent">SHOW</span></span></div>
+        <div className="brand"><span className="brand-icon" aria-hidden="true"><img src="/favicon.svg?v=2" alt="" /></span><span>PIXEL<span className="brand-accent">SHOW</span></span></div>
         <nav className="game-picker" aria-label="추첨 게임 선택">{(['arena', 'racing', 'election'] as const).map((value, index) => <button type="button" key={value} onClick={() => chooseGame(value)} aria-pressed={mode === value}><small aria-hidden="true">0{index + 1}</small>{games[value].label}</button>)}</nav>
         <span className="header-badge">RANDOM DRAW SHOW <span className="badge-star">✦</span> 001</span>
       </header>

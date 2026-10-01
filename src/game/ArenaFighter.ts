@@ -2,7 +2,7 @@ import type { Candidate } from '../election';
 
 export type ArenaPose = 'idle' | 'guard' | 'walk' | 'run' | 'grapple' | 'brace' | 'push' | 'dodge' | 'lift' | 'throw' | 'airborne' | 'land' | 'recover' | 'cheer' | 'clap' | 'bow';
 type Point = { x: number; y: number };
-type Motion = { crouch: number; lean: number; hipX: number; head: number; mouth: number; backX: number; backY: number; frontX: number; frontY: number; spread: number; contact: number; shoulderLift: number; clapTurn: number; cheerTurn: number };
+type Motion = { crouch: number; lean: number; hipX: number; head: number; mouth: number; backX: number; backY: number; frontX: number; frontY: number; spread: number; contact: number; shoulderLift: number; clapTurn: number; cheerTurn: number; applause: number };
 type FootMemory = { anchor: Point; from: Point; to: Point; ground: Point; lift: number; swinging: boolean; settleAt: number; settleFrom: Point; settleTo: Point; settleLift: number };
 export type ArenaFighterAnimation = { clock: number | null; signature: string; epoch?: number | string; motion: Motion | null; gait: number; distance: number; moving: boolean; airborne: boolean; feet: [FootMemory, FootMemory] | null; localFeet: [Point, Point] | null; grip?: Point; secondaryGrip?: Point; pose?: ArenaPose };
 export type ArenaActor = { candidate: Candidate; index: number; x: number; y: number; scale: number; facing: number; pose: ArenaPose; angle: number; alpha: number; velocityX: number; velocityY: number; gaitDistance: number; phase: number; power?: number; gripTarget?: Point; secondaryGripTarget?: Point; animation?: ArenaFighterAnimation; motionEpoch?: number | string; motionImmediate?: boolean };
@@ -106,11 +106,11 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const moving = speed > 6 && !air, backward = actor.velocityX * facing < -5;
   const state = actor.animation ?? createArenaFighterAnimation();
   const signature = candidate.id + ':' + index + ':' + candidate.color;
-  const reset = !state.motion || !Number.isFinite(state.motion.clapTurn) || !Number.isFinite(state.motion.cheerTurn) || state.signature !== signature || state.epoch !== actor.motionEpoch || actor.motionImmediate || clock < (state.clock ?? clock) || actor.gaitDistance < state.distance - 1;
+  const reset = !state.motion || !Number.isFinite(state.motion.clapTurn) || !Number.isFinite(state.motion.cheerTurn) || !Number.isFinite(state.motion.applause) || state.signature !== signature || state.epoch !== actor.motionEpoch || actor.motionImmediate || clock < (state.clock ?? clock) || actor.gaitDistance < state.distance - 1;
   const delta = reset ? 0 : Math.max(0, Math.min(50, clock - (state.clock ?? clock)));
   if (reset) { state.feet = null; state.localFeet = null; state.gait = .42 + personality * .015; state.moving = false; state.airborne = false; }
   const gait = state.gait * Math.PI * 2, power = clamp(actor.power ?? .6);
-  const target: Motion = { crouch: .2 + breath * .2, lean: breath * .7, hipX: breath * .12, head: breath * 1.1, mouth: 1.2, backX: -9, backY: 0, frontX: 10, frontY: 0, spread: 1 + personality * .035, contact: actor.gripTarget ? 1 : 0, shoulderLift: actor.gripTarget ? clamp((y - actor.gripTarget.y - 66) / (scale * 14)) * 3 : 0, clapTurn: 0, cheerTurn: 0 };
+  const target: Motion = { crouch: .2 + breath * .2, lean: breath * .7, hipX: breath * .12, head: breath * 1.1, mouth: 1.2, backX: -9, backY: 0, frontX: 10, frontY: 0, spread: 1 + personality * .035, contact: actor.gripTarget ? 1 : 0, shoulderLift: actor.gripTarget ? clamp((y - actor.gripTarget.y - 66) / (scale * 14)) * 3 : 0, clapTurn: ['idle', 'walk', 'run', 'bow', 'clap'].includes(pose) ? 1 : 0, cheerTurn: 0, applause: 0 };
   if (pose === 'guard' || pose === 'grapple') { target.crouch = 1.2 + personality * .25; target.lean = 2 + personality * .4; target.backX = -5; target.backY = -12; target.frontX = 15; target.frontY = -15; target.head = -target.lean * .3; }
   if (pose === 'brace') { target.crouch = 4.2; target.hipX = -1.2; target.lean = -4.5; target.backX = -1; target.backY = -12; target.frontX = 16; target.frontY = -14; target.spread += .22; target.mouth = .9; }
   if (pose === 'push') { target.crouch = 2.7; target.hipX = 1.2; target.lean = 4 + power * 5; target.backX = 7; target.backY = -14; target.frontX = 22; target.frontY = -16; target.mouth = 1.8; }
@@ -127,13 +127,13 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     target.mouth = 2.6; target.head = -1.5 + breath * .4; target.cheerTurn = 1;
   }
   if (pose === 'clap') {
-    const cycle = ((clock + index * 273) % (1040 + personality * 80)) / (1040 + personality * 80);
-    const clap = cycle < .22 ? ease(cycle / .22) : cycle < .46 ? 1 : 1 - ease((cycle - .46) / .32);
+    const cycle = ((clock + index * 273) % (980 + personality * 72)) / (980 + personality * 72);
+    const clap = cycle < .22 ? ease(cycle / .22) : cycle < .32 ? 1 : 1 - ease((cycle - .32) / .28);
     // A short contact hold lets the palms meet before they separate again.
-    target.backX = mix(-6, 1, clap); target.backY = -14;
-    target.frontX = mix(14, 5.4, clap); target.frontY = -14;
+    target.backX = mix(-8, -2.5, clap); target.backY = -12;
+    target.frontX = mix(8, 2.5, clap); target.frontY = -12;
     target.crouch = .8 + breath * .12; target.lean = breath * .35;
-    target.mouth = 1.8; target.head = -.4 + breath * .3; target.clapTurn = 1;
+    target.mouth = 1.8; target.head = -.4 + breath * .3; target.clapTurn = 1; target.applause = 1;
   }
   if (pose === 'bow') {
     const cycle = ((clock + index * 617) % 2400) / 2400;
@@ -157,7 +157,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     (Object.keys(target) as (keyof Motion)[]).forEach(key => {
       const hand = key === 'backX' || key === 'backY' || key === 'frontX' || key === 'frontY';
       const turn = key === 'clapTurn' || key === 'cheerTurn';
-      const amount = 1 - Math.exp(-delta / (air ? 55 : turn ? 180 : pose === 'clap' && hand && state.motion!.clapTurn > .9 ? 45 : 95));
+      const amount = 1 - Math.exp(-delta / (air ? 55 : turn ? 180 : pose === 'clap' && hand && state.motion!.applause > .9 ? 45 : 95));
       state.motion![key] = mix(state.motion![key], target[key], amount);
     });
   }
@@ -189,9 +189,25 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     hands = [pointMix(hands[0], localHand(state.secondaryGrip), motion.contact), pointMix(hands[1], localHand(state.grip), motion.contact)];
   }
   hands = hands.map((hand, arm) => reachable(shoulders[arm], hand, 21.3));
+  if (pose === 'clap' && motion.contact < .03 && target.frontX - target.backX < 5.01 && hands[1].x - hands[0].x < 5.4) {
+    // Resolve palm contact at the chest; two hands stay distinct and share one height.
+    const center = { x: (hands[0].x + hands[1].x) / 2, y: (hands[0].y + hands[1].y) / 2 };
+    hands = [{ x: center.x - 2.5, y: center.y }, { x: center.x + 2.5, y: center.y }];
+  }
   // Keep applause in front of the chest and raised victory arms outside the head.
   const elbows = hands.map((hand, arm) => knee(shoulders[arm], hand, 11, 10.5, -Math.cos(Math.PI * (arm === 1 ? motion.clapTurn : motion.cheerTurn))));
   const bodyPoint = (point: Point): Point => { const p = rotate(point, lean); return { x: hip.x + p.x, y: hip.y + p.y }; };
+  const shorts = hips.map((origin, leg) => {
+    const direction = { x: (knees[leg].x - origin.x) / 11, y: (knees[leg].y - origin.y) / 11 };
+    const normal = { x: direction.y, y: -direction.x };
+    const top = { x: origin.x - direction.x * .75, y: origin.y - direction.y * .75 };
+    const hem = { x: origin.x + direction.x * 5.8, y: origin.y + direction.y * 5.8 };
+    const edge = (point: Point, width: number, side: number) => ({ x: point.x + normal.x * width * side, y: point.y + normal.y * width * side });
+    return { direction, normal, points: [edge(top, 4.1, -1), edge(top, 4.1, 1), edge(hem, 3.8, 1), edge(hem, 3.8, -1)] };
+  });
+  const waist = [bodyPoint({ x: -bodyWidth / 2, y: -4.3 }), bodyPoint({ x: bodyWidth / 2, y: -4.3 }), bodyPoint({ x: bodyWidth / 2, y: -1.7 }), bodyPoint({ x: -bodyWidth / 2, y: -1.7 })];
+  const crotch = { x: hip.x, y: hip.y + 2.6 };
+  const yoke = [waist[3], waist[2], { x: hip.x + 7.4, y: hip.y + 1.1 }, crotch, { x: hip.x - 7.4, y: hip.y + 1.1 }];
   const headWidth = [14, 15, 14, 16][personality], headY = -33 - index % 2;
   ctx.save(); ctx.globalAlpha = actor.alpha;
   if (pose !== 'airborne') { ctx.fillStyle = '#25302d40'; ctx.beginPath(); ctx.ellipse(x, y + 2, 16 * scale, 3.5 * scale, 0, 0, Math.PI * 2); ctx.fill(); }
@@ -212,6 +228,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
       boundRect({ x: knees[leg].x - 2.8, y: knees[leg].y - 2.8 }, 5.6, 5.6);
       boundRect({ x: foot.x - 3, y: foot.y - 1 }, 9, 3);
     });
+    bounds.push(...shorts.flatMap(panel => panel.points), ...waist, ...yoke);
     boundRect({ x: -headWidth / 2 - 1.5, y: -12 }, headWidth + 3, 21, point => {
       const p = rotate(point, motion.head * Math.PI / 180); return bodyPoint({ x: p.x, y: headY + p.y });
     });
@@ -230,11 +247,9 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     segment(ctx, origin, joint, 6.5, palette); segment(ctx, joint, ankle, 5.5, palette);
     rect(joint.x - 2.8, joint.y - 2.8, 5.6, 5.6, palette.base);
     rect(joint.x - 1.5, joint.y - 1.8, 2.2, 1.2, palette.light); rect(joint.x + 1, joint.y + .8, 1.4, 1.4, palette.shade);
-    const hem = reachable(origin, joint, 4.5);
-    ctx.save(); ctx.translate(origin.x, origin.y); ctx.rotate(Math.atan2(hem.y - origin.y, hem.x - origin.x)); ctx.fillStyle = candidate.color; ctx.fillRect(-1, -3.8, Math.hypot(hem.x - origin.x, hem.y - origin.y) + 1, 7.6); ctx.restore();
     rect(ankle.x - 3, ankle.y - 1, 9, 3, palette.base); rect(ankle.x - 1.8, ankle.y - .5, 2.8, 1, palette.light); rect(ankle.x - 3, ankle.y + 1.3, 9, .7, palette.shade);
   };
-  leg(true);
+  leg(true); leg(false);
   ctx.save(); ctx.translate(hip.x, hip.y); ctx.rotate(lean);
   const arm = (back: boolean, lowerOnly = false) => {
     const index = back ? 0 : 1, shoulder = shoulders[index], elbow = elbows[index], hand = hands[index];
@@ -251,7 +266,6 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   rect(-bodyWidth / 2 + 2, -21, 5, 2, palette.light); rect(-bodyWidth / 2 + 3, -15, 3, 2, palette.light);
   rect(bodyWidth / 2 - 3, -20, 3, 5, palette.shade); rect(bodyWidth / 2 - 4, -10, 4, 4, palette.shade);
   rect(-3, -14, 6, 1, palette.shade);
-  rect(-bodyWidth / 2 - 1, -5, bodyWidth + 2, 5, candidate.color); rect(-bodyWidth / 2, 0, bodyWidth, 5, candidate.color); rect(-1.5, -5, 3, 10, '#fff0cf');
   rect(-2.7, -28, 5.4, 7, palette.base); rect(-1.5, -27.5, 4.2, 1.5, palette.shade); rect(.6, -24.5, 2.1, 2, palette.shade);
   ctx.save(); ctx.translate(0, headY); ctx.rotate(motion.head * Math.PI / 180);
   rect(-headWidth / 2, -8, headWidth, 16, palette.base);
@@ -272,9 +286,23 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   rect(-4.5, intense ? -3 : -3.5, 3, .8, hair); rect(2.5, intense ? -3.5 : -3, 3, .8, hair);
   rect(-1, 4, 2.7, motion.mouth, palette.deep);
   if (pose === 'cheer' || pose === 'clap') { rect(-2, 3.3, .8, 1.8, palette.deep); rect(1.8, 3.3, .8, 1.8, palette.deep); }
-  ctx.restore();
-  if (pose === 'clap') arm(true, true);
-  arm(false); ctx.restore(); leg(false); ctx.restore();
+  ctx.restore(); ctx.restore();
+  const fabricShade = shade(candidate.color, .72), fabricLight = shade(candidate.color, 1.1);
+  const polygon = (points: Point[], color: string) => {
+    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+    points.slice(1).forEach(point => ctx.lineTo(point.x, point.y)); ctx.closePath(); ctx.fill();
+  };
+  // Both cuffs follow the thighs; the pelvic yoke joins them without a solid crotch block.
+  shorts.forEach(panel => {
+    polygon(panel.points, candidate.color);
+    const [a, b] = panel.points.slice(2), direction = panel.direction;
+    polygon([a, b, { x: b.x - direction.x * .9, y: b.y - direction.y * .9 }, { x: a.x - direction.x * .9, y: a.y - direction.y * .9 }], fabricShade);
+  });
+  polygon(yoke, candidate.color); polygon(waist, fabricShade);
+  polygon([bodyPoint({ x: 1, y: -3.7 }), bodyPoint({ x: 3.1, y: -3.7 }), bodyPoint({ x: 3.1, y: -2.4 }), bodyPoint({ x: 1, y: -2.4 })], fabricLight);
+  ctx.save(); ctx.translate(hip.x, hip.y); ctx.rotate(lean);
+  if (motion.applause > .01) { ctx.save(); ctx.globalAlpha = actor.alpha * motion.applause; arm(true, true); ctx.restore(); }
+  arm(false); ctx.restore(); ctx.restore();
   state.clock = clock; state.signature = signature; state.epoch = actor.motionEpoch; state.distance = actor.gaitDistance; state.moving = moving; state.airborne = air; state.pose = pose;
 }
 

@@ -36,44 +36,53 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   const phase = reduced ? 0 : wrap(motion.phase ?? clock / period + index * .193);
   const cycle = phase * Math.PI * 2;
   const effort = mode === 'walk' ? 1 : clamp(speed, .65, 1.4);
-  const strideLength = mode === 'walk' ? 18 : 20 * (.88 + effort * .10);
+  const strideLength = mode === 'walk' ? 18 : 26 * (.90 + effort * .07);
   const stance = mode === 'walk' ? .62 : .20;
   const breath = reduced ? 0 : Math.sin(clock / 960 + index * .83) * .18;
-  const bounce = mix(breath, .15 + Math.cos((phase - .12) * Math.PI * 2) * (mode === 'walk' ? .30 : 1.15), activity);
-  const pitch = (reduced ? 0 : clamp(lean, -8, 8) * .004) + activity * (mode === 'walk' ? 0 : -.008 + Math.sin(cycle) * .012);
+  const bob = mix(breath, .15 + Math.cos((phase - .12) * Math.PI * 2) * (mode === 'walk' ? .30 : 1.15), activity);
+  // Give the cannon bones room below the belly, rather than folding four short legs into it.
+  const bounce = bob - 12 + activity * (mode === 'walk' ? 2 : 4);
+  const pitch = activity * (clamp(lean, -8, 8) * .004 + (mode === 'walk' ? 0 : -.008 + Math.sin(cycle) * .012));
   const bodyPoint = (point: Point): Point => { const p = rotate(point, pitch); return { x: p.x, y: p.y + bounce }; };
   const coat = coats[index % coats.length], dark = ['#583928', '#302e35', '#805632', '#a09b90', '#514a41', '#773e28'][index % 6];
   const legData = [
-    { rear: true, far: true, hip: { x: -23, y: -27 }, offset: mode === 'walk' ? .50 : .05, rest: -26 },
+    { rear: true, far: true, hip: { x: -23, y: -27 }, offset: mode === 'walk' ? .50 : .05, rest: -22 },
     { rear: false, far: true, hip: { x: 18, y: -30.8 }, offset: mode === 'walk' ? .25 : .40, rest: 20 },
-    { rear: true, far: false, hip: { x: -21, y: -27 }, offset: mode === 'walk' ? 0 : .18, rest: -23 },
+    { rear: true, far: false, hip: { x: -21, y: -27 }, offset: mode === 'walk' ? 0 : .18, rest: -19 },
     { rear: false, far: false, hip: { x: 21, y: -30.8 }, offset: mode === 'walk' ? .75 : .54, rest: 24 },
   ].map(data => {
     const p = wrap(phase - data.offset), support = p < stance;
     const swing = clamp((p - stance) / (1 - stance), 0, 1);
     const fold = Math.sin(swing * Math.PI) ** 2;
     const center = data.rear ? data.hip.x - 2 : data.hip.x + 2;
-    const travelX = support ? center + strideLength * (.5 - p / stance) : mix(center - strideLength / 2, center + strideLength / 2, ease(swing)) + fold * (data.rear ? 5 : -7);
-    const lift = support ? 0 : fold * (mode === 'walk' ? 3 : data.rear ? 13 : 16);
+    const travelX = support ? center + strideLength * (.5 - p / stance) : mix(center - strideLength / 2, center + strideLength / 2, ease(swing)) + fold * (data.rear ? 4 : -6);
+    const lift = support ? 0 : fold * (mode === 'walk' ? 3 : data.rear ? 9 : 13);
     const hoof = { x: mix(data.rest, travelX, activity), y: -2 - lift * activity };
     const hip = bodyPoint(data.hip);
+    const ankle = { x: hoof.x - 1.8, y: hoof.y - 3.8 };
     if (data.rear) {
-      const stifle = bodyPoint({ x: data.hip.x + 7, y: data.hip.y + 8 });
-      return { ...data, hip, knee: stifle, ankle: joint(stifle, hoof, 15, 12, -1), hoof };
+      // The thigh turns through landing and push-off. The hock always folds backward.
+      const thighAngle = mix(.44, support ? mix(.44, -.40, ease(p / stance)) : mix(-.40, .44, ease(swing)) + fold * (mode === 'walk' ? .12 : .5), activity);
+      const thighLength = Math.hypot(7, 8);
+      const stifle = bodyPoint({ x: data.hip.x + Math.sin(thighAngle) * thighLength, y: data.hip.y + Math.cos(thighAngle) * thighLength });
+      return { ...data, hip, knee: stifle, hock: joint(stifle, ankle, 11.5, 13, -1), ankle, hoof };
     }
-    const ankle = { x: hoof.x - 2, y: hoof.y - 4 };
-    return { ...data, hip, knee: joint(hip, ankle, 16, 13, -1), ankle, hoof };
+    // Fore knees flex forward while the hoof gathers back under the chest.
+    return { ...data, hip, knee: joint(hip, ankle, 19.1, 19.1, 1), hock: null, ankle, hoof };
   });
   ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
   const alpha = ctx.globalAlpha;
-  ctx.fillStyle = '#07162455'; ctx.beginPath(); ctx.ellipse(-2, 2.5, 38 + bounce * .6, 4.1, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#07162455'; ctx.beginPath(); ctx.ellipse(-2, 2.5, 38 + bob * .6, 4.1, 0, 0, Math.PI * 2); ctx.fill();
   const bone = (a: Point, b: Point, width: number, color: string) => {
     ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
   };
   const leg = (data: typeof legData[number]) => {
-    ctx.globalAlpha = alpha * (data.far ? .68 : 1);
+    ctx.globalAlpha = alpha * (data.far ? .86 : 1);
     bone(data.hip, data.knee, 6.2, data.far ? dark : coat);
-    bone(data.knee, data.ankle, data.rear ? 4.1 : 3.8, data.far ? dark : coat);
+    if (data.hock) {
+      bone(data.knee, data.hock, 4.1, data.far ? dark : coat);
+      bone(data.hock, data.ankle, 2.8, data.far ? dark : coat);
+    } else bone(data.knee, data.ankle, 3.2, data.far ? dark : coat);
     bone(data.ankle, data.hoof, 2.8, data.far ? dark : coat);
     if (index % 3 === 0) {
       const sock = { x: mix(data.ankle.x, data.hoof.x, .58), y: mix(data.ankle.y, data.hoof.y, .58) };
@@ -195,13 +204,14 @@ export function drawRaceStadium(ctx: CanvasRenderingContext2D, w: number, h: num
 export function drawRaceDust(ctx: CanvasRenderingContext2D, index: number, x: number, y: number, scale: number, clock: number, reduced: boolean, effort = 1) {
   if (reduced || effort <= .05) return;
   const period = 560 + index % 4 * 22, strength = clamp(effort, .2, 1.4);
+  const reach = 13 * (.90 + clamp(effort, .65, 1.4) * .07);
   const horseClock = clock + index * .193 * period;
   for (const [leg, contact] of [.05, .18, .40, .54].entries()) {
     const sinceContact = ((horseClock - contact * period) % period + period) % period;
     for (let particle = 0; particle < 2; particle++) {
       const age = (sinceContact + particle * period) / 590;
       if (age >= 1) continue;
-      const origin = leg < 2 ? -14 : 29, trail = age * (38 + strength * 8);
+      const origin = [-25, -23, 20, 23][leg] + reach, trail = age * (38 + strength * 8);
       ctx.fillStyle = `rgba(211,187,143,${(1 - age) ** 2 * .24 * strength})`; ctx.beginPath();
       ctx.ellipse(x + (origin - trail) * scale, y + (1 - Math.sin(age * Math.PI) * 5) * scale, (1.1 + age * 5) * scale, (.55 + age * 2.2) * scale, -.1, 0, Math.PI * 2); ctx.fill();
     }

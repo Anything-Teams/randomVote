@@ -9,17 +9,20 @@ const clamp = (value: number, low: number, high: number) => Math.max(low, Math.m
 /** Keep leaders and every actual overtaking opponent together, before the story starts. */
 export function racingFocusIds(timeline: RacingTimeline, elapsed: number): string[] {
   const leaders = racingStandings(timeline, elapsed).slice(0, 3).map(standing => standing.id);
+  const straightOpponents = timeline.straight.waves.flatMap(wave => wave.swaps.flatMap(swap =>
+    wave.beforeOrder.indexOf(swap.aheadId) < 3 && elapsed >= swap.start - 500 && elapsed < swap.end + 650
+      ? [swap.aheadId, swap.behindId] : []));
   const incident = activeRacingIncident(timeline, elapsed)
     ?? timeline.incidents.find(item => elapsed >= item.end && elapsed < item.end + 1600)
     ?? timeline.incidents.find(item => item.start > elapsed && item.start - elapsed <= 1100);
-  if (!incident) return leaders;
+  if (!incident) return [...new Set([...leaders, ...straightOpponents])];
   const status = racingIncidentStatus(timeline, incident, elapsed);
-  return [...new Set([...leaders, incident.actorId, incident.rivalId, ...status.opponentIds])];
+  return [...new Set([...leaders, ...straightOpponents, incident.actorId, incident.rivalId, ...status.opponentIds])];
 }
 
 /** A fixed distance projection and persistent horses replace rank-based scene cuts. */
 export function placeRacingField(camera: RacingCamera, candidates: Candidate[], timeline: RacingTimeline, elapsed: number, w: number, h: number, delta: number, immediate = false): RacingPlacement[] {
-  const focus = racingFocusIds(timeline, elapsed), featured = candidates.filter(candidate => focus.includes(candidate.id));
+  const focus = racingFocusIds(timeline, elapsed);
   const distances = candidates.map(candidate => readRacingTravel(timeline, candidate.id, elapsed));
   const tracked = candidates.flatMap((candidate, index) => focus.includes(candidate.id) ? [distances[index]] : []);
   const ahead = Math.max(0, ...tracked), behind = tracked.length ? Math.min(...tracked) : 0;
@@ -30,11 +33,13 @@ export function placeRacingField(camera: RacingCamera, candidates: Candidate[], 
   camera.center += (center - camera.center) * blend;
   camera.span += (span - camera.span) * blend;
   camera.key = key; camera.elapsed = elapsed;
-  const scale = clamp(Math.min(w / 430, h * .48 / Math.max(180, featured.length * 78)), .17, 1.6);
+  // Ranking changes the camera's subject, never a horse's physical size.
+  const scale = clamp(Math.min(w / 600, h / 470), .17, 1.35);
   return candidates.map((candidate, index) => {
-    const slot = featured.findIndex(item => item.id === candidate.id), isFeatured = slot >= 0;
-    const targetY = h * (isFeatured ? featured.length <= 1 ? .79 : .54 + slot / (featured.length - 1) * .36 : .46 + (index + .5) / candidates.length * .16);
-    const targetScale = scale * (isFeatured ? 1 : .58);
+    const isFeatured = focus.includes(candidate.id);
+    // Each horse keeps its course row while focus only controls the camera and labels.
+    const targetY = h * (candidates.length <= 1 ? .79 : .54 + index / (candidates.length - 1) * .36);
+    const targetScale = scale;
     let pose = camera.horses.get(candidate.id);
     if (!pose || reset) { pose = { y: targetY, scale: targetScale }; camera.horses.set(candidate.id, pose); }
     const laneBlend = reset ? 1 : 1 - Math.exp(-delta / 550);

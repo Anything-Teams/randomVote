@@ -1,8 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" shape-rendering="crispEdges">
-  <rect width="64" height="64" fill="#111d35"/>
-  <rect x="8" y="8" width="48" height="48" fill="#f9d56e"/>
-  <rect x="14" y="14" width="36" height="36" fill="#111d35"/>
-  <rect x="24" y="22" width="16" height="8" fill="#f9d56e"/>
-  <rect x="20" y="30" width="24" height="18" fill="#f9d56e"/>
-  <rect x="26" y="36" width="12" height="6" fill="#ff744b"/>
+  <title>픽셀 랜뽑 — 주사위 뽑기 상자</title>
+  <path fill="#111d35" d="M8 0h48v4h4v4h4v48h-4v4h-4v4H8v-4H4v-4H0V8h4V4h4z"/>
+  <path fill="#ff7654" d="M12 28h40v4h4v24H8V32h4z"/>
+  <path fill="#f9d56e" d="M8 36h48v20H8z"/>
+  <path fill="#ddaa48" d="M48 36h8v20h-8zM12 56h40v4H12z"/>
+  <path fill="#17233d" d="M12 28h40v8H12z"/>
+  <path fill="#fff0cf" d="M20 4h20v4h4v20h-4v4H20v-4h-4V8h4z"/>
+  <path fill="#e7cf97" d="M40 8h4v20h-4v4H20v-4h20z"/>
+  <path fill="#17233d" d="M20 8h4v4h-4zM36 8h4v4h-4zM28 16h4v4h-4zM20 24h4v4h-4zM36 24h4v4h-4z"/>
+  <path fill="#17233d" d="M24 40h12v4h-4v4h-4v-4h-4zM28 52h4v4h-4z"/>
+  <path fill="#64c8be" d="M48 8h4v4h4v4h-4v4h-4v-4h-4v-4h4zM8 16h4v4H8z"/>
+  <path fill="#fff0cf" d="M12 40h4v4h-4z"/>
 </svg>

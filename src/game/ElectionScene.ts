@@ -74,7 +74,6 @@ export class ElectionScene extends Phaser.Scene {
   private victoryPayoffStarted = false;
   private victoryPayoffPose: 'nervous' | 'surprised' = 'nervous';
   private victorySupporters: VictorySupporter[] = [];
-  private victoryCrown?: Phaser.GameObjects.Container;
   private victoryMomentAt = 0;
   private victoryImpactFired = false;
   private lastBoxImpact = 0;
@@ -184,7 +183,6 @@ export class ElectionScene extends Phaser.Scene {
     this.marginText = undefined;
     this.winner = undefined;
     this.victorySupporters = [];
-    this.victoryCrown = undefined;
     this.countdownLabel = undefined;
     this.ballotBox = undefined;
     this.lastFirework = -1;
@@ -1048,14 +1046,6 @@ export class ElectionScene extends Phaser.Scene {
     this.winner = this.citizen(this.root, candidate, state.candidates.indexOf(candidate), 640, 480, 5);
     this.winner.root.setDepth(20);
     this.winner.pose = 'brake';
-    const crown = this.add.container(0, -12).setVisible(state.reducedMotion);
-    this.winner.addHeadAccessory(crown);
-    this.rect(crown, -9, 0, 18, 4, gold);
-    this.rect(crown, -9, -7, 4, 8, gold);
-    this.rect(crown, -2, -11, 4, 12, gold);
-    this.rect(crown, 5, -7, 4, 8, gold);
-    this.rect(crown, -1, 1, 2, 2, 0xee785e);
-    this.victoryCrown = crown;
     // The celebration has a second beat: a wonderfully serious prop arrives to claim the promise.
     const prop = this.add.container(state.reducedMotion ? 875 : 1460, 440).setScale(0.65).setDepth(15).setVisible(false);
     this.root.add(prop);
@@ -1262,7 +1252,6 @@ export class ElectionScene extends Phaser.Scene {
         const flight = Math.sin(jump * Math.PI);
         const landing = local > 1050 && local < 1240 ? Math.sin((local - 1050) / 190 * Math.PI) : 0;
         this.winner.root.setPosition(640, 480 - flight * 63).setScale(5 * (1 - flight * 0.018 + landing * 0.075), 5 * (1 + flight * 0.032 - landing * 0.065));
-        this.victoryCrown?.setVisible(local > 1010).setAlpha(Phaser.Math.Clamp((local - 1010) / 240, 0, 1));
       }
       if (!this.victoryImpactFired && (state.reducedMotion || local >= 420)) {
         this.victoryImpactFired = true;

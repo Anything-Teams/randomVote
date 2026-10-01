@@ -11,7 +11,9 @@ export type RacingIncident = {
   waitingOrder: string[];
   afterOrder: string[];
 };
-export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[] };
+export type RacingStraightSwap = { aheadId: string; behindId: string; start: number; end: number };
+export type RacingStraightWave = { start: number; end: number; beforeOrder: string[]; swaps: RacingStraightSwap[] };
+export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[]; straight: { start: number; waves: RacingStraightWave[] } };
 export type RacingStanding = { id: string; distance: number; rank: number; finished: boolean; finishTime: number };
 export type RacingIncidentStatus = { stage: 'setup' | 'action' | 'outcome'; beforeRank: number; currentRank: number; afterRank: number; opponentIds: string[]; overtakenIds: string[]; passedByIds: string[]; nextRivalId?: string };
 export const RACING_STORIES: { kind: RacingIncidentKind; title: string; setup: string; action: string; outcome: string }[] = [
@@ -30,6 +32,8 @@ export const RACING_STORIES: { kind: RacingIncidentKind; title: string; setup: s
 ];
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const smooth = (value: number) => { const t = clamp(value); return t * t * (3 - 2 * t); };
+// Keep the same physical spacing into the straight; do not squeeze the entire field at the finish.
+const RANK_GAP = .005;
 function generator(seed: number) {
   let state = seed >>> 0;
   return (limit: number) => { state += 0x6d2b79f5; let value = state; value = Math.imul(value ^ value >>> 15, value | 1); value ^= value + Math.imul(value ^ value >>> 7, value | 61); return ((value ^ value >>> 14) >>> 0) % limit; };
@@ -80,7 +84,7 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   const offsets = (ranking: string[], final = false) => Object.fromEntries(ids.map(id => {
     const rank = ranking.indexOf(id);
     // At the first finish only the winner reaches one complete lap. Others are still approaching.
-    return [id, final ? -rank * .0018 : ((ids.length - 1) / 2 - rank) * .011];
+    return [id, final ? -rank * RANK_GAP : ((ids.length - 1) / 2 - rank) * RANK_GAP];
   }));
   const makeKnot = (at: number, ranking: string[], final = false) => {
     const base = clamp((at - start) / raceLength), values = offsets(ranking, final);
@@ -93,12 +97,31 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
     knots.push(makeKnot(incident.start, incident.beforeOrder), makeKnot(incident.start + 1300 * scale, incident.waitingOrder), makeKnot(incident.end, incident.afterOrder));
   }
   if (!incidents.length) knots.push(makeKnot(start + 27_500 * scale, firstOrder));
-  // Let the final incident's outcome breathe before the last straight reshuffles the field.
-  knots.push(makeKnot(start + 29_500 * scale, incidents[incidents.length - 1]?.afterOrder ?? firstOrder));
+  const straightStart = start + 29_500 * scale, straightOrder = incidents[incidents.length - 1]?.afterOrder ?? firstOrder;
+  // Move the field's common origin before the straight, without changing any actual gap.
+  knots.push(makeKnot(straightStart, straightOrder, true));
   knots.push(makeKnot(finish, finishOrder, true));
+  // Adjacent duels retain the other horses' full gaps. A reversed field cannot collapse at one midpoint.
+  const positions = [...straightOrder], targetRanks = new Map(finishOrder.map((id, rank) => [id, rank]));
+  const waveDuration = (finish - straightStart) / Math.max(1, ids.length), waves: RacingStraightWave[] = [];
+  for (let pass = 0; pass < ids.length && positions.some((id, rank) => id !== finishOrder[rank]); pass++) {
+    const beforeOrder = [...positions], pairs: { aheadId: string; behindId: string }[] = [];
+    for (let rank = pass % 2; rank < positions.length - 1; rank += 2) {
+      const aheadId = positions[rank], behindId = positions[rank + 1];
+      if (targetRanks.get(aheadId)! < targetRanks.get(behindId)!) continue;
+      pairs.push({ aheadId, behindId });
+      [positions[rank], positions[rank + 1]] = [behindId, aheadId];
+    }
+    const at = straightStart + pass * waveDuration, moveDuration = waveDuration * .8;
+    const swaps = pairs.map((pair, index) => {
+      const start = at + waveDuration * .2 * (pairs.length < 2 ? .5 : index / (pairs.length - 1));
+      return { ...pair, start, end: start + moveDuration };
+    });
+    waves.push({ start: at, end: at + waveDuration, beforeOrder, swaps });
+  }
   const finishStep = Math.min(240 * scale, 2000 / Math.max(1, ids.length - 1));
   const finishTimes = Object.fromEntries(finishOrder.map((id, rank) => [id, finish + rank * finishStep]));
-  return { start, finish, ids, finishOrder, finishTimes, knots: knots.sort((a, b) => a.at - b.at), incidents };
+  return { start, finish, ids, finishOrder, finishTimes, knots: knots.sort((a, b) => a.at - b.at), incidents, straight: { start: straightStart, waves } };
 }
 
 export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed: number): number {
@@ -106,8 +129,15 @@ export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed
   if (elapsed >= timeline.finish) {
     const rank = timeline.finishOrder.indexOf(id), finishTime = timeline.finishTimes[id];
     if (rank <= 0 || elapsed >= finishTime) return 1;
-    const remaining = 1 - rank * .0018;
+    const remaining = 1 - rank * RANK_GAP;
     return remaining + (1 - remaining) * clamp((elapsed - timeline.finish) / (finishTime - timeline.finish));
+  }
+  if (elapsed >= timeline.straight.start) {
+    const wave = timeline.straight.waves.find(item => elapsed < item.end);
+    const ranking = wave?.beforeOrder ?? timeline.finishOrder, rank = ranking.indexOf(id);
+    const swap = wave?.swaps.find(item => item.aheadId === id || item.behindId === id);
+    const change = swap ? (swap.aheadId === id ? -1 : 1) * RANK_GAP * smooth((elapsed - swap.start) / (swap.end - swap.start)) : 0;
+    return clamp((elapsed - timeline.start) / (timeline.finish - timeline.start) - rank * RANK_GAP + change);
   }
   const rightIndex = timeline.knots.findIndex(knot => knot.at >= elapsed);
   if (rightIndex < 0) return timeline.knots[timeline.knots.length - 1].distances[id];
@@ -130,7 +160,7 @@ export function readRacingTravel(timeline: RacingTimeline, id: string, elapsed: 
   if (!Number.isFinite(finishTime) || elapsed <= finishTime) return readRacingDistance(timeline, id, elapsed);
   const runner = timeline.finishOrder[1];
   const interval = runner ? timeline.finishTimes[runner] - timeline.finish : 240;
-  const speed = .0018 / Math.max(1, interval);
+  const speed = RANK_GAP / Math.max(1, interval);
   const age = Math.max(0, elapsed - finishTime);
   return 1 + speed * 1100 * (1 - Math.exp(-age / 1100));
 }
