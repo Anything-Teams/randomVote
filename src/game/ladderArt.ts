@@ -33,6 +33,12 @@ function reachable(origin: Point, target: Point, length: number): Point {
   const ratio = Math.min(1, length / Math.max(.01, Math.hypot(target.x - origin.x, target.y - origin.y)));
   return { x: mix(origin.x, target.x, ratio), y: mix(origin.y, target.y, ratio) };
 }
+function armJoint(shoulder: Point, hand: Point, side: number, facing: number, scale: number): Point {
+  // Raised arms fold away from the head. As an arm turns through the shoulder's
+  // height its elbow moves through depth, avoiding a sudden IK branch flip.
+  const raised = clamp((hand.y - shoulder.y) / (4 * scale), -1, 1);
+  return joint(shoulder, hand, ARM_LENGTH * scale, ARM_LENGTH * scale, (side ? 1 : -1) * facing * raised);
+}
 function rectangle(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string) { ctx.fillStyle = color; ctx.fillRect(x, y, w, h); }
 function line(ctx: CanvasRenderingContext2D, a: Point, b: Point, width: number, color: string) {
   ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'square'; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
@@ -125,7 +131,8 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
   const scale = geometry.scale, personality = actor.index % 4;
   const rung = geometry.rungGap / geometry.subdivisions / scale, step = actor.rungProgress * geometry.subdivisions;
   const base = { x: geometry.laneX(actor.lane), y: geometry.rowY(actor.rungProgress) + (actor.depthOffset ?? 0) * geometry.rungGap };
-  let angle = 0, facing = actor.toLane !== undefined && actor.fromLane !== undefined && actor.toLane < actor.fromLane ? -1 : 1;
+  const topOut = actor.pose === 'climb' ? clamp((actor.rungProgress - (geometry.rungCount - 3)) / 3) : 0;
+  let angle = 0, facing = actor.pose === 'climb' ? 1 : actor.toLane !== undefined && actor.fromLane !== undefined && actor.toLane < actor.fromLane ? -1 : 1;
   let hip = { x: 0, y: -13 }, hands: [Point, Point] = [{ x: -8, y: -16 }, { x: 8, y: -16 }], feet: [Point, Point] = [{ x: -3.8, y: 0 }, { x: 3.8, y: 0 }];
   let handContact: [boolean, boolean] = [false, false], footContact: [boolean, boolean] = [true, true];
   let anchorAmount: [number, number] = [0, 0];
@@ -168,12 +175,12 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
     }
   } else if (actor.pose === 'climb') {
     hip.y = -15;
-    const gripOffset = Math.max(3, Math.round(36 / rung));
+    const gripOffset = Math.max(3, Math.floor(42 / rung));
     hands = [0, 1].map(side => {
       const leading = (side + actor.index % 2) % 2;
       const progress = (motor + leading) / 2, cycle = wrap(progress), start = Math.floor(progress) * 2 - leading;
       const swing = clamp((cycle - .62) / .38);
-      const row = start + gripOffset + 2 * ease(swing);
+      const row = Math.min(geometry.rungCount * geometry.subdivisions, start + gripOffset + 2 * ease(swing));
       handContact[side] = cycle < .62;
       return { x: (side ? 1 : -1) * (6 + Math.sin(swing * Math.PI) * 1.3), y: -(row - motor) * rung };
     }) as [Point, Point];
@@ -190,6 +197,20 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
     // Rung targets stay in world space, so the torso's effort never drags a grip.
     const weight = Math.sin(motor * Math.PI) * side;
     hip.x = weight * (.52 + personality * .03); hip.y += Math.sin(motor * Math.PI * 2) * .14 + breath; angle = weight * .019;
+    if (topOut > 0) {
+      // The ladder ends at the terrace. Push off its edge, plant one foot, then
+      // release the supporting hand instead of reaching for rungs in the sky.
+      const deckY = (geometry.rowY(geometry.rungCount) - base.y) / scale;
+      hands = hands.map((_, side) => {
+        const release = ease((topOut - (side ? .25 : .42)) / (side ? .4 : .33));
+        handContact[side] = release < .000001;
+        return { x: (side ? 1 : -1) * mix(6, 8, release), y: mix(deckY, -12, release) };
+      }) as [Point, Point];
+      feet[1].y = mix(feet[1].y, deckY, ease(topOut / .42));
+      feet[0].y = mix(feet[0].y, deckY, ease((topOut - .38) / .62));
+      footContact = [topOut >= 1, topOut >= .42];
+      hip.x *= 1 - ease(topOut); angle *= 1 - ease(topOut);
+    }
   } else if (actor.motionType && actor.eventStage === 'setup') {
     const climb = rawLadderRig({ ...actor, pose: 'climb', motionType: undefined, interaction: undefined, transition: undefined }, geometry, clock, reduced);
     const local = (point: Point): Point => ({ x: (point.x - base.x) / scale, y: (point.y - base.y) / scale });
@@ -265,16 +286,21 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
       feet = feet.map((point, side) => ({ x: mix(point.x, side ? 5 : -4.5, catchBlend), y: mix(point.y, hangingHip + 12 + side * .8, catchBlend) })) as [Point, Point];
       hands[0] = { x: mix(hands[0].x, -9, catchBlend), y: mix(hands[0].y, hangingHip - 7, catchBlend) };
       angle *= 1 - catchBlend; anchorAmount[1] = catchBlend;
-      if (!reduced && p >= catchAt) {
+      if (p >= catchAt) {
         const age = clamp((p - catchAt) / (1 - catchAt));
-        const impact = Math.sin(age * Math.PI) * Math.exp(-age * 4), effort = Math.sin(age * Math.PI);
-        // The fixed hand absorbs a short downward jolt. Keep it inside arm reach.
-        hip.y += impact * 1.4; hip.x += Math.sin(age * Math.PI * 2) * effort * .3;
-        hands[0].x -= effort * .8; hands[0].y -= Math.sin(age * Math.PI * 2) * effort * 1.2;
-        feet.forEach((foot, side) => {
-          const struggle = Math.sin(age * Math.PI * 3 + side * Math.PI) * effort;
-          foot.x += struggle * 1.5; foot.y += impact * 1.4 - struggle * 2.2;
-        });
+        // After absorbing the catch, the free arm searches upward before the
+        // torso starts its pull. The second hand continues holding the rung.
+        hands[0].y -= ease(age) * 10;
+        if (!reduced) {
+          const impact = Math.sin(age * Math.PI) * Math.exp(-age * 4), effort = Math.sin(age * Math.PI);
+          // The fixed hand absorbs a short downward jolt. Keep it inside arm reach.
+          hip.y += impact * 1.4; hip.x += Math.sin(age * Math.PI * 2) * effort * .3;
+          hands[0].x -= effort * .8; hands[0].y -= Math.sin(age * Math.PI * 2) * effort * 1.2;
+          feet.forEach((foot, side) => {
+            const struggle = Math.sin(age * Math.PI * 3 + side * Math.PI) * effort;
+            foot.x += struggle * 1.5; foot.y += impact * 1.4 - struggle * 2.2;
+          });
+        }
       }
     } else {
       const reach = ease((p - .76) / .24);
@@ -335,7 +361,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
       hands = climb.hands.map(local) as [Point, Point];
       // The free arm reaches up from its hanging position while the catching
       // arm holds the rung. It must not visit that second grip first.
-      hands[0] = { x: mix(-9 * facing, hands[0].x, settle), y: mix(fromHip - 7, hands[0].y, settle) };
+      hands[0] = { x: mix(-9 * facing, hands[0].x, settle), y: mix(fromHip - 17, hands[0].y, settle) };
       feet = [{ x: -4.5, y: hip.y + 12 }, { x: 5, y: hip.y + 12.8 }];
       handContact = [false, false]; footContact = [false, false];
       anchorAmount = [0, 1 - settle];
@@ -367,7 +393,8 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
   angle += actor.motionType === 'swing' ? 0 : (actor.tilt ?? 0) * .5;
   const toWorld = (point: Point) => { const p = rotate({ x: point.x * facing, y: point.y }, angle); return { x: base.x + p.x * scale, y: base.y + p.y * scale }; };
   const hipWorld = toWorld(hip);
-  const shoulders = [{ x: hip.x - 4.2, y: hip.y - 10 }, { x: hip.x + 4.2, y: hip.y - 10 }].map(toWorld) as [Point, Point];
+  const shoulderRise = actor.pose === 'climb' ? mix(12, 10, ease(topOut)) : 10;
+  const shoulders = [{ x: hip.x - 4.2, y: hip.y - shoulderRise }, { x: hip.x + 4.2, y: hip.y - shoulderRise }].map(toWorld) as [Point, Point];
   if (actor.pose === 'win') shoulders[1].y -= 2 * scale; // a raised shoulder supports the treasure above the helmet
   let handWorld = hands.map(toWorld) as [Point, Point];
   let footWorld = feet.map(point => ({ x: base.x + point.x * facing * scale, y: base.y + point.y * scale })) as [Point, Point];
@@ -402,7 +429,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
     if (Math.hypot(target.x - point.x, target.y - point.y) > .001) footContact[side] = false;
     return target;
   }) as [Point, Point];
-  const elbows = handsReached.map((point, side) => joint(shoulders[side], point, ARM_LENGTH * scale, ARM_LENGTH * scale, (side ? 1 : -1) * facing)) as [Point, Point];
+  const elbows = handsReached.map((point, side) => armJoint(shoulders[side], point, side, facing, scale)) as [Point, Point];
   const sideView = actor.pose === 'bridge' || actor.eventStage === 'action' && !!actor.motionType && ['slide', 'swing', 'launch', 'drop'].includes(actor.motionType);
   const knees = footWorld.map((point, side) => joint(hipSides[side], point, 8.2 * scale, 8.2 * scale, sideView ? facing : (side ? 1 : -1) * facing * kneeBend(actor))) as [Point, Point];
   return { hip: hipWorld, shoulders, elbows, hands: handsReached, knees, feet: footWorld, head: toWorld({ x: hip.x, y: hip.y - 19 }), angle, facing, scale, handContact, footContact };
@@ -425,7 +452,7 @@ export function sampleLadderRig(actor: LadderArtActor, geometry: LadderGeometry,
     if (Math.hypot(from.x + transition.shift.x - point.x, from.y + transition.shift.y - point.y) > current.scale * .8) foot.y -= Math.sin(p * Math.PI) * current.scale * 1.2;
     return reachable(hipSides[index], foot, 16.2 * current.scale);
   }) as [Point, Point];
-  const elbows = hands.map((point, index) => joint(shoulders[index], point, ARM_LENGTH * current.scale, ARM_LENGTH * current.scale, (index ? 1 : -1) * current.facing)) as [Point, Point];
+  const elbows = hands.map((point, index) => armJoint(shoulders[index], point, index, current.facing, current.scale)) as [Point, Point];
   const sideView = actor.pose === 'bridge' || actor.eventStage === 'action' && !!actor.motionType && ['slide', 'swing', 'launch', 'drop'].includes(actor.motionType);
   const knees = feet.map((point, index) => joint(hipSides[index], point, 8.2 * current.scale, 8.2 * current.scale, sideView ? current.facing : (index ? 1 : -1) * current.facing * kneeBend(actor))) as [Point, Point];
   const same = (a: Point, b: Point) => Math.hypot(a.x + transition.shift.x - b.x, a.y + transition.shift.y - b.y) < .001;

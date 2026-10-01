@@ -311,6 +311,99 @@ test('each hand follows its own arm through turns and settles without a late sna
   }
 });
 
+test('ordinary climbing arms reach from their own shoulders with elbows outside the body', () => {
+  const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  for (const [width, height, count] of [[800, 600, 5], [640, 500, 10], [320, 180, 5]]) {
+    const geometry = createLadderGeometry(width, height, count);
+    for (const index of [0, 1, 2, 3]) for (const direction of ['up', 'left', 'right']) {
+      let previous, reachedAboveHelmet = false;
+      for (let sample = 0; sample <= 600; sample++) {
+        const row = 4 + sample / 300;
+        const actor = {
+          id: participants[index].id, index, candidate: participants[index], lane: 2,
+          rungProgress: row, height: row / 24, pose: 'climb', phase: 0, arrived: false,
+          ...(direction === 'up' ? {} : { eventStage: 'setup', fromLane: 2, toLane: direction === 'left' ? 1 : 3 }),
+        };
+        const rig = sampleLadderRig(actor, geometry, 1000);
+        assert.ok(rig.shoulders[0].x < rig.shoulders[1].x, 'an upcoming left crossing cannot mirror the climbing shoulders');
+        assert.ok(rig.hands[0].x < rig.hands[1].x, 'each climbing wrist stays on its own side of the ladder');
+        assert.ok(rig.handContact.some(Boolean), 'one arm supports the body while the other reaches');
+        for (const side of [0, 1]) {
+          const shoulder = rig.shoulders[side], elbow = rig.elbows[side], wrist = rig.hands[side];
+          if (wrist.y < shoulder.y) assert.ok(side ? elbow.x > shoulder.x : elbow.x < shoulder.x, 'a raised elbow bends outward instead of crossing the face');
+          assert.ok(Math.abs(distance(shoulder, elbow) - distance(elbow, wrist)) < geometry.scale * .01, 'climbing preserves both arm segment lengths');
+          reachedAboveHelmet ||= wrist.y < rig.head.y - 6.5 * geometry.scale;
+          if (!rig.handContact[side]) continue;
+          const rung = (geometry.bottom - wrist.y) / geometry.rungGap * geometry.subdivisions;
+          assert.ok(Math.abs(rung - Math.round(rung)) < .0001, 'a supporting hand really holds a visible rung');
+          assert.ok(side ? wrist.x > shoulder.x : wrist.x < shoulder.x, 'a supporting wrist reaches from the matching shoulder');
+          if (previous?.handContact[side]) assert.ok(distance(previous.hands[side], wrist) < geometry.scale * .001, 'the planted wrist stays fixed while the torso rises');
+        }
+        previous = rig;
+      }
+      assert.ok(reachedAboveHelmet, 'a climbing stroke reaches above the helmet rather than paddling at chest height');
+    }
+  }
+});
+
+test('climbing wrists and elbows stay continuous across repeated rung strokes', () => {
+  const geometry = createLadderGeometry(640, 500, 5);
+  const rigAt = (row, index) => sampleLadderRig({
+    id: participants[index].id, index, candidate: participants[index], lane: 2,
+    rungProgress: row, height: row / 24, pose: 'climb', phase: 0, arrived: false,
+  }, geometry, 1000);
+  for (const index of [0, 1]) for (let rung = 8; rung <= 20; rung++) {
+    const row = rung / geometry.subdivisions;
+    const before = rigAt(row - .00001, index), after = rigAt(row + .00001, index);
+    for (const part of ['hands', 'elbows']) for (const side of [0, 1]) {
+      assert.ok(Math.hypot(before[part][side].x - after[part][side].x, before[part][side].y - after[part][side].y) < geometry.scale * .005, `${part} cannot flip at a stroke boundary`);
+    }
+  }
+});
+
+test('the final upward climb leaves time for a readable reaching arm', () => {
+  const candidates = participants.slice(0, 5), timeline = buildLadderTimeline(candidates, candidates.map(candidate => candidate.id).reverse(), 44_000, 12);
+  const geometry = createLadderGeometry(800, 600, 5), read = time => ladderFrame(timeline, time, 0);
+  let samples = 0;
+  for (const path of Object.values(timeline.paths)) {
+    const segment = path.segments.at(-1);
+    if (segment?.kind !== 'climb') continue;
+    let previous;
+    for (let time = segment.start + 300; time < segment.end; time += 16) {
+      const actor = ladderArtActors(timeline, read(time), candidates, time, geometry, false, read).find(item => item.id === path.id);
+      if (actor.transition || actor.pose !== 'climb') { previous = undefined; continue; }
+      const rig = sampleLadderRig(actor, geometry, time);
+      if (previous) for (const side of [0, 1]) {
+        const step = Math.hypot(rig.hands[side].x - previous.hands[side].x, rig.hands[side].y - previous.hands[side].y);
+        assert.ok(step <= geometry.scale * 4.5, 'an upward hand stroke must not become a rapid blur near the treasure');
+        samples++;
+      }
+      previous = rig;
+    }
+  }
+  assert.ok(samples > 10, 'the check covers actual complete arm strokes near arrival');
+});
+
+test('climbers use the terrace edge and plant a foot before releasing their last grip', () => {
+  const geometry = createLadderGeometry(800, 600, 5), deckY = geometry.rowY(geometry.rungCount);
+  for (const index of [0, 1]) {
+    let previous;
+    for (let sample = 0; sample <= 800; sample++) {
+      const row = 20 + sample / 200;
+      const rig = sampleLadderRig({ id: participants[index].id, index, candidate: participants[index], lane: 2, rungProgress: row, height: row / 24, pose: 'climb', phase: 0, arrived: false }, geometry, 1000);
+      for (const side of [0, 1]) if (rig.handContact[side]) assert.ok(rig.hands[side].y >= deckY - .001, 'a supporting hand cannot grasp a rung above the end of the ladder');
+      if (!rig.handContact.some(Boolean)) {
+        assert.ok(rig.footContact.some(Boolean), 'a foot must support the climber before both hands leave the terrace');
+        for (const side of [0, 1]) if (rig.footContact[side]) assert.ok(Math.abs(rig.feet[side].y - deckY) < .001, 'the planted foot stays on the real terrace');
+      }
+      if (previous) for (const part of ['hands', 'elbows', 'feet']) for (const side of [0, 1]) assert.ok(Math.hypot(rig[part][side].x - previous[part][side].x, rig[part][side].y - previous[part][side].y) < geometry.scale * .3, 'stepping onto the terrace has no pose snap');
+      previous = rig;
+    }
+    assert.ok(previous.footContact.every(Boolean));
+    assert.ok(previous.hands.every((hand, side) => hand.y > previous.shoulders[side].y), 'once on the terrace the arms settle beside the body');
+  }
+});
+
 test('climbing cadences visibly differ while every individual segment moves strictly forward', () => {
   const candidates = participants.slice(0, 4), timeline = buildLadderTimeline(candidates, candidates.map(candidate => candidate.id), 44_000, 7);
   const firstWave = timeline.waves[0];

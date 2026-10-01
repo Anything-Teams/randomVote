@@ -189,9 +189,17 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
     });
   }
   const remainingWork = new Map<string, number>();
+  const finalClimbTails = new Map<string, number>();
+  for (const id of ids) {
+    const last = timeline.bridges.filter(bridge => bridge.actorIds.includes(id)).at(-1);
+    if (!last) continue;
+    const climb = Math.max(600 * unit, (LADDER_RUNGS - landingFor(last, id)) * 300 * unit);
+    finalClimbTails.set(last.id, Math.max(finalClimbTails.get(last.id) ?? 0, climb));
+  }
+  const arrivalHeadroom = 1700 * unit;
   for (const bridge of [...timeline.bridges].reverse()) {
     const original = originalTimes.get(bridge.id)!;
-    let tail = 0;
+    let tail = Math.max(0, (finalClimbTails.get(bridge.id) ?? 0) - arrivalHeadroom);
     for (const next of timeline.bridges) for (const dependency of dependencies.get(next.id)!) {
       if (dependency.previous === bridge.id) tail = Math.max(tail, dependency.gap + remainingWork.get(next.id)!);
     }
@@ -223,7 +231,9 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
         times.set(bridge.id, { start, end }); firingTimes.push({ start, action: start + setup });
       }
     }
-    return { times, end: Math.max(3000 * unit, ...[...times.values()].map(time => time.end)) };
+    // Reserve the final hand-over-hand climb before filling the device budget.
+    // Actors that leave their last device lower down need to depart sooner.
+    return { times, end: Math.max(3000 * unit, ...[...times].map(([id, time]) => time.end + Math.max(0, (finalClimbTails.get(id) ?? 0) - arrivalHeadroom))) };
   };
   let strategy = 0;
   if (schedule(1).end > lastWaveEnd + .01) {
@@ -251,7 +261,7 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
   for (let index = 0; index < laneCount; index++) {
     const id = ids[index], startAt = (3000 + index % 4 * 45) * unit;
     const ownBridges = timeline.bridges.filter(item => item.actorIds.includes(id)), last = ownBridges.at(-1);
-    const finalClimbMinimum = last ? Math.max(260 * unit, (LADDER_RUNGS - landingFor(last, id)) * 120 * unit) : 0;
+    const finalClimbMinimum = last ? Math.max(600 * unit, (LADDER_RUNGS - landingFor(last, id)) * 300 * unit) : 0;
     const arrivalAt = Math.max((39_500 + random() * 1700) * unit, last ? last.end + finalClimbMinimum : 0);
     const path: LadderPath = { id, index, startLane: index, doorLane: doorOrder.indexOf(id), startAt, arrivalAt, segments: [] };
     let lane = index, row = 0, at = startAt;

@@ -17,6 +17,7 @@ function Preview() {
   const [duration, setDuration] = useState(SPORT_DURATION);
   const [elapsed, setElapsed] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [storySeed, setStorySeed] = useState(1);
   const clock = useRef({ began: 0, age: 0 });
   useEffect(() => {
     if (!playing) return;
@@ -38,6 +39,9 @@ function Preview() {
           {Array.from({ length: 9 }, (_, index) => index + 2).map(value => <option key={value} value={value}>{value}명</option>)}
         </select>
       </label>
+      {mode === 'racing' && <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#d8e5ef', fontSize: 11 }}>시드
+        <input aria-label="경마 장면 시드" type="number" value={storySeed} onChange={event => { setStorySeed(Number(event.target.value)); setPlaying(false); }} style={{ width: 52 }} />
+      </label>}
       {mode === 'arena' && <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#d8e5ef', fontSize: 11 }}>길이
         <select aria-label="검증 경기 길이" value={duration} onChange={event => { setDuration(Number(event.target.value)); setElapsed(0); setPlaying(false); }}>
           {[40_000, 44_000, 62_000].map(value => <option key={value} value={value}>{value / 1000}초</option>)}
@@ -50,7 +54,7 @@ function Preview() {
       {`${(elapsed / 1000).toFixed(1)}초`}
       <input aria-label="장면 검증 시간" type="range" min={0} max={duration} step={100} value={elapsed} onChange={event => { setPlaying(false); setElapsed(Number(event.target.value)); }} style={{ flex: 1, minWidth: 0 }} />
     </label>
-    <div className="sports-body" key={`${mode}-${count}-${duration}`}>{mode === 'racing' ? <RacingShow {...props} /> : <ArenaShow {...props} />}</div>
+    <div className="sports-body" key={`${mode}-${count}-${duration}`}>{mode === 'racing' ? <RacingShow {...props} storySeed={storySeed} /> : <ArenaShow {...props} />}</div>
   </div>;
 }
 createRoot(document.getElementById('root')!).render(<Preview />);

@@ -11,6 +11,7 @@ const phaseAt = (incident: RacingIncident, elapsed: number) => (elapsed - incide
 export function racingIncidentMotion(incident: RacingIncident | undefined, id: string, elapsed: number, reduced = false): RaceHorseMotion {
   if (!incident || reduced || elapsed < incident.start || elapsed > incident.end || id !== incident.actorId && id !== incident.rivalId) return {};
   const p = phaseAt(incident, elapsed), kind = incident.kind, actor = id === incident.actorId;
+  if (kind === 'hay-jump' || kind === 'puddle') return actor ? { crouch: pulse(p, .28, .77) * .72 } : {};
   if (kind === 'gust') return { stumble: pulse(p, .16, .68) * (actor ? .3 : .55), crouch: pulse(p, .13, .76) * (actor ? .75 : .6) };
   if (!actor) return {};
   if (kind === 'balance') return { stumble: pulse(p, .08, .56) * Math.sin(clamp((p - .08) / .48) * Math.PI * 3) * .9, crouch: pulse(p, .08, .66) * .6 };

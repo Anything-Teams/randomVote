@@ -13,7 +13,7 @@ const path = (ctx: CanvasRenderingContext2D, draw: () => void, fill: string | Ca
   ctx.beginPath(); draw(); ctx.fillStyle = fill; ctx.fill(); if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = .7; ctx.stroke(); }
 };
 
-export type RaceHorseMotion = { gait?: 'idle' | 'walk' | 'gallop'; phase?: number; settle?: number; victory?: number; stumble?: number; crouch?: number };
+export type RaceHorseMotion = { gait?: 'idle' | 'walk' | 'gallop'; phase?: number; settle?: number; victory?: number; jump?: number; stumble?: number; crouch?: number };
 
 /** A grounded four-beat stride, with the rider's pelvis and boots tied to the saddle. */
 export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidate, index: number, x: number, y: number, scale: number, clock: number, speed: number, reduced: boolean, cheer = false, lean = 0, motion: RaceHorseMotion = {}) {
@@ -39,11 +39,11 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   const strideLength = mode === 'walk' ? 18 : 26 * (.90 + effort * .07);
   const stance = mode === 'walk' ? .62 : .20;
   const breath = reduced ? 0 : Math.sin(clock / 960 + index * .83) * .18;
-  const stumble = reduced ? 0 : motion.stumble ?? 0, crouch = reduced ? 0 : clamp(motion.crouch ?? 0, 0, 1);
+  const jump = reduced ? 0 : clamp(motion.jump ?? 0, 0, 1), stumble = reduced ? 0 : motion.stumble ?? 0, crouch = reduced ? 0 : clamp(motion.crouch ?? 0, 0, 1);
   const bob = mix(breath, .15 + Math.cos((phase - .12) * Math.PI * 2) * (mode === 'walk' ? .30 : 1.15), activity);
   // Give the cannon bones room below the belly, rather than folding four short legs into it.
-  const bounce = bob - 12 + activity * (mode === 'walk' ? 2 : 4) + Math.abs(stumble) * 2;
-  const pitch = activity * (clamp(lean, -8, 8) * .004 + (mode === 'walk' ? 0 : -.008 + Math.sin(cycle) * .012)) + stumble * .055;
+  const bounce = bob - 12 + activity * (mode === 'walk' ? 2 : 4) - jump * 24 + Math.abs(stumble) * 2;
+  const pitch = activity * (clamp(lean, -8, 8) * .004 + (mode === 'walk' ? 0 : -.008 + Math.sin(cycle) * .012)) + stumble * .055 - jump * .035;
   const bodyPoint = (point: Point): Point => { const p = rotate(point, pitch); return { x: p.x, y: p.y + bounce }; };
   const coat = coats[index % coats.length], dark = ['#583928', '#302e35', '#805632', '#a09b90', '#514a41', '#773e28'][index % 6];
   const legData = [
@@ -58,7 +58,8 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
     const center = data.rear ? data.hip.x - 2 : data.hip.x + 2;
     const travelX = support ? center + strideLength * (.5 - p / stance) : mix(center - strideLength / 2, center + strideLength / 2, ease(swing)) + fold * (data.rear ? 4 : -6);
     const lift = support ? 0 : fold * (mode === 'walk' ? 3 : data.rear ? 9 : 13);
-    const hoof = { x: mix(data.rest, travelX, activity), y: -2 - lift * activity };
+    const gathered = data.rear ? data.hip.x + 4 : data.hip.x - 7;
+    const hoof = { x: mix(mix(data.rest, travelX, activity), gathered, jump * .65), y: -2 - lift * activity * (1 - jump * .8) - jump * (data.rear ? 30 : 37) };
     const hip = bodyPoint(data.hip);
     const ankle = { x: hoof.x - 1.8, y: hoof.y - 3.8 };
     if (data.rear) {
@@ -73,7 +74,7 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   });
   ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
   const alpha = ctx.globalAlpha;
-  ctx.fillStyle = '#07162455'; ctx.beginPath(); ctx.ellipse(-2, 2.5, 38 + bob * .6, 4.1, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#07162455'; ctx.beginPath(); ctx.ellipse(-2, 2.5, 38 + bob * .6 - jump * 8, 4.1 - jump * 1.3, 0, 0, Math.PI * 2); ctx.fill();
   const bone = (a: Point, b: Point, width: number, color: string) => {
     ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
   };
@@ -144,8 +145,18 @@ export function drawRaceHorse(ctx: CanvasRenderingContext2D, candidate: Candidat
   ctx.restore(); leg(legData[2]); leg(legData[3]); ctx.restore();
 }
 
-export function drawRaceStadium(ctx: CanvasRenderingContext2D, w: number, h: number, clock: number, reduced: boolean, close = false, finish = false) {
-  const scroll = reduced ? 0 : clock * .12;
+export type RacingGroundProjection = { center: number; pixelsPerLap: number };
+export function racingGroundMarks(width: number, projection: RacingGroundProjection, spacing: number) {
+  const step = spacing / (width * .65 / .067), first = Math.floor((projection.center - width * .5 / projection.pixelsPerLap) / step) - 1;
+  return Array.from({ length: Math.ceil(width / (step * projection.pixelsPerLap)) + 4 }, (_, offset) => {
+    const index = first + offset, distance = index * step;
+    return { index, distance, x: width * .5 + (distance - projection.center) * projection.pixelsPerLap };
+  });
+}
+
+export function drawRaceStadium(ctx: CanvasRenderingContext2D, w: number, h: number, clock: number, reduced: boolean, close = false, finish = false, trackProjection?: RacingGroundProjection) {
+  const scroll = trackProjection ? trackProjection.center * w * .65 / .067 : reduced ? 0 : clock * .12;
+  const marks = (spacing: number) => trackProjection ? racingGroundMarks(w, trackProjection, spacing) : Array.from({ length: Math.ceil(w / spacing) + 4 }, (_, index) => ({ index: index - 2, x: (index - 2) * spacing - scroll % spacing }));
   const sky = ctx.createLinearGradient(0, 0, 0, h); sky.addColorStop(0, '#091323'); sky.addColorStop(.3, '#243a54'); sky.addColorStop(.42, '#334c49'); sky.addColorStop(1, '#3b4d34'); ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
   const horizon = h * (close ? .36 : .29);
   // Sweeping roof, tiered architecture and hundreds of individually colored spectators.
@@ -179,14 +190,14 @@ export function drawRaceStadium(ctx: CanvasRenderingContext2D, w: number, h: num
     const ground = ctx.createLinearGradient(0, horizon, 0, h); ground.addColorStop(0, '#77674e'); ground.addColorStop(.3, '#ad9164'); ground.addColorStop(1, '#64543c'); ctx.fillStyle = ground; ctx.fillRect(0, horizon + boardH, w, h);
     for (let row = 0; row < 14; row++) {
       const depth = row / 14, y = horizon + boardH + depth * (h - horizon - boardH), interval = 11 + depth * 37;
-      for (let grain = -2; grain < w / interval + 2; grain++) { const x = grain * interval - scroll * (.1 + depth * .72) % interval; ctx.strokeStyle = row % 2 ? '#dbc19625' : '#342e2925'; ctx.lineWidth = 1 + depth; ctx.beginPath(); ctx.moveTo(x, y + Math.sin(grain * 2.1 + row) * 2); ctx.lineTo(x + 3 + depth * 13, y - depth * 2); ctx.stroke(); }
+      for (const grain of marks(interval)) { ctx.strokeStyle = row % 2 ? '#dbc19642' : '#342e2940'; ctx.lineWidth = 1 + depth; ctx.beginPath(); ctx.moveTo(grain.x, y + Math.sin(grain.index * 2.1 + row) * 2); ctx.lineTo(grain.x + 3 + depth * 13, y - depth * 2); ctx.stroke(); }
     }
     const rail = horizon + boardH + 4; ctx.strokeStyle = '#ede4cb'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, rail); ctx.lineTo(w, rail + h * .024); ctx.stroke();
-    for (let post = -1; post < w / 46 + 2; post++) { const x = post * 46 - scroll * .31 % 46; ctx.fillStyle = '#d3d8c8'; ctx.fillRect(x, rail, 2, h * .055); }
+    for (const post of marks(46)) { ctx.fillStyle = '#d3d8c8'; ctx.fillRect(post.x, rail, 2, h * .055); }
     // Fast near-side rail and turf provide parallax without moving the racers off screen.
     ctx.fillStyle = '#284733'; ctx.fillRect(0, h * .97, w, h * .03);
     ctx.strokeStyle = '#eee5ca99'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(0, h * .94); ctx.lineTo(w, h * .99); ctx.stroke();
-    for (let post = -1; post < w / 90 + 2; post++) { const x = post * 90 - scroll * .8 % 90; ctx.fillStyle = '#d2d4be'; ctx.fillRect(x, h * .945, 3, h * .08); }
+    for (const post of marks(90)) { ctx.fillStyle = '#d2d4be'; ctx.fillRect(post.x, h * .945, 3, h * .08); }
     if (finish) { const x = w * .82; for (let y = Math.floor(h * .46); y < h; y += 7) for (let col = 0; col < 2; col++) { ctx.fillStyle = (Math.floor(y / 7) + col) % 2 ? '#121f2d' : '#f4e9cd'; ctx.fillRect(x + col * 5, y, 5, 7); } ctx.strokeStyle = '#e4d6b2'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, h * .1); ctx.lineTo(x, h * .44); ctx.stroke(); }
   } else {
     const cx = w * .5, cy = h * .66, rx = w * .48, ry = h * .31;

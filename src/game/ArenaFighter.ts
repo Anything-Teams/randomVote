@@ -3,7 +3,7 @@ import type { Candidate } from '../election';
 export type ArenaPose = 'idle' | 'guard' | 'walk' | 'run' | 'grapple' | 'brace' | 'push' | 'dodge' | 'lift' | 'throw' | 'airborne' | 'land' | 'recover' | 'cheer' | 'clap' | 'bow';
 type Point = { x: number; y: number };
 type Motion = { crouch: number; lean: number; hipX: number; head: number; mouth: number; backX: number; backY: number; frontX: number; frontY: number; spread: number; contact: number; shoulderLift: number; clapTurn: number; cheerTurn: number; applause: number };
-type FootMemory = { anchor: Point; from: Point; to: Point; ground: Point; lift: number; swinging: boolean; settleAt: number; settleFrom: Point; settleTo: Point; settleLift: number };
+type FootMemory = { anchor: Point; from: Point; to: Point; ground: Point; lift: number; swinging: boolean; swingStart: number; settleAt: number; settleFrom: Point; settleTo: Point; settleLift: number };
 export type ArenaFighterAnimation = { clock: number | null; signature: string; epoch?: number | string; motion: Motion | null; gait: number; distance: number; moving: boolean; airborne: boolean; feet: [FootMemory, FootMemory] | null; localFeet: [Point, Point] | null; grip?: Point; secondaryGrip?: Point; pose?: ArenaPose };
 export type ArenaActor = { candidate: Candidate; index: number; x: number; y: number; depthY?: number; scale: number; facing: number; pose: ArenaPose; angle: number; alpha: number; velocityX: number; velocityY: number; gaitDistance: number; phase: number; power?: number; gripTarget?: Point; secondaryGripTarget?: Point; animation?: ArenaFighterAnimation; motionEpoch?: number | string; motionImmediate?: boolean };
 
@@ -50,7 +50,7 @@ function segment(ctx: CanvasRenderingContext2D, a: Point, b: Point, width: numbe
   ctx.restore();
 }
 function makeFoot(point: Point): FootMemory {
-  return { anchor: { ...point }, from: { ...point }, to: { ...point }, ground: { ...point }, lift: 0, swinging: false, settleAt: -Infinity, settleFrom: { ...point }, settleTo: { ...point }, settleLift: 0 };
+  return { anchor: { ...point }, from: { ...point }, to: { ...point }, ground: { ...point }, lift: 0, swinging: false, swingStart: .62, settleAt: -Infinity, settleFrom: { ...point }, settleTo: { ...point }, settleLift: 0 };
 }
 
 /** Stance feet stay in world space; changing a pose cannot restart the stride. */
@@ -67,7 +67,8 @@ function groundedFeet(actor: ArenaActor, state: ArenaFighterAnimation, clock: nu
   state.feet ??= [makeFoot(comfortable(0)), makeFoot(comfortable(1))];
   const speed = Math.max(.01, Math.hypot(actor.velocityX, actor.velocityY));
   const vx = actor.velocityX / speed, vy = actor.velocityY / speed;
-  const vertical = Math.abs(vy), cycleLength = mix(actor.pose === 'run' ? 34 : 30, 13.2, vertical) * (1 + (index % 3 - 1) * .025);
+  const running = actor.pose === 'run' ? ease((speed - 35) / 80) : 0;
+  const vertical = Math.abs(vy), cycleLength = mix(mix(30, 34, running), 13.2, vertical) * (1 + (index % 3 - 1) * .025);
   const distance = reset ? 0 : Math.max(0, actor.gaitDistance - state.distance);
   if (moving) state.gait += distance / Math.max(1, scale * cycleLength);
   const stance = .62;
@@ -76,13 +77,13 @@ function groundedFeet(actor: ArenaActor, state: ArenaFighterAnimation, clock: nu
       const cycle = (state.gait + leg * .5) % 1;
       if (cycle >= stance) {
         if (!foot.swinging) {
-          foot.swinging = true; foot.from = { ...foot.ground };
+          foot.swinging = true; foot.from = { ...foot.ground }; foot.swingStart = cycle;
           const ahead = ((1 - cycle) + stance / 2) * cycleLength * scale;
           foot.to = { x: x + facing * (leg ? 3 : -3) * scale + vx * ahead, y: y + vy * ahead };
         }
-        const amount = (cycle - stance) / (1 - stance);
+        const amount = clamp((cycle - foot.swingStart) / Math.max(.001, 1 - foot.swingStart));
         foot.ground = pointMix(foot.from, foot.to, ease(amount));
-        foot.lift = Math.sin(amount * Math.PI) * (actor.pose === 'run' ? 5.8 : 3.6);
+        foot.lift = Math.sin(amount * Math.PI) * mix(3.6, 5.8, running);
       } else {
         if (foot.swinging) { foot.anchor = { ...foot.to }; foot.swinging = false; }
         foot.ground = { ...foot.anchor }; foot.lift = 0;
@@ -108,8 +109,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const palette = palettes[index % palettes.length], hair = ['#162536', '#4b362e', '#6f493e', '#2b3f49'][index % 4];
   const personality = index % 4, breath = Math.sin((clock + index * 719) / (580 + personality * 65));
   const speed = Math.hypot(actor.velocityX, actor.velocityY), air = ['airborne', 'land', 'recover'].includes(pose);
-  const moving = speed > 6 && !air, backward = actor.velocityX * facing < -5;
   const state = actor.animation ?? createArenaFighterAnimation();
+  const moving = speed > (state.moving ? 3 : 8) && !air, backward = actor.velocityX * facing < -5;
   const signature = candidate.id + ':' + index + ':' + candidate.color;
   const reset = !state.motion || !Number.isFinite(state.motion.clapTurn) || !Number.isFinite(state.motion.cheerTurn) || !Number.isFinite(state.motion.applause) || state.signature !== signature || state.epoch !== actor.motionEpoch || actor.motionImmediate || clock < (state.clock ?? clock) || actor.gaitDistance < state.distance - 1;
   const delta = reset ? 0 : Math.max(0, Math.min(50, clock - (state.clock ?? clock)));
@@ -148,13 +149,14 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     target.backX = -10; target.frontX = 11; target.backY = -1; target.frontY = -1; target.mouth = .9;
   }
   if (moving) {
-    target.crouch = Math.max(target.crouch, pose === 'run' ? 3.2 : 2.2) + Math.abs(Math.sin(gait)) * .65;
-    target.hipX += Math.sin(gait) * .45;
+    const activity = ease(speed / 120), running = pose === 'run' ? ease((speed - 35) / 80) : 0;
+    target.crouch = mix(target.crouch, Math.max(target.crouch, 2.2 + running) + Math.abs(Math.sin(gait)) * .65, activity);
+    target.hipX += Math.sin(gait) * .45 * activity;
     if (pose === 'walk' || pose === 'run') {
-      const swing = Math.cos(gait + personality * .07), reach = pose === 'run' ? 7 : 4.5;
-      target.lean = backward ? -2 : pose === 'run' ? 5 : 1.2; target.head = -target.lean * .35;
+      const swing = Math.cos(gait + personality * .07), reach = mix(4.5, 7, running) * activity;
+      target.lean = mix(target.lean, backward ? -2 : mix(1.2, 5, running), activity); target.head = -target.lean * .35;
       target.backX = -8 - swing * reach; target.frontX = 9 + swing * reach;
-      target.backY = -1 - Math.abs(swing) * 1.5; target.frontY = -1 - Math.abs(swing) * 1.5;
+      target.backY = -1 - Math.abs(swing) * 1.5 * activity; target.frontY = -1 - Math.abs(swing) * 1.5 * activity;
     }
   }
   if (reset) state.motion = { ...target };

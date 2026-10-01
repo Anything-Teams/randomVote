@@ -38,7 +38,7 @@ test('the camera keeps every named horse visible throughout the live race on sma
   }
 });
 
-test('racing tactics animate the correct bodies smoothly without obstacle jumps or attacks', () => {
+test('racing tactics and obstacle jumps animate the correct bodies smoothly without attacks', () => {
   const base = { actorId: '0', rivalId: '1', start: 10_000, end: 15_500, beforeOrder: ['1', '0'], waitingOrder: ['1', '0'], afterOrder: ['0', '1'] };
   for (const { kind } of RACING_STORIES) {
     const incident = { ...base, kind };
@@ -49,7 +49,7 @@ test('racing tactics animate the correct bodies smoothly without obstacle jumps 
         const motion = racingIncidentMotion(incident, id, at);
         assert.deepEqual(racingIncidentMotion(incident, id, at), motion, 'pause and seek must reproduce the same pose');
         assert.deepEqual(racingIncidentMotion(incident, id, at, true), {});
-        assert.equal(motion.jump, undefined, 'flat racing never asks a horse to leap over an obstacle');
+        if (!['hay-jump', 'puddle'].includes(kind)) assert.equal(motion.jump, undefined, 'only a visible course obstacle asks a horse to leap');
         assert.equal(motion.kick, undefined, 'horses race through gaps instead of attacking rivals');
         if (id === '2' || id === '1' && kind !== 'gust') assert.deepEqual(motion, {});
         for (const key of new Set([...Object.keys(previous), ...Object.keys(motion)])) {

@@ -1,6 +1,6 @@
 import type { Candidate } from './election';
 
-export type RacingIncidentKind = 'blocked' | 'inside' | 'outside' | 'chase' | 'gust' | 'balance' | 'draft' | 'fatigue' | 'patience' | 'lead-change' | 'rail' | 'last-kick';
+export type RacingIncidentKind = 'blocked' | 'inside' | 'outside' | 'chase' | 'gust' | 'balance' | 'draft' | 'fatigue' | 'patience' | 'lead-change' | 'rail' | 'last-kick' | 'hay-jump' | 'puddle';
 export type RacingIncident = {
   kind: RacingIncidentKind;
   actorId: string;
@@ -17,6 +17,8 @@ export type RacingTimeline = { start: number; finish: number; ids: string[]; fin
 export type RacingStanding = { id: string; distance: number; rank: number; finished: boolean; finishTime: number };
 export type RacingIncidentStatus = { stage: 'setup' | 'action' | 'outcome'; beforeRank: number; currentRank: number; afterRank: number; opponentIds: string[]; overtakenIds: string[]; passedByIds: string[]; nextRivalId?: string };
 export const RACING_STORIES: { kind: RacingIncidentKind; title: string; setup: string; action: string; outcome: string }[] = [
+  { kind: 'hay-jump', title: '건초 장벽을 넘는 한 걸음', setup: '앞쪽 코스의 낮은 건초 장벽이 가까워집니다. 기수가 고삐를 모읍니다.', action: '앞다리를 접고 장벽을 넘습니다. 뒷다리까지 넘긴 뒤 보폭을 되찾습니다.', outcome: '건초 장벽을 넘고 착지했습니다. 추격을 이어갑니다.' },
+  { kind: 'puddle', title: '물웅덩이를 넘는 질주', setup: '앞쪽 코스에 고인 물이 가까워집니다. 기수가 도약할 거리를 맞춥니다.', action: '고인 물을 길게 넘습니다. 착지한 발굽 아래 물방울이 튑니다.', outcome: '물을 넘은 말이 발을 단단히 딛고 추격을 이어갑니다.' },
   { kind: 'blocked', title: '막힌 길, 열린 틈', setup: '앞말에 길이 막혔습니다. 고삐를 당기며 틈을 기다립니다.', action: '한 박자 기다린 기수가 안쪽 빈 공간으로 파고듭니다.', outcome: '기다린 보람이 있습니다. 안쪽 돌파에 성공했습니다.' },
   { kind: 'inside', title: '짧은 길의 승부', setup: '코너 안쪽에 말 한 마리가 지날 틈이 생겼습니다.', action: '기수가 몸을 낮춥니다. 짧은 코스로 앞말을 따라잡습니다.', outcome: '코너를 짧게 돌아 순위를 끌어올렸습니다.' },
   { kind: 'outside', title: '바깥쪽의 추격자', setup: '말들이 몰린 안쪽을 버리고 바깥으로 크게 나갑니다.', action: '거리는 길어졌지만 앞이 열렸습니다. 보폭을 넓힙니다.', outcome: '자유롭게 달린 바깥 추격이 통했습니다.' },
@@ -56,7 +58,7 @@ export function createRacingIncidents(candidates: Candidate[], order: string[], 
   const result: RacingIncident[] = [];
   let previousActor = '';
   for (let scene = 0; scene < 3; scene++) {
-    const pool = kinds.filter(story => scene === 0 ? ['blocked', 'inside', 'outside', 'draft'].includes(story.kind) : scene === 1 ? ['balance', 'gust', 'fatigue', 'patience'].includes(story.kind) : ['chase', 'lead-change', 'rail', 'last-kick'].includes(story.kind));
+    const pool = kinds.filter(story => scene === 0 ? ['hay-jump', 'puddle', 'blocked', 'inside', 'outside', 'draft'].includes(story.kind) : scene === 1 ? ['balance', 'gust', 'fatigue', 'patience'].includes(story.kind) : ['chase', 'lead-change', 'rail', 'last-kick'].includes(story.kind));
     const template = pool[random(pool.length)]; kinds.splice(kinds.indexOf(template), 1);
     const losing = template.kind === 'fatigue' || template.kind === 'balance';
     const eligible = positions.filter((id, rank) => id !== previousActor && (losing ? rank < positions.length - 1 : rank > 0));
@@ -185,7 +187,11 @@ export function racingIncidentStatus(timeline: RacingTimeline, incident: RacingI
 }
 
 export function activeRacingIncident(timeline: RacingTimeline, elapsed: number) { return timeline.incidents.find(incident => elapsed >= incident.start && elapsed < incident.end); }
-export function racingIncidentStage(incident: RacingIncident, elapsed: number) { const progress = clamp((elapsed - incident.start) / (incident.end - incident.start)); return progress < .24 ? 'setup' : progress < .82 ? 'action' : 'outcome'; }
+export function racingIncidentStage(incident: RacingIncident, elapsed: number) {
+  const progress = clamp((elapsed - incident.start) / (incident.end - incident.start));
+  const actionStarts = incident.kind === 'hay-jump' || incident.kind === 'puddle' ? .48 : .24;
+  return progress < actionStarts ? 'setup' : progress < .82 ? 'action' : 'outcome';
+}
 export function racingLaneShift(incident: RacingIncident | undefined, id: string, elapsed: number): number {
   if (!incident || incident.actorId !== id) return 0;
   const age = clamp((elapsed - incident.start) / (incident.end - incident.start));

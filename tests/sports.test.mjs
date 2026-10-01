@@ -462,14 +462,14 @@ test('racing incidents describe real opponents and the displayed rank changes', 
   assert.deepEqual([...kinds].sort(), RACING_STORIES.map(story => story.kind).sort());
 });
 
-test('flat racing only generates track tactics, pace changes and weather responses', () => {
-  const allowed = new Set(['blocked', 'inside', 'outside', 'chase', 'gust', 'balance', 'draft', 'fatigue', 'patience', 'lead-change', 'rail', 'last-kick']);
+test('racing combines track tactics, pace changes and visible course obstacles', () => {
+  const allowed = new Set(['blocked', 'inside', 'outside', 'chase', 'gust', 'balance', 'draft', 'fatigue', 'patience', 'lead-change', 'rail', 'last-kick', 'hay-jump', 'puddle']);
   assert.deepEqual(new Set(RACING_STORIES.map(story => story.kind)), allowed);
   for (let size = 2; size <= 10; size++) for (let seed = 0; seed < 100; seed++) {
     const list = participants.slice(0, size), order = list.map(player => player.id).reverse();
     const incidents = createRacingIncidents(list, order, 44_000, seed);
-    assert.equal(incidents.length, 3, 'removing obstacles preserves the race story pacing');
-    for (const incident of incidents) assert.ok(allowed.has(incident.kind), `unexpected obstacle or attack: ${incident.kind}`);
+    assert.equal(incidents.length, 3, 'obstacles share the natural race story pacing');
+    for (const incident of incidents) assert.ok(allowed.has(incident.kind), `unexpected race event: ${incident.kind}`);
   }
 });
 
