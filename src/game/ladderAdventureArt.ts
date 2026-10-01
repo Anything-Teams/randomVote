@@ -22,13 +22,32 @@ export function drawLadderAdventure(c: CanvasRenderingContext2D, g: LadderGeomet
   const moon = Math.max(5, Math.min(h * .062, 29)); rect(c, w * .09, h * .075, moon, moon, '#f7db9c'); rect(c, w * .09 + moon * .65, h * .075, moon * .35, moon * .22, '#bda888');
   for (let i = 0; i < 24; i++) { const x = (i * 137 + 41) % w, y = (i * 59 + 7) % Math.max(1, h * .43); rect(c, x, y, i % 6 ? 1 : 2, 1, '#e1e8cb77'); }
   for (let i = 0; i < 9; i++) { const scale = .5 + i % 3 * .5, x = ((i * 143 + time / (170 + i * 9)) % (w + 150)) - 100; cloud(c, x, h * (.22 + i % 4 * .18), scale, i % 2 ? '#d8eee81b' : '#c5e8e929'); }
-  // Distant islands keep the climbing course suspended above the clouds.
-  for (let i = 0; i < 4; i++) {
-    const x = w * (.08 + i * .27), y = h * (.60 + i % 2 * .17), size = clamp(w * .045, 10, 42);
-    c.fillStyle = '#25465c66'; c.beginPath(); c.moveTo(x - size, y); c.lineTo(x + size, y); c.lineTo(x + size * .22, y + size * .85); c.lineTo(x - size * .4, y + size * .65); c.closePath(); c.fill(); rect(c, x - size, y - 3, size * 2, 4, '#90b8a166');
-  }
   const left = Math.max(2, g.left - laneGap * .37), right = Math.min(w - 2, g.right + laneGap * .37), deck = top + 1;
-  // A quiet stone terrace supports the chests and each ladder's anchor.
+  // The ladders climb one continuous sky tower. Its walls, columns and floor
+  // beams reach the lower foundation instead of floating as detached islands.
+  const towerWidth = Math.max(1, right - left), foundation = Math.max(bottom + 11 * s, h + 1);
+  rect(c, left + 5 * s, deck + 11 * s, Math.max(1, towerWidth - 10 * s), foundation - deck, '#253e57b0');
+  rect(c, left + 9 * s, deck + 11 * s, Math.max(1, towerWidth - 18 * s), foundation - deck, '#304e6666');
+  for (let row = 6; row < 24; row += 6) {
+    const yy = g.rowY(row);
+    rect(c, left + 4 * s, yy + 4 * s, Math.max(1, towerWidth - 8 * s), 3 * s, '#456479');
+    rect(c, left + 4 * s, yy + 7 * s, Math.max(1, towerWidth - 8 * s), 2 * s, '#1b344e');
+    for (let lane = 0; lane < g.laneCount - 1; lane++) {
+      const x = g.laneX(lane + .5), ww = Math.min(laneGap * .5, 75 * s), wh = g.rungGap * 3.3;
+      rect(c, x - ww / 2 - s, yy - wh - s, ww + 2 * s, wh + 2 * s, '#587286');
+      rect(c, x - ww / 2, yy - wh, ww, wh, '#1a354d');
+      rect(c, x - ww / 2 + 2 * s, yy - wh + 2 * s, ww * .28, Math.max(s, wh - 4 * s), '#7594a022');
+      stroke(c, x, yy - wh, x, yy, Math.max(.5, s * .7), '#496c81');
+    }
+  }
+  for (const x of [left, right - 7 * s]) {
+    rect(c, x, deck + 3 * s, 7 * s, foundation - deck, '#6a8392');
+    rect(c, x + s, deck + 3 * s, 2 * s, foundation - deck, '#a6b7ad');
+    for (let yy = deck + 14 * s; yy < foundation; yy += 15 * s) stroke(c, x, yy, x + 7 * s, yy, Math.max(.5, s * .6), '#415f72');
+  }
+  rect(c, left - 2 * s, bottom + 8 * s, towerWidth + 4 * s, Math.max(7 * s, h - bottom + 4 * s), '#536e7d');
+  rect(c, left - 2 * s, bottom + 8 * s, towerWidth + 4 * s, 2.3 * s, '#d7caa8');
+  // The roof terrace caps those same columns and supports every treasure chest.
   rect(c, left, deck, right - left, 3 * s, '#e4d7af');
   rect(c, left + s, deck + 3 * s, right - left - 2 * s, 6 * s, '#6b8490');
   rect(c, left + 3 * s, deck + 9 * s, right - left - 6 * s, 2 * s, '#304c62');

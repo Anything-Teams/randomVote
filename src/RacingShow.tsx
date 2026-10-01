@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { randomInt } from './election';
 import type { SportsStageProps } from './sports';
-import { activeRacingIncident, buildRacingTimeline, createRacingIncidents, racingIncidentStatus, racingLaneShift, racingStandings, readRacingTravel, RACING_STORIES, type RacingTimeline, type RacingStanding } from './racingNarrative';
+import { activeRacingIncident, buildRacingTimeline, createRacingIncidents, racingIncidentStatus, racingIncidentSetback, racingLaneShift, racingStandings, readRacingTravel, RACING_STORIES, type RacingTimeline, type RacingStanding } from './racingNarrative';
 import { drawRaceDust, drawRaceHorse, drawRaceStadium, raceBox, raceLabel } from './racingArt';
 import { drawRacingCourse, drawRacingStartingGate, drawRacingTopView } from './racingCourse';
 import { createRacingCamera, placeRacingField, racingFocusIds, type RacingCamera } from './racingCamera';
 import { drawRacingIncidentEffects, placeRacingDuel, racingIncidentMotion } from './racingEffects';
-import { drawRacingObstacles, placeRacingObstacles, racingObstacleJump } from './racingObstacles';
+import { drawRacingObstacles, placeRacingObstacles, racingObstacleJump, racingObstacleMotion, racingObstacleStatus } from './racingObstacles';
 import './racing.css';
 
 type RacePhase = 'preview' | 'paddock' | 'countdown' | 'race' | 'straight' | 'photo' | 'winner';
@@ -43,16 +43,44 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
   if (incident && template && actor) {
     const status = racingIncidentStatus(timeline, incident, elapsed);
     const next = props.candidates.find(candidate => candidate.id === status.nextRivalId);
-    const crossed = status.overtakenIds.length ? status.overtakenIds : status.passedByIds;
+    const gained = status.beforeRank - status.currentRank, crossed = gained >= 0 ? status.overtakenIds : status.passedByIds;
     const last = props.candidates.find(candidate => candidate.id === crossed.at(-1));
     headline = actor.name + ' · ' + template.title;
     detail = status.stage === 'outcome'
-      ? status.beforeRank + '위 → 현재 ' + status.currentRank + '위. ' + (last ? last.name + (status.overtakenIds.length ? ' 앞에 나섰습니다.' : '의 뒤에서 다시 리듬을 찾습니다.') : template.outcome)
+      ? status.beforeRank + '위 → 현재 ' + status.currentRank + '위. ' + (last ? last.name + (gained >= 0 ? ' 앞에 나섰습니다.' : '의 뒤에서 다시 리듬을 찾습니다.') : gained > 0 ? '앞말과의 경합에서 순위를 끌어올렸습니다.' : gained < 0 ? '보폭을 회복하고 앞말을 다시 쫓습니다.' : '같은 순위에서 리듬을 지키며 다음 경합을 준비합니다.')
       : '현재 ' + status.currentRank + '위 · ' + (next ? next.name + '와 경합. ' : last ? last.name + '를 지나 앞으로. ' : '') + template[status.stage];
     badge = status.stage === 'setup' ? '추월 준비 · 앞말을 함께 포착' : status.stage === 'action' ? '실제 추월 중계' : '추월 결과';
+    const p = (elapsed - incident.start) / (incident.end - incident.start), rival = props.candidates.find(candidate => candidate.id === incident.rivalId);
+    const checked = racingIncidentSetback(incident, incident.actorId, elapsed);
+    if (checked > 0 && p < .38) {
+      headline = actor.name + ' · 진로를 막혔습니다';
+      detail = '현재 ' + status.currentRank + '위. ' + (rival?.name ?? '앞말') + '가 옆 진로를 지킵니다. 고삐를 당겨 속도를 줄이고 틈을 기다립니다.' + (status.passedByIds.length ? ' 그 사이 뒤의 말이 앞으로 나섰습니다.' : ' 앞말과 간격이 벌어집니다.');
+      badge = '진로 견제 · 실제 감속';
+    } else if (checked > 0 && p < .70) {
+      headline = actor.name + ' · 틈으로 빠져 재가속';
+      detail = '현재 ' + status.currentRank + '위. ' + template.action + ' 옆 진로로 빠져 잃은 간격을 좁힙니다.';
+      badge = '응수 · 실제 재추격';
+    }
   }
-  const pace = leader ? (readRacingTravel(timeline, leader.id, elapsed + 100) - readRacingTravel(timeline, leader.id, elapsed)) * 335 : 1;
-  return { phase, standings, headline, detail, focusId: incident?.actorId, badge, progress: Math.max(0, ...standings.map(standing => standing.distance)), speed: phase === 'race' || phase === 'straight' ? Math.round(clamp(56 * pace, 35, 72)) : 0 };
+  const challenge = phase === 'race' ? timeline.obstacles.find(obstacle => elapsed >= obstacle.encounter - 1450 && elapsed < (obstacle.outcome === 'clear' ? obstacle.impact + 1000 : obstacle.recovered + 450)) : undefined;
+  let focusId = incident?.actorId;
+  if (challenge) {
+    const subject = props.candidates.find(candidate => candidate.id === challenge.actorId), status = racingObstacleStatus(timeline, challenge, elapsed);
+    const name = subject?.name ?? '경주마', object = challenge.kind === 'hay-jump' ? '건초 장벽' : '물웅덩이';
+    const ahead = props.candidates.find(candidate => candidate.id === standings[status.currentRank - 2]?.id);
+    const change = status.currentRank > status.beforeRank ? ' · ' + (status.currentRank - status.beforeRank) + '계단 밀렸습니다.' : '';
+    headline = name + ' · ' + (status.stage === 'approach' ? object + ' 접근' : status.stage === 'jump' ? '도약!' : status.stage === 'impact' ? challenge.outcome === 'clip' ? '장벽에 발이 걸렸습니다' : '젖은 착지에서 미끄러졌습니다' : status.stage === 'recover' ? '균형을 되찾는 중' : status.stage === 'chase' ? '다시 추격합니다' : '코스 통과');
+    detail = '현재 ' + status.currentRank + '위. ' + (status.stage === 'approach' ? '오른쪽에서 ' + object + '이 가까워집니다. 기수가 도약할 보폭을 맞춥니다.'
+      : status.stage === 'jump' ? '앞다리를 모아 넘습니다. 착지까지 보폭을 지켜보세요.'
+      : status.stage === 'impact' ? (challenge.outcome === 'clip' ? '낮은 도약 끝에 앞발이 건초를 건드립니다. 기수가 고삐를 당기며 버팁니다.' : '발이 젖은 지면을 밀고 미끄러집니다. 기수가 몸을 세워 중심을 잡습니다.') + change
+      : status.stage === 'recover' ? '보폭이 짧아져 앞말과 간격이 벌어졌습니다. 발을 다시 딛고 중심을 맞춥니다.' + change
+      : status.stage === 'chase' ? '고삐를 풀고 보폭을 되찾습니다. ' + (ahead ? ahead.name + '의 뒤에서 잃은 거리를 좁힙니다.' : '다시 선두 경합에 합류합니다.')
+      : challenge.outcome === 'clear' ? '장애물을 넘으며 착지로 이어집니다. 네 발의 달리는 리듬을 지킵니다.' : '흔들림을 수습하고 달리는 리듬을 되찾았습니다. 실제 간격만큼 추격이 이어집니다.');
+    badge = status.stage === 'impact' || status.stage === 'recover' ? '실제 감속 · 역전 기회' : status.stage === 'chase' ? '회복 · 재추격' : '코스 장애물';
+    focusId = challenge.actorId;
+  }
+  const trackedId = focusId ?? leader?.id, pace = trackedId ? (readRacingTravel(timeline, trackedId, elapsed + 100) - readRacingTravel(timeline, trackedId, elapsed)) * 335 : 1;
+  return { phase, standings, headline, detail, focusId, badge, progress: Math.max(0, ...standings.map(standing => standing.distance)), speed: phase === 'race' || phase === 'straight' ? Math.round(clamp(56 * pace, 0, 100)) : 0 };
 }
 function horseTag(ctx: CanvasRenderingContext2D, name: string, color: string, x: number, y: number, canvasWidth: number, canvasHeight: number, compact: boolean) {
   const size = compact ? 7 : 9;
@@ -74,8 +102,10 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
   const obstacles = placeRacingObstacles(timeline, scene.camera, placements, w);
   const locations = placeRacingDuel(incident, baseLocations, obstacles, elapsed).sort((a, b) => a.y - b.y);
   const motions = new Map(locations.map(item => {
-    const jump = reduced ? 0 : Math.max(0, ...obstacles.filter(obstacle => obstacle.actorId === item.id).map(obstacle => racingObstacleJump(obstacle, item)));
-    return [item.id, { ...racingIncidentMotion(incident, item.id, elapsed, reduced), jump }];
+    const own = obstacles.filter(obstacle => obstacle.actorId === item.id);
+    const jump = reduced ? 0 : Math.max(0, ...own.map(obstacle => racingObstacleJump(obstacle, item)));
+    const obstacleMotion = own.reduce((motion, obstacle) => ({ ...motion, ...racingObstacleMotion(obstacle, elapsed, reduced) }), {});
+    return [item.id, { ...racingIncidentMotion(incident, item.id, elapsed, reduced), ...obstacleMotion, jump }];
   }));
   if (phase === 'straight' || phase === 'photo') {
     const finishX = w * .5 + (1 - scene.camera.center) / scene.camera.span * w * .65;
@@ -100,7 +130,8 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
     const velocityRatio = standing?.finished ? Math.exp(-(elapsed - standing.finishTime) / 1100) : 1;
     // Invert the renderer's easing so stride shrinks with the continuous run-out velocity.
     const settle = .5 - Math.sin(Math.asin(2 * velocityRatio - 1) / 3);
-    drawRaceHorse(ctx, candidate, item.index, item.x, item.y, item.scale, clock, effort, reduced, false, 0, { settle, ...motion });
+    // Course progress drives hoof cadence, so a checked or stumbling horse really shortens its steps.
+    drawRaceHorse(ctx, candidate, item.index, item.x, item.y, item.scale, clock, effort, reduced, false, 0, { settle, phase: item.distance * 62 + item.index * .193, ...motion });
   });
   drawRacingObstacles(ctx, groundObjects.slice(nextGroundObject), w, elapsed, reduced, 'ground');
   drawRacingIncidentEffects(ctx, incident, locations, elapsed, reduced, 'air');

@@ -15,11 +15,11 @@ export function racingIncidentMotion(incident: RacingIncident | undefined, id: s
   if (kind === 'hay-jump' || kind === 'puddle') return actor ? { crouch: pulse(p, .28, .77) * .72 } : {};
   if (kind === 'gust') return { stumble: pulse(p, .16, .68) * (actor ? .3 : .55), crouch: pulse(p, .13, .76) * (actor ? .75 : .6) };
   if (kind === 'blocked') return actor
-    ? { check: pulse(p, .02, .34) * .9, crouch: pulse(p, .32, .9) * .85 }
+    ? { check: pulse(p, .14, .43) * .95, crouch: pulse(p, .38, .93) * .9 }
     : { check: pulse(p, .1, .43) * .4, crouch: pulse(p, .41, .91) * .7 };
   if (['draft', 'lead-change', 'inside', 'outside', 'rail', 'chase', 'last-kick', 'patience'].includes(kind)) return actor
-    ? { check: kind === 'patience' || kind === 'draft' ? pulse(p, .04, .33) * .5 : 0, crouch: pulse(p, .26, .91) * .85 }
-    : { check: pulse(p, .2, .51) * .35, crouch: pulse(p, .43, .93) * .72 };
+    ? { check: pulse(p, .14, .43) * .9, crouch: pulse(p, .38, .93) * .9 }
+    : { check: pulse(p, .38, .72) * .65, crouch: pulse(p, .57, .95) * .85 };
   if (!actor) return {};
   if (kind === 'balance') return { stumble: pulse(p, .08, .56) * Math.sin(clamp((p - .08) / .48) * Math.PI * 3) * .9, crouch: pulse(p, .08, .66) * .6 };
   if (kind === 'fatigue') return { stumble: pulse(p, .1, .76) * .28, crouch: pulse(p, .38, .84) * .25 };
@@ -33,8 +33,8 @@ export function placeRacingDuel<T extends RacingEffectPlacement>(incident: Racin
   if (!actor || !rival) return placements;
   const p = phaseAt(incident, elapsed), sign = actor.y >= rival.y ? 1 : -1, scale = Math.min(actor.scale, rival.scale);
   const center = (actor.y + rival.y) / 2, separation = 12 * scale;
-  const sidestep = smooth((p - .28) / .25), defence = smooth((p - .4) / .28);
-  let join = smooth(p / .28) * (1 - smooth((p - .78) / .22));
+  const sidestep = smooth((p - .36) / .26), defence = smooth((p - .4) / .28);
+  let join = smooth(p / .20) * (1 - smooth((p - .78) / .22));
   // Give the pair space for a physical course jump instead of pulling the horse across it.
   const courseClearance = Math.max(0, ...obstacles.flatMap(obstacle => [actor, rival].filter(item => item.id === obstacle.actorId).map(item => 1 - smooth((Math.abs(obstacle.x - item.x) / Math.max(.05, item.scale) - 90) / 150))));
   join *= 1 - courseClearance;

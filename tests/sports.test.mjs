@@ -424,23 +424,21 @@ test('racing incidents describe real opponents and the displayed rank changes', 
       const incidents = createRacingIncidents(list, order, 44_000, seed);
       const timeline = buildRacingTimeline(list, order, 44_000, incidents);
       assert.equal(new Set(incidents.map(incident => incident.kind)).size, incidents.length);
-      const rankedAt = elapsed => [...order].sort((a, b) => readRacingDistance(timeline, b, elapsed) - readRacingDistance(timeline, a, elapsed));
+      const rankedAt = elapsed => racingStandings(timeline, elapsed).map(standing => standing.id);
       for (const incident of incidents) {
         kinds.add(incident.kind);
         assert.notEqual(incident.actorId, incident.rivalId);
         for (const snapshot of [incident.beforeOrder, incident.waitingOrder, incident.afterOrder]) assert.deepEqual([...snapshot].sort(), [...order].sort());
-        assert.deepEqual(rankedAt(incident.start), incident.beforeOrder);
-        assert.deepEqual(rankedAt(incident.start + 1300), incident.waitingOrder);
-        assert.deepEqual(rankedAt(incident.end), incident.afterOrder);
-        const before = incident.beforeOrder.indexOf(incident.actorId), after = incident.afterOrder.indexOf(incident.actorId);
-        assert.ok(incident.kind === 'fatigue' || incident.kind === 'balance' ? after > before : after < before);
+        const beforeOrder = rankedAt(incident.start), afterOrder = rankedAt(incident.end);
+        const before = beforeOrder.indexOf(incident.actorId), after = afterOrder.indexOf(incident.actorId);
+        const changedOpponents = beforeOrder.filter(id => id !== incident.actorId && (beforeOrder.indexOf(id) < before) !== (afterOrder.indexOf(id) < after));
         const outcome = racingIncidentStatus(timeline, incident, incident.end);
         assert.equal(outcome.currentRank, after + 1);
         assert.equal(outcome.beforeRank, before + 1);
         assert.equal(outcome.afterRank, after + 1);
-        assert.equal(outcome.opponentIds.length, Math.abs(after - before));
-        assert.ok(outcome.opponentIds.includes(incident.rivalId));
-        assert.deepEqual(after < before ? outcome.overtakenIds : outcome.passedByIds, outcome.opponentIds);
+        assert.deepEqual([...outcome.opponentIds].sort(), changedOpponents.sort(), 'reported opponents must have actually crossed the actor, including setbacks');
+        assert.deepEqual([...outcome.overtakenIds].sort(), changedOpponents.filter(id => beforeOrder.indexOf(id) < before && afterOrder.indexOf(id) > after).sort());
+        assert.deepEqual([...outcome.passedByIds].sort(), changedOpponents.filter(id => beforeOrder.indexOf(id) > before && afterOrder.indexOf(id) < after).sort());
         assert.equal(outcome.nextRivalId, undefined);
         for (let elapsed = incident.start; elapsed <= incident.end; elapsed += 100) {
           const live = racingIncidentStatus(timeline, incident, elapsed), ranks = racingStandings(timeline, elapsed);

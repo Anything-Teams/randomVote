@@ -29,9 +29,6 @@ export class PixelCitizen {
   private brows: Phaser.GameObjects.Rectangle[];
   private mouth: Phaser.GameObjects.Rectangle;
   private shadow: Phaser.GameObjects.Ellipse;
-  private profileHair: Phaser.GameObjects.Rectangle;
-  private profileNose: Phaser.GameObjects.Rectangle;
-  private profileAmount = 0;
   private offset: number;
   private tempo: number;
   private personality: number;
@@ -107,8 +104,6 @@ export class PixelCitizen {
     rect(this.head, 6, -7, 2, 5, hair);
     if (index % 2 === 0) rect(this.head, -4, -8, 8, 2, hair);
     if (index % 5 === 2) rect(this.head, -6, -13, 5, 2, hair);
-    this.profileHair = rect(this.head, -7, -5, 4, 9, hair).setAlpha(0);
-    this.profileNose = rect(this.head, 7, -1, 3, 3, skin).setAlpha(0);
     // Preserve the resting pixel bounds while scaling and rotating around each feature's center.
     this.eyes = [rect(this.head, -3, 0, 2, 2, 0x182137).setOrigin(0.5), rect(this.head, 4, 0, 2, 2, 0x182137).setOrigin(0.5)];
     this.brows = [rect(this.head, -3, -3.5, 4, 1, hair).setOrigin(0.5), rect(this.head, 4, -3.5, 4, 1, hair).setOrigin(0.5)];
@@ -282,13 +277,6 @@ export class PixelCitizen {
     this.leftLeg.upper.setAngle(m.ll); this.rightLeg.upper.setAngle(m.rl);
     this.leftLeg.lower.setAngle(m.lk); this.rightLeg.lower.setAngle(m.rk);
     this.mouth.setScale(1, m.mouth);
-    const profile = this.locomotionDistance !== undefined && ['walk', 'run', 'brake'].includes(this.pose) ? 1 : 0;
-    this.profileAmount += (profile - this.profileAmount) * (reduced ? 1 : 1 - Math.exp(-delta / 100));
-    this.profileHair.setAlpha(this.profileAmount);
-    this.profileNose.setAlpha(this.profileAmount);
-    this.eyes[0].setAlpha(1 - this.profileAmount);
-    this.brows[0].setAlpha(1 - this.profileAmount);
-    this.mouth.setX(.5 + this.profileAmount * 4);
     this.brows.forEach((brow, index) => { brow.y = -3.5 + m.brows; brow.angle = this.pose === 'nervous' ? (index ? -8 : 8) : 0; });
     const blinkAt = clock % (3100 + p * 470); const blink = reduced || blinkAt < 2950 + p * 470 ? 1 : 0.12;
     this.eyes.forEach(eye => { eye.scaleY += (blink - eye.scaleY) * Math.min(1, delta / 24); });

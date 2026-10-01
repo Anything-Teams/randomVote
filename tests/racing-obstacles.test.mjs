@@ -6,9 +6,9 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { buildRacingTimeline, createRacingIncidents, readRacingDistance } = await source('src/racingNarrative.ts');
+const { buildRacingTimeline, createRacingIncidents, readRacingDistance, racingStandings, racingObstacleLoss, racingIncidentSetback } = await source('src/racingNarrative.ts');
 const { createRacingCamera, placeRacingField } = await source('src/racingCamera.ts');
-const { racingObstacleDistance, racingCourseObstacles, placeRacingObstacles, racingObstacleJump } = await source('src/racingObstacles.ts');
+const { racingObstacleDistance, racingCourseObstacles, placeRacingObstacles, racingObstacleJump, racingObstacleMotion, racingObstacleStatus } = await source('src/racingObstacles.ts');
 const { racingTopLegPose, racingGateWalk, racingGateLegPose } = await source('src/racingCourse.ts');
 const { racingGroundMarks } = await source('src/racingArt.ts');
 const players = Array.from({ length: 10 }, (_, index) => ({ id: String(index), name: `선수 ${index}`, color: '#abcdef' }));
@@ -46,9 +46,10 @@ test('course obstacles enter from the right, travel left with the ground, and pe
       const actor = field.find(item => item.id === incident.actorId);
       assert.ok(Math.abs(obstacle.x - actor.x) < .001, 'the actor reaches the physical obstacle at the planned encounter');
       const body = { ...actor, x: actor.x - 57 * actor.scale };
-      assert.ok(racingObstacleJump(obstacle, { ...body, x: obstacle.x - 20 * body.scale }) > .9, 'front hooves must be airborne when they reach the obstacle');
-      assert.ok(racingObstacleJump(obstacle, { ...body, x: obstacle.x }) > .95, 'the body passes over the object at the peak of the jump');
-      assert.ok(racingObstacleJump(obstacle, { ...body, x: obstacle.x + 20 * body.scale }) > .6, 'hind hooves clear the object before landing');
+      const clearance = obstacle.outcome === 'clip' ? .42 : obstacle.outcome === 'slip' ? .68 : 1;
+      assert.ok(racingObstacleJump(obstacle, { ...body, x: obstacle.x - 20 * body.scale }) > .9 * clearance, 'the physical approach determines the takeoff');
+      assert.ok(racingObstacleJump(obstacle, { ...body, x: obstacle.x }) > .95 * clearance, 'the failed takeoff remains lower than a successful jump');
+      assert.ok(racingObstacleJump(obstacle, { ...body, x: obstacle.x + 20 * body.scale }) > .6 * clearance, 'the rear legs finish the same physical motion');
       assert.equal(racingObstacleJump(obstacle, { ...body, x: obstacle.x - 79 * body.scale }), 0);
       assert.ok(racingObstacleJump(obstacle, { ...body, x: obstacle.x + 63 * body.scale }) < 1e-10);
       assert.equal(readRacingDistance(timeline, incident.actorId, expected.encounter), obstacle.distance);
@@ -124,10 +125,61 @@ test('every race includes three separated course obstacles on different horses',
     assert.equal(obstacles.length, 3);
     assert.equal(new Set(obstacles.map(obstacle => obstacle.id)).size, 3);
     assert.equal(new Set(obstacles.map(obstacle => obstacle.kind)).size, 2, 'both water and a low hay hurdle are present');
+    assert.ok(obstacles.some(obstacle => obstacle.outcome === 'clear') && obstacles.some(obstacle => obstacle.outcome !== 'clear'), 'successes and mistakes both occur');
     for (let index = 1; index < obstacles.length; index++) {
       assert.ok(obstacles[index].encounter - obstacles[index - 1].encounter > 6500, 'challenges leave time for racing duels');
       assert.notEqual(obstacles[index].actorId, obstacles[index - 1].actorId, 'different racers take the next challenge');
     }
     for (const obstacle of obstacles) assert.equal(obstacle.distance, readRacingDistance(timeline, obstacle.actorId, obstacle.encounter));
+  }
+});
+
+test('course mistakes lose real speed and ranks, then recover without moving the obstacle or changing the result', () => {
+  const outcomes = new Set();
+  let lostPositions = 0;
+  for (const count of [2, 6, 10]) for (let seed = 0; seed < 30; seed++) {
+    const list = players.slice(0, count), order = list.map(player => player.id).reverse();
+    const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed)), noCourse = { ...timeline, obstacles: [] };
+    for (const obstacle of timeline.obstacles) {
+      outcomes.add(obstacle.outcome);
+      assert.equal(readRacingDistance(timeline, obstacle.actorId, obstacle.encounter), obstacle.distance, 'the horse actually reaches the fixed obstacle at the encounter');
+      if (obstacle.outcome === 'clear') { assert.equal(racingObstacleLoss(obstacle, obstacle.lowest), 0); continue; }
+      const at = (obstacle.impact + obstacle.lowest) / 2, recoveryAt = (obstacle.lowest + obstacle.recovered) / 2;
+      const speed = (plan, time) => (readRacingDistance(plan, obstacle.actorId, time + 8) - readRacingDistance(plan, obstacle.actorId, time - 8)) / 16;
+      assert.ok(speed(timeline, at) < speed(noCourse, at) * .55, 'the checked horse loses forward speed');
+      assert.ok(speed(timeline, recoveryAt) > speed(noCourse, recoveryAt), 'recovery earns back the lost ground through acceleration');
+      assert.ok(Math.abs(readRacingDistance(noCourse, obstacle.actorId, obstacle.lowest) - readRacingDistance(timeline, obstacle.actorId, obstacle.lowest) - obstacle.loss) < 1e-9);
+      const before = racingStandings(timeline, obstacle.impact).find(item => item.id === obstacle.actorId).rank;
+      const peak = racingStandings(timeline, obstacle.lowest).find(item => item.id === obstacle.actorId).rank;
+      if (peak > before) lostPositions++;
+      let previous = readRacingDistance(timeline, obstacle.actorId, obstacle.impact), priorMotion = {};
+      for (let elapsed = obstacle.impact; elapsed <= obstacle.recovered + 16; elapsed += 16) {
+        const distance = readRacingDistance(timeline, obstacle.actorId, elapsed), status = racingObstacleStatus(timeline, obstacle, elapsed), motion = racingObstacleMotion(obstacle, elapsed);
+        assert.ok(distance >= previous - 1e-9, 'a mistake can slow the horse without reversing it');
+        assert.equal(status.currentRank, racingStandings(timeline, elapsed).find(item => item.id === obstacle.actorId).rank);
+        assert.equal(status.lost, racingObstacleLoss(obstacle, elapsed));
+        for (const key of new Set([...Object.keys(priorMotion), ...Object.keys(motion)])) assert.ok(Math.abs((motion[key] ?? 0) - (priorMotion[key] ?? 0)) < .09, 'impact and recovery poses remain continuous');
+        assert.deepEqual(racingObstacleMotion(obstacle, elapsed, true), {});
+        priorMotion = motion; previous = distance;
+      }
+      assert.equal(racingObstacleLoss(obstacle, obstacle.recovered), 0);
+      assert.deepEqual(racingObstacleMotion(obstacle, obstacle.recovered), {});
+    }
+    assert.deepEqual(racingStandings(timeline, 44_000).map(item => item.id), order);
+  }
+  assert.deepEqual(outcomes, new Set(['clear', 'clip', 'slip']));
+  assert.ok(lostPositions > 50, 'mistakes cause readable overtakes throughout both small and large fields');
+});
+
+test('a guarded lane checks actual travel before the horse escapes and accelerates', () => {
+  for (const kind of ['blocked', 'inside', 'outside', 'draft', 'patience', 'lead-change', 'rail', 'chase', 'last-kick']) {
+    const incident = { kind, actorId: '0', rivalId: '1', start: 10_500, end: 16_000, beforeOrder: ['1', '0'], waitingOrder: ['1', '0'], afterOrder: ['0', '1'] };
+    const timeline = buildRacingTimeline(players.slice(0, 2), ['0', '1'], 44_000, [incident]), unconstrained = { ...timeline, incidents: [], obstacles: [] };
+    const checkAt = incident.start + (incident.end - incident.start) * .28, escapeAt = incident.start + (incident.end - incident.start) * .68;
+    const speed = (plan, time) => (readRacingDistance(plan, '0', time + 8) - readRacingDistance(plan, '0', time - 8)) / 16;
+    assert.ok(racingIncidentSetback(incident, '0', checkAt) > .003);
+    assert.ok(speed(timeline, checkAt) < speed(unconstrained, checkAt) * .8, `${kind} must slow actual travel while the reins are checked`);
+    assert.ok(speed(timeline, escapeAt) > speed(unconstrained, escapeAt), 'escaping the guarded line creates real acceleration');
+    assert.equal(racingIncidentSetback(incident, '0', incident.end), 0);
   }
 });

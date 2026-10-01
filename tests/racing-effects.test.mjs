@@ -85,7 +85,7 @@ test('opponents close the lane, respond to a pass, and separate without changing
     }
     const joined = placeRacingDuel(incident, base, [], 12_000);
     assert.ok(Math.abs(joined[0].y - joined[1].y) < 50, 'the defence and attempted pass occur together on screen');
-    assert.ok(racingIncidentMotion(incident, '0', 11_000).check > .2 || racingIncidentMotion(incident, '0', 12_600).crouch > .6);
+    assert.ok(racingIncidentMotion(incident, '0', 11_600).check > .6 || racingIncidentMotion(incident, '0', 13_700).crouch > .6);
     assert.ok(racingIncidentMotion(incident, '1', 13_800).crouch > .5, 'the defending rider responds to the attack');
     assert.deepEqual(placeRacingDuel(incident, base, [], incident.end), base);
   }

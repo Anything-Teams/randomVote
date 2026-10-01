@@ -8,8 +8,117 @@ async function load(entry) {
 }
 const { buildLadderTimeline, ladderFrame, LADDER_STORIES, LADDER_RUNGS, LADDER_ROOF_STEAL_CHANCE } = await load('src/ladderLogic.ts');
 const { createSportsOrder } = await load('src/sports.ts');
-const { createLadderGeometry, ladderArtActors, sampleLadderRig, ladderSuspension, drawLadderCrossing } = await load('src/game/ladderArt.ts');
+const { createLadderGeometry, ladderArtActors, sampleLadderRig, ladderSuspension, drawLadderCrossing, drawLadderActor } = await load('src/game/ladderArt.ts');
+const { drawLadderAdventure } = await load('src/game/ladderAdventureArt.ts');
 const participants = Array.from({ length: 10 }, (_, index) => ({ id: `person-${index}`, name: `참가자 ${index + 1}`, color: '#83c7de' }));
+
+test('both rendered legs stay proportionate and folded across takeoff, flight, catch and landing', () => {
+  const seen = new Set(); let caught = 0, drawn = 0;
+  for (const count of [2, 5, 10]) for (const seed of [1, 4, 12]) {
+    const candidates = participants.slice(0, count), timeline = buildLadderTimeline(candidates, candidates.map(person => person.id).reverse(), 44_000, seed);
+    const geometry = createLadderGeometry(800, 600, count), read = time => ladderFrame(timeline, time, 0);
+    const at = (id, time) => {
+      const actor = ladderArtActors(timeline, read(time), candidates, time, geometry, false, read).find(item => item.id === id);
+      return { actor, rig: sampleLadderRig(actor, geometry, time) };
+    };
+    for (const bridge of timeline.bridges) {
+      const event = timeline.events.find(item => item.id === bridge.eventId), id = event?.actorId ?? bridge.actorIds[0];
+      const segment = timeline.paths[id].segments.find(item => item.bridgeId === bridge.id), duration = segment.end - segment.start;
+      const action = event?.action ?? segment.start + duration * .14, resolve = event?.resolve ?? segment.start + duration * .84;
+      const times = Array.from({ length: 101 }, (_, index) => segment.start + duration * index / 100);
+      for (const id of bridge.actorIds) for (const time of times) {
+        const { actor, rig } = at(id, time); seen.add(actor.motionType);
+        for (const side of [0, 1]) {
+          const upper = Math.hypot(rig.knees[side].x - rig.legRoots[side].x, rig.knees[side].y - rig.legRoots[side].y);
+          const lower = Math.hypot(rig.feet[side].x - rig.knees[side].x, rig.feet[side].y - rig.knees[side].y);
+          assert.ok(upper <= geometry.scale * 7 && lower <= geometry.scale * 7, 'neither thigh nor shin grows longer during a jump or recovery');
+          assert.ok(upper + lower <= geometry.scale * 14, 'the airborne legs keep the same proportion as the torso');
+          assert.ok(rig.legRoots[side].y > rig.hip.y, 'the trousers connect below the waist rather than drawing thighs from the belt');
+          if (actor.eventStage === 'action' && actor.transferStage === 'catch' && actor.pose === 'hang') {
+            assert.ok(rig.feet[side].y > rig.hip.y + geometry.scale * 2, 'a hanging boot stays below the pelvis, with the knee folded rather than reaching back to the old body origin');
+            assert.ok(rig.feet[side].y - rig.hip.y < geometry.scale * 14, `the catch keeps a folded leg ${count}/${seed}/${bridge.id}/${id}/${time}/${side}: ${(rig.feet[side].y - rig.hip.y) / geometry.scale}`);
+            caught++;
+          }
+        }
+        if (!actor.transition && actor.eventStage === 'action' && actor.transferStage === 'flight') {
+          const lines = [], context = new Proxy({ lineWidth: 0 }, { get: (target, key) => key === 'moveTo' ? (...args) => { target.start = args; } : key === 'lineTo' ? (...args) => { lines.push([target.start, args]); } : key in target ? target[key] : () => {}, set: (target, key, value) => { target[key] = value; return true; } });
+          drawLadderActor(context, actor, geometry, time);
+          for (const side of [0, 1]) {
+            const [root, knee] = lines[side * 2], [shin, boot] = lines[side * 2 + 1];
+            assert.ok(Math.hypot(root[0] - rig.legRoots[side].x, root[1] - rig.legRoots[side].y) < .001 && Math.hypot(knee[0] - shin[0], knee[1] - shin[1]) < .001, 'the actual drawing uses the constrained pelvis and one shared knee');
+            assert.ok(Math.hypot(boot[0] - rig.feet[side].x, boot[1] - rig.feet[side].y) < .001);
+          }
+          drawn++;
+        }
+      }
+      for (const boundary of [segment.start, action, resolve, segment.end]) for (const id of bridge.actorIds) {
+        const before = at(id, boundary - .001).rig, after = at(id, boundary + .001).rig;
+        for (const part of ['legRoots', 'knees', 'feet']) for (const side of [0, 1]) assert.ok(Math.hypot(before[part][side].x - after[part][side].x, before[part][side].y - after[part][side].y) < geometry.scale * .015, 'each knee and boot follows its own continuous path into the catch and landing');
+      }
+    }
+  }
+  assert.ok(caught > 100 && drawn > 100);
+  for (const motion of ['launch', 'swing', 'drop', 'slide', 'rotate', 'conveyor', 'portal', 'pounce']) assert.ok(seen.has(motion), 'all actual crossing mechanisms are exercised');
+});
+
+test('climbing, jumping and catching keep the rear head and shoulders until the award', () => {
+  for (const pose of ['idle', 'climb', 'launch', 'swing', 'drop', 'hang', 'clamber', 'transfer', 'run', 'balance']) {
+    const geometry = createLadderGeometry(800, 600, 5), actor = { id: participants[0].id, index: 0, candidate: participants[0], lane: 2, rungProgress: 10, height: 10 / 24, pose, phase: .5, arrived: false };
+    const colors = [], context = new Proxy({}, { get: () => () => {}, set: (_, key, value) => { if (key === 'fillStyle') colors.push(value); return true; } });
+    drawLadderActor(context, actor, geometry, 1000);
+    assert.ok(!colors.includes('#172d3d'), `${pose} cannot show front eyes while the camera looks at the climber's back`);
+    assert.ok(!colors.includes('#ddc387') && !colors.includes('#f1eadc'), `${pose} cannot put the front buckle or chest stripe onto the back`);
+    const front = [];
+    const awardContext = new Proxy({}, { get: () => () => {}, set: (_, key, value) => { if (key === 'fillStyle') front.push(value); return true; } });
+    drawLadderActor(awardContext, { ...actor, pose: 'win', arrived: true }, geometry, 1000);
+    assert.ok(front.includes('#172d3d'), 'the winner can turn toward the camera for the award');
+  }
+});
+
+test('deck transfers land with both boots on the receiving floor instead of hanging below it', () => {
+  const seen = new Set();
+  for (const count of [2, 5, 10]) for (let seed = 0; seed < 16; seed++) {
+    const candidates = participants.slice(0, count), timeline = buildLadderTimeline(candidates, candidates.map(person => person.id).reverse(), 44_000, seed);
+    const geometry = createLadderGeometry(800, 600, count), read = time => ladderFrame(timeline, time, 0);
+    for (const bridge of timeline.bridges.filter(item => ['rotate', 'conveyor', 'portal'].includes(item.motionType))) {
+      seen.add(bridge.motionType);
+      const event = timeline.events.find(item => item.id === bridge.eventId), id = event?.actorId ?? bridge.actorIds[0];
+      const segment = timeline.paths[id].segments.find(item => item.bridgeId === bridge.id), duration = segment.end - segment.start;
+      const action = event?.action ?? segment.start + duration * .14, resolve = event?.resolve ?? segment.start + duration * .84;
+      const at = phase => {
+        const time = action + (resolve - action) * phase;
+        const actor = ladderArtActors(timeline, read(time), candidates, time, geometry, false, read).find(item => item.id === id);
+        return { actor, rig: sampleLadderRig(actor, geometry, time) };
+      };
+      const first = at(.90), later = at(.94);
+      assert.equal(first.actor.pose, 'balance');
+      assert.equal(first.actor.rungProgress, segment.toRow, 'the torso finishes above the receiving deck');
+      for (const side of [0, 1]) {
+        assert.ok(first.rig.footContact[side] && later.rig.footContact[side], 'both knees can reach the planted soles with the normal leg length');
+        assert.ok(Math.abs(first.rig.feet[side].y - geometry.rowY(segment.toRow)) < .001, 'the sole touches the actual receiving floor');
+        assert.ok(Math.hypot(first.rig.feet[side].x - later.rig.feet[side].x, first.rig.feet[side].y - later.rig.feet[side].y) < .001, 'the receiving floor holds each boot still while the arms recover');
+      }
+    }
+  }
+  assert.deepEqual([...seen].sort(), ['conveyor', 'portal', 'rotate']);
+});
+
+test('the treasure terrace is connected to tower columns and a lower foundation without floating terrain chunks', () => {
+  const geometry = createLadderGeometry(800, 600, 5), rectangles = [], polygons = [];
+  const context = new Proxy({ path: [] }, { get: (target, key) => {
+    if (key === 'createLinearGradient' || key === 'createRadialGradient') return () => ({ addColorStop() {} });
+    if (key === 'fillRect') return (...args) => rectangles.push(args);
+    if (key === 'beginPath') return () => { target.path = []; };
+    if (key === 'moveTo' || key === 'lineTo') return (x, y) => target.path.push([x, y]);
+    if (key === 'fill') return () => polygons.push([...target.path]);
+    return () => {};
+  }, set: (target, key, value) => { target[key] = value; return true; } });
+  drawLadderAdventure(context, geometry, [], 0, 1000, false, new Set());
+  const columns = rectangles.filter(([, y, width, height]) => y >= geometry.top && y < geometry.top + 10 * geometry.scale && width < 12 * geometry.scale && y + height > geometry.bottom);
+  assert.ok(columns.length >= 2, 'the same columns visibly reach from the terrace down to the base');
+  assert.ok(rectangles.some(([, y, width]) => y > geometry.bottom && width > geometry.right - geometry.left), 'all ladders share one lower foundation');
+  assert.ok(!polygons.some(points => points.length >= 3 && points.every(([, y]) => y > geometry.top + 10)), 'terrain pieces cannot float separately in the middle of the climbing course');
+});
 
 test('the rare adjacent-ladder dash preserves every assigned treasure and the arrival budget', () => {
   assert.equal(LADDER_ROOF_STEAL_CHANCE, .05);
@@ -305,8 +414,8 @@ test('nineteen readable event kinds vary independently of the destination draw',
       const partner = ladderFrame(timeline, event.resolve, 0).actors.find(actor => actor.id === event.partnerId);
       assert.equal(landed.lane, event.toLane);
       assert.equal(partner.lane, event.fromLane);
-      if (event.motion.type === 'pounce') assert.equal(landed.rungProgress, event.landingRow, 'the thrower keeps their feet planted after throwing');
-      else assert.ok(landed.rungProgress < event.landingRow, 'the caught body still needs to pull itself onto the target foot rung');
+      if (['pounce', 'rotate', 'conveyor', 'portal'].includes(event.motion.type)) assert.equal(landed.rungProgress, event.landingRow, 'a thrower or stationary receiving deck keeps the body above the target foot level');
+      else assert.ok(landed.rungProgress < event.landingRow, 'an airborne climber catches below the target foot rung before pulling up');
       assert.ok(partner.rungProgress < event.partnerLandingRow);
       for (const id of event.actors) {
         const segments = timeline.paths[id].segments, eventIndex = segments.findIndex(segment => segment.eventId === event.id);

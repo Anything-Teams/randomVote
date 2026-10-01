@@ -332,7 +332,8 @@ function transferFrame(timeline: LadderTimeline, segment: LadderPathSegment, ela
   const phase = clamp((elapsed - stageStart) / (stageEnd - stageStart), 0, 1), role = segment.transferRole ?? 'primary';
   const type = role === 'partner' ? bridge.partnerMotionType : bridge.motionType, landingRow = segment.toRow;
   const catchRow = Math.min(LADDER_RUNGS, landingRow + 2);
-  const catchRoot = landingRow - (type === 'drop' || type === 'slide' ? 1.2 : .8);
+  const airborne = ['drop', 'slide', 'swing', 'launch', 'pounce'].includes(type);
+  const catchRoot = landingRow - (type === 'drop' || type === 'slide' ? 1.2 : airborne ? .8 : 0);
   if (bridge.motionType === 'pounce') {
     const thrower = role === 'primary', actionPhase = stage === 'setup' ? 0 : stage === 'resolve' ? 1 : phase;
     const interactionStage: LadderInteraction['stage'] = actionPhase < .32 ? 'approach' : actionPhase < .48 ? 'grip' : actionPhase < .6 ? 'throw' : actionPhase < .9 ? 'flight' : 'catch';
@@ -384,7 +385,7 @@ function transferFrame(timeline: LadderTimeline, segment: LadderPathSegment, ela
     } else if (type === 'swing') row -= 4.6 * Math.sin(progress * Math.PI);
     else if (type === 'launch') row += 4.6 * Math.sin(progress * Math.PI);
     else if (type === 'rotate') row -= .7 * Math.sin(progress * Math.PI);
-    if (phase >= flightEnd && type !== 'drop' && type !== 'slide') pose = 'hang';
+    if (phase >= flightEnd && type !== 'drop' && type !== 'slide') pose = airborne ? 'hang' : 'balance';
   } else if (stage === 'resolve') {
     row = catchRoot + (landingRow - catchRoot) * smooth(phase);
     pose = 'clamber';

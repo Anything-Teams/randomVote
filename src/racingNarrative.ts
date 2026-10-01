@@ -13,7 +13,8 @@ export type RacingIncident = {
 };
 export type RacingStraightSwap = { aheadId: string; behindId: string; start: number; end: number };
 export type RacingStraightWave = { start: number; end: number; beforeOrder: string[]; swaps: RacingStraightSwap[] };
-export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[]; straight: { start: number; waves: RacingStraightWave[] } };
+export type RacingCourseChallenge = { id: string; kind: 'hay-jump' | 'puddle'; actorId: string; distance: number; encounter: number; outcome: 'clear' | 'clip' | 'slip'; impact: number; lowest: number; recovered: number; loss: number };
+export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[]; obstacles: RacingCourseChallenge[]; straight: { start: number; waves: RacingStraightWave[] } };
 export type RacingStanding = { id: string; distance: number; rank: number; finished: boolean; finishTime: number };
 export type RacingIncidentStatus = { stage: 'setup' | 'action' | 'outcome'; beforeRank: number; currentRank: number; afterRank: number; opponentIds: string[]; overtakenIds: string[]; passedByIds: string[]; nextRivalId?: string };
 export const RACING_STORIES: { kind: RacingIncidentKind; title: string; setup: string; action: string; outcome: string }[] = [
@@ -124,10 +125,12 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   }
   const finishStep = Math.min(240 * scale, 2000 / Math.max(1, ids.length - 1));
   const finishTimes = Object.fromEntries(finishOrder.map((id, rank) => [id, finish + rank * finishStep]));
-  return { start, finish, ids, finishOrder, finishTimes, knots: knots.sort((a, b) => a.at - b.at), incidents, straight: { start: straightStart, waves } };
+  const timeline: RacingTimeline = { start, finish, ids, finishOrder, finishTimes, knots: knots.sort((a, b) => a.at - b.at), incidents, obstacles: [], straight: { start: straightStart, waves } };
+  planCourseChallenges(timeline);
+  return timeline;
 }
 
-export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed: number): number {
+function plannedDistance(timeline: RacingTimeline, id: string, elapsed: number): number {
   if (!timeline.ids.includes(id) || elapsed <= timeline.start) return 0;
   if (elapsed >= timeline.finish) {
     const rank = timeline.finishOrder.indexOf(id), finishTime = timeline.finishTimes[id];
@@ -151,6 +154,67 @@ export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed
   const leftBase = clamp((left.at - timeline.start) / (timeline.finish - timeline.start));
   const rightBase = clamp((right.at - timeline.start) / (timeline.finish - timeline.start));
   return clamp(leftBase + (rightBase - leftBase) * amount + (left.distances[id] - leftBase) + ((right.distances[id] - rightBase) - (left.distances[id] - leftBase)) * smooth(amount));
+}
+
+/** A setback changes forward speed, holds the lost ground, then earns it back gradually. */
+function setbackLoss(elapsed: number, start: number, lowest: number, end: number, loss: number) {
+  if (elapsed <= start || elapsed >= end) return 0;
+  return loss * (elapsed < lowest ? smooth((elapsed - start) / (lowest - start)) : 1 - smooth((elapsed - lowest) / (end - lowest)));
+}
+
+export function racingIncidentSetback(incident: RacingIncident, id: string, elapsed: number) {
+  const duration = incident.end - incident.start, actor = id === incident.actorId;
+  if (!actor && id !== incident.rivalId) return 0;
+  const defensive = ['blocked', 'inside', 'outside', 'draft', 'patience', 'lead-change', 'rail', 'chase', 'last-kick'].includes(incident.kind);
+  if (actor && defensive) return setbackLoss(elapsed, incident.start + duration * .18, incident.start + duration * .38, incident.end, incident.kind === 'blocked' ? .013 : .009);
+  if (!actor && defensive) return setbackLoss(elapsed, incident.start + duration * .40, incident.start + duration * .64, incident.end, .004);
+  return 0;
+}
+
+export function racingObstacleLoss(obstacle: RacingCourseChallenge, elapsed: number) {
+  return setbackLoss(elapsed, obstacle.impact, obstacle.lowest, obstacle.recovered, obstacle.loss);
+}
+
+export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed: number): number {
+  if (elapsed >= timeline.straight.start) return plannedDistance(timeline, id, elapsed);
+  const lost = timeline.incidents.reduce((sum, incident) => sum + racingIncidentSetback(incident, id, elapsed), 0)
+    + timeline.obstacles.filter(obstacle => obstacle.actorId === id).reduce((sum, obstacle) => sum + racingObstacleLoss(obstacle, elapsed), 0);
+  return clamp(plannedDistance(timeline, id, elapsed) - lost);
+}
+
+/** Build immutable course locations before playback; later reads cannot move an obstacle. */
+function planCourseChallenges(timeline: RacingTimeline) {
+  if (!timeline.ids.length) return;
+  const hash = timeline.incidents.map(item => item.kind + item.actorId).join('|').split('').reduce((value, letter) => (value * 31 + letter.charCodeAt(0)) >>> 0, 7);
+  const scale = (timeline.finish - timeline.start) / 33_500, first = timeline.incidents[0];
+  const firstIsObstacle = first?.kind === 'hay-jump' || first?.kind === 'puddle', small = timeline.ids.length <= 3;
+  const encounters = [first ? small && !firstIsObstacle ? first.end + 350 * scale : first.start + (first.end - first.start) * .6 : timeline.start + 7750 * scale,
+    small && timeline.incidents[1] ? timeline.incidents[1].end + 350 * scale : timeline.start + 16_500 * scale,
+    timeline.start + 25_300 * scale];
+  const firstKind: RacingCourseChallenge['kind'] = first?.kind === 'hay-jump' || first?.kind === 'puddle' ? first.kind : hash % 2 ? 'puddle' : 'hay-jump';
+  let previousActor = '';
+  for (const [index, encounter] of encounters.entries()) {
+    const story = timeline.incidents.find(item => encounter >= item.start && encounter <= item.end);
+    const quiet = timeline.ids.filter(id => id !== previousActor && id !== story?.actorId && id !== story?.rivalId);
+    const available = quiet.length ? quiet : timeline.ids.filter(id => id !== previousActor);
+    const ranked = racingStandings(timeline, encounter).filter(item => available.includes(item.id));
+    const actorId = index === 0 && firstIsObstacle ? first.actorId : ranked[0]?.id ?? timeline.ids[0];
+    const kind: RacingCourseChallenge['kind'] = index === 0 ? firstKind : index === 1 ? firstKind === 'puddle' ? 'hay-jump' : 'puddle' : hash % 2 ? 'hay-jump' : 'puddle';
+    const failed = index === 0 ? hash % 3 !== 0 : index === 1 ? hash % 3 !== 1 : false;
+    const outcome = failed ? kind === 'hay-jump' ? 'clip' : 'slip' : 'clear';
+    const distance = readRacingDistance(timeline, actorId, encounter);
+    // The front feet trail the nose. Resolve the physical contact from course progress.
+    let left = encounter, right = Math.min(timeline.straight.start - 1, encounter + 1800 * scale);
+    for (let iteration = 0; iteration < 32; iteration++) {
+      const middle = (left + right) / 2, field = timeline.ids.map(id => readRacingDistance(timeline, id, middle));
+      const span = Math.max(.067, (Math.max(...field) - Math.min(...field)) * 1.35 + .016);
+      if (readRacingDistance(timeline, actorId, middle) < distance + span * .0718) left = middle; else right = middle;
+    }
+    const impact = (left + right) / 2, lowest = impact + (failed ? 1100 : 350) * scale;
+    const recovered = failed ? Math.min(timeline.straight.start, impact + 3500 * scale) : impact + 1000 * scale;
+    timeline.obstacles.push({ id: actorId + ':' + encounter, kind, actorId, distance, encounter, outcome, impact, lowest, recovered, loss: failed ? kind === 'hay-jump' ? .014 : .0125 : 0 });
+    previousActor = actorId;
+  }
 }
 
 export function racerFinishTime(timeline: RacingTimeline, id: string): number {
@@ -177,13 +241,14 @@ export function racingStandings(timeline: RacingTimeline, elapsed: number): Raci
 
 export function racingIncidentStatus(timeline: RacingTimeline, incident: RacingIncident, elapsed: number): RacingIncidentStatus {
   const standings = racingStandings(timeline, elapsed), currentOrder = standings.map(standing => standing.id);
-  const before = incident.beforeOrder.indexOf(incident.actorId), after = incident.afterOrder.indexOf(incident.actorId), current = currentOrder.indexOf(incident.actorId);
-  const losing = after > before;
-  const opponentIds = losing ? incident.beforeOrder.slice(before + 1, after + 1) : incident.beforeOrder.slice(after, before).reverse();
-  const overtakenIds = losing ? [] : opponentIds.filter(id => currentOrder.indexOf(id) > current);
-  const passedByIds = losing ? opponentIds.filter(id => currentOrder.indexOf(id) < current) : [];
-  const crossed = new Set(losing ? passedByIds : overtakenIds);
-  return { stage: racingIncidentStage(incident, elapsed), beforeRank: before + 1, currentRank: current + 1, afterRank: after + 1, opponentIds, overtakenIds, passedByIds, nextRivalId: opponentIds.find(id => !crossed.has(id)) };
+  const beforeOrder = racingStandings(timeline, incident.start).map(standing => standing.id), afterOrder = racingStandings(timeline, incident.end).map(standing => standing.id);
+  const before = beforeOrder.indexOf(incident.actorId), after = afterOrder.indexOf(incident.actorId), current = currentOrder.indexOf(incident.actorId);
+  const overtakenIds = beforeOrder.filter((id, rank) => rank < before && currentOrder.indexOf(id) > current).reverse();
+  const passedByIds = beforeOrder.filter((id, rank) => rank > before && currentOrder.indexOf(id) < current);
+  const expected = beforeOrder.filter((id, rank) => id !== incident.actorId && (rank < before) !== (afterOrder.indexOf(id) < after));
+  const opponentIds = [...new Set([...expected, ...overtakenIds, ...passedByIds])];
+  const crossed = new Set([...overtakenIds, ...passedByIds]), plannedStage = racingIncidentStage(incident, elapsed);
+  return { stage: plannedStage === 'outcome' && current !== after ? 'action' : plannedStage, beforeRank: before + 1, currentRank: current + 1, afterRank: after + 1, opponentIds, overtakenIds, passedByIds, nextRivalId: expected.find(id => !crossed.has(id)) ?? (plannedStage !== 'outcome' ? incident.rivalId : undefined) };
 }
 
 export function activeRacingIncident(timeline: RacingTimeline, elapsed: number) { return timeline.incidents.find(incident => elapsed >= incident.start && elapsed < incident.end); }

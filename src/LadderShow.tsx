@@ -12,12 +12,14 @@ const poseNames = { idle: '준비', climb: '오르는 중', run: '보물로 달�
 const deviceNames = { slide: '미끄럼 통로', swing: '줄타기', launch: '공중 점프', drop: '옆줄 추락·붙잡기', pounce: '뛰어들어 던지기', rotate: '회전 발판', conveyor: '이동 벨트', portal: '열리는 연결다리' };
 const interactionNames = { approach: '옆줄로 뛰어들기', grip: '상대를 붙잡기', throw: '들어 던지기', flight: '옆줄로 던져짐', catch: '손끝으로 버티기' };
 const contactBeats: Partial<Record<LadderActiveEvent['kind'], string>> = { 'loose-rung': '발판이 돌아간다!', trapdoor: '발판이 열렸다!', wind: '바람이 밀어낸다!', pendulum: '추가 다리를 돌린다!', spring: '발판을 눌렀다!', bird: '새가 문을 열었다!', paint: '페인트가 쏟아졌다!', sticky: '손잡이가 움직인다!', 'rope-tangle': '안전줄을 붙잡았다!', balloon: '풍선이 몸을 띄운다!', 'false-sign': '옆 통로가 열렸다!', bucket: '물이 쏟아졌다!', banana: '발이 미끄러졌다!', zipline: '손잡이를 잡았다!', 'lights-out': '불이 꺼졌다!', 'safety-net': '그물이 튕겨낸다!', 'leap-grapple': '옆줄로 뛰어들어!', 'crumbling-step': '발판이 무너진다!', 'rocket-boots': '부츠가 점화됐다!' };
+const standsOnDeck = (actor: LadderActorFrame | undefined) => ['rotate', 'conveyor', 'portal'].includes(actor?.motionType ?? '');
 function actorStatus(actor: LadderActorFrame | undefined, preview?: boolean) {
   if (actor?.winner) return '당첨';
   if (actor?.arrived) return `${actor.doorLane! + 1}번 상자`;
   if (preview) return '준비';
   if (actor?.eventStage === 'setup') return '오르는 중';
-  if (actor?.eventStage === 'resolve') return actor.interaction?.role === 'thrower' ? '새 줄에 발 딛기' : '붙잡고 올라가기';
+  if (actor?.eventStage === 'resolve') return standsOnDeck(actor) ? '발 딛고 다시 오르기' : actor.interaction?.role === 'thrower' ? '새 줄에 발 딛기' : '붙잡고 올라가기';
+  if (actor?.transferStage === 'catch' && standsOnDeck(actor)) return '새 줄에 두 발 딛기';
   const action = actor?.interaction;
   if (!action) return poseNames[actor?.pose ?? 'idle'];
   if (action.role === 'thrower' && action.stage === 'flight') return '던지고 발 딛기';
@@ -34,7 +36,7 @@ function storyDetail(story: LadderActiveEvent, actor: LadderActorFrame | undefin
     if (actor?.interaction?.stage === 'throw' && person && partner) return `${person.name}님이 ${partner.name}님을 반대편 사다리 쪽으로 들어 던집니다!`;
     if (actor?.interaction?.stage === 'flight' && partner) return `${partner.name}님이 옆줄로 떨어집니다. 손잡이를 향해 손을 뻗습니다!`;
   }
-  if (catching) return '손끝이 닿았다! 흔들리는 몸을 버티고 발판을 찾아야 합니다.';
+  if (catching) return standsOnDeck(actor) ? '새 줄의 받침대에 두 발을 딛었습니다. 다음 손잡이를 잡고 다시 올라갑니다!' : '손끝이 닿았다! 흔들리는 몸을 버티고 발판을 찾아야 합니다.';
   return story.stage === 'setup' ? story.setupText : story.stage === 'action' ? story.actionText : story.recoveryText;
 }
 function storyAt(event: LadderTimeline['events'][number], elapsed: number): LadderActiveEvent {
@@ -137,9 +139,10 @@ export default function LadderShow(props: LadderShowProps) {
   const crossing = frame?.actors.find(actor => actor.id === story?.actorId && actor.motionType && actor.eventStage !== 'setup') ?? frame?.actors.find(actor => actor.motionType && actor.eventStage !== 'setup');
   const spotlight = frame?.actors.find(actor => actor.id === story?.actorId);
   const interaction = spotlight?.interaction, grapple = story?.kind === 'leap-grapple';
+  const deckLanding = standsOnDeck(spotlight);
   const storyBeat = !story || props.elapsed >= story.end ? undefined : story.stage === 'setup' || story.stage === 'action' && story.phase < .13 ? 'takeoff' : story.stage === 'resolve' ? 'pull' : interaction?.stage === 'grip' || interaction?.stage === 'throw' || interaction?.stage === 'flight' ? 'grip' : interaction?.stage === 'catch' || spotlight?.transferStage === 'catch' ? 'catch' : 'flight';
   const flightLabel = grapple ? interaction?.stage === 'flight' ? '옆줄로 던져졌다!' : '옆줄로 뛰어들어!' : story?.kind === 'wind' ? '바람에 날려!' : story?.motion.type === 'launch' ? '도약!' : story?.motion.type === 'swing' ? '줄을 타고!' : story?.motion.type === 'drop' ? '손을 뻗어!' : '옆줄로!';
-  const beatLabel = storyBeat === 'takeoff' ? (story ? contactBeats[story.kind] : undefined) ?? '발판을 딛고' : storyBeat === 'flight' ? flightLabel : storyBeat === 'grip' ? interaction?.stage === 'flight' ? '옆줄로 던져졌다!' : interaction?.stage === 'throw' ? '들어 던지기!' : '상대를 붙잡았다!' : storyBeat === 'catch' ? '손끝으로 버티기' : storyBeat === 'pull' ? '몸을 끌어올려!' : undefined;
+  const beatLabel = storyBeat === 'takeoff' ? (story ? contactBeats[story.kind] : undefined) ?? '발판을 딛고' : storyBeat === 'flight' ? flightLabel : storyBeat === 'grip' ? interaction?.stage === 'flight' ? '옆줄로 던져졌다!' : interaction?.stage === 'throw' ? '들어 던지기!' : '상대를 붙잡았다!' : storyBeat === 'catch' ? deckLanding ? '새 줄에 두 발 딛기' : '손끝으로 버티기' : storyBeat === 'pull' ? deckLanding ? '다시 위로 올라!' : '몸을 끌어올려!' : undefined;
   const partner = props.candidates.find(candidate => candidate.id === story?.partnerId);
   const pastStories = props.preview ? [] : timeline?.events.filter(event => props.elapsed >= event.action).slice(-3) ?? [];
   const roofRunner = !props.preview && timeline?.roofFinish && props.elapsed >= timeline.roofFinish.runStart && props.elapsed < timeline.roofFinish.claimAt ? props.candidates.find(candidate => candidate.id === timeline.roofFinish!.actorId) : undefined;
