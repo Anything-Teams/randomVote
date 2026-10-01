@@ -139,7 +139,7 @@ test('catching and outside shoves occur in elimination stories with only living 
 });
 
 test('a two-person final also offers a catch and throw without adding a third attacker', () => {
-  const order = ['2', '1'];
+  const order = ['1', '7'];
   const round = arenaRounds(order).at(-1);
   assert.equal(round.tactic, 'catch');
   assert.equal(round.helper, undefined);
@@ -147,7 +147,7 @@ test('a two-person final also offers a catch and throw without adding a third at
   assert.deepEqual(action.actors.map(part => part.id), order);
   assert.deepEqual(action.attackers, [order[0]]);
   assert.ok(action.lift > 40);
-  assert.deepEqual(arenaRanks(order, round.resolve), { 2: 1, 1: 2 });
+  assert.deepEqual(arenaRanks(order, round.resolve), { 1: 1, 7: 2 });
 });
 
 test('up and down steps keep knees compact and both trouser cuffs connected to the pelvis', () => {

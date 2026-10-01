@@ -32,11 +32,11 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
   const leader = props.candidates.find(candidate => candidate.id === standings[0]?.id), incident = phase === 'race' ? displayedIncident(timeline, elapsed) : undefined;
   const template = RACING_STORIES.find(story => story.kind === incident?.kind), actor = props.candidates.find(candidate => candidate.id === incident?.actorId);
   const names: Record<RacePhase, [string, string, string]> = {
-    preview: ['출발선에 모이는 경주마', '번호와 기수의 색으로 내 말을 따라가세요. 모두 같은 출발선에서 한 바퀴를 달립니다.', 'STARTING GATE'],
-    paddock: ['출발선 · 마지막 준비', '말들이 같은 출발선의 게이트에 입장합니다. 기수가 고삐와 등자를 확인합니다.', 'GATE LOADING'],
-    countdown: ['게이트 오픈 직전', '나란히 준비했습니다. 문이 열리면 한꺼번에 출발합니다.', 'STARTING GATE'],
+    preview: ['출발선에 모이는 경주마', '번호와 기수의 색으로 내 말을 따라가세요. 안쪽은 뒤에서, 바깥쪽은 앞에서 같은 거리를 달립니다.', 'STARTING GATE'],
+    paddock: ['출발선 · 마지막 준비', '코너 안쪽은 뒤에, 바깥쪽은 앞에 있는 게이트에 입장합니다. 기수가 고삐와 등자를 확인합니다.', 'GATE LOADING'],
+    countdown: ['게이트 오픈 직전', '코너의 거리 차이를 맞춰 준비했습니다. 문이 열리면 한꺼번에 출발합니다.', 'STARTING GATE'],
     race: [(leader?.name ?? '') + ' · 현재 선두', '현장 중계로 선두와 추격마의 실제 간격을 보세요. 우측 상단 지도에서 전체 위치를 확인할 수 있습니다.', 'LIVE RACE'],
-    straight: ['마지막 직선 · 끝까지 추격', '선두 세 말이 같은 화면에서 달립니다. 코끝이 결승선을 지나는 순간까지 순위가 바뀝니다.', 'FINAL STRAIGHT'],
+    straight: ['마지막 직선 · 끝까지 추격', '선두와 가까운 추격마가 화면에서 달립니다. 코끝이 결승선을 지나는 순간까지 순위가 바뀝니다.', 'FINAL STRAIGHT'],
     photo: ['결승선 통과 · 사진 판정', '말들이 도착 순서대로 결승선을 통과합니다. 통과한 말도 앞으로 달리며 속도를 줄입니다.', 'PHOTO FINISH'],
     winner: [(leader?.name ?? '오늘의 말') + ' · 우승 확정', '전원 한 바퀴 완주. 말은 천천히 멈추고 기수가 한 손을 들어 인사합니다.', 'WINNER’S CIRCLE'],
   };
@@ -101,7 +101,16 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
     badge = status.stage === 'stunned' ? '기수 일시 기절 · 실제 감속' : status.stage === 'chase' ? '회복 · 재추격' : kick ? '뒷발차기 견제' : '모래주머니 투척';
     focusId = elapsed < trick.impact ? trick.actorId : trick.targetId;
   }
-  const trackedId = focusId ?? leader?.id, pace = trackedId ? (readRacingTravel(timeline, trackedId, elapsed + 100) - readRacingTravel(timeline, trackedId, elapsed)) * 335 : 1;
+  const late = timeline.lateFall;
+  if (late && elapsed >= late.impact - 450 && elapsed < timeline.finishTimes[late.actorId]) {
+    const name = props.candidates.find(candidate => candidate.id === late.actorId)?.name ?? '경주마';
+    const rank = standings.find(item => item.id === late.actorId)?.rank;
+    headline = name + ' · ' + (elapsed < late.impact ? '결승선 앞 마지막 경합' : elapsed < late.lowest ? '결승선 앞에서 발이 꼬였습니다!' : '몸을 일으켜 결승선으로');
+    detail = '현재 ' + rank + '위. ' + (elapsed < late.impact ? '바로 앞 결승선까지 나란히 달립니다. 마지막 한 걸음까지 긴장을 놓을 수 없습니다.' : elapsed < late.lowest ? '앞발이 접히고 몸이 앞으로 고꾸라집니다. 멈춘 사이 뒤의 말들이 결승선을 향해 지나갑니다.' : '기수가 고삐를 모으고 다시 출발합니다. 잃은 거리를 달려 마지막으로 결승선을 통과합니다.');
+    badge = elapsed < late.impact ? '결승선 앞 경합' : '막판 발걸림 · 실제 감속'; focusId = late.actorId;
+  }
+  const trackedId = [...timeline.ids].sort((a, b) => readRacingTravel(timeline, b, elapsed) - readRacingTravel(timeline, a, elapsed))[0];
+  const pace = trackedId ? (readRacingTravel(timeline, trackedId, elapsed + 100) - readRacingTravel(timeline, trackedId, elapsed)) * 335 : 1;
   return { phase, standings, headline, detail, focusId, badge, progress: Math.max(0, ...standings.map(standing => standing.distance)), speed: phase === 'race' || phase === 'straight' ? Math.round(clamp(56 * pace, 0, 100)) : 0 };
 }
 function horseTag(ctx: CanvasRenderingContext2D, name: string, color: string, x: number, y: number, canvasWidth: number, canvasHeight: number, compact: boolean) {
@@ -127,7 +136,8 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
   const motions = new Map(locations.map(item => {
     const own = obstacles.filter(obstacle => obstacle.actorId === item.id);
     const jump = reduced ? 0 : Math.max(0, ...own.map(obstacle => racingObstacleJump(obstacle, item)));
-    const obstacleMotion = own.reduce<RaceHorseMotion>((motion, obstacle) => ({ ...motion, ...racingObstacleMotion(obstacle, elapsed, reduced) }), {});
+    const late = timeline.lateFall?.actorId === item.id ? racingObstacleMotion(timeline.lateFall, elapsed, reduced) : {};
+    const obstacleMotion = own.reduce<RaceHorseMotion>((motion, obstacle) => ({ ...motion, ...racingObstacleMotion(obstacle, elapsed, reduced) }), late);
     return [item.id, combineRacingHorseMotion(racingIncidentMotion(incident, item.id, elapsed, reduced), racingTrickMotion(trick, item.id, elapsed, locations, reduced), obstacleMotion, { jump: jump * (1 - (obstacleMotion.fall ?? 0)) })];
   }));
   const physicalLocations = locations.map(item => {
@@ -150,7 +160,7 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
     if (phase === 'photo') raceLabel(ctx, 'FINISH · 실제 통과 순서', 14, h * .37, clamp(w / 65, 8, 13), '#f2ddb0');
   }
   // Names belong behind every horse and rider, including when two opponents overlap.
-  locations.forEach(item => horseTag(ctx, props.candidates[item.index].name, props.candidates[item.index].color, item.x, item.y - (motions.get(item.id)?.jump ?? 0) * 24 * item.scale, w, h, w < 520 || h < 250));
+  locations.filter(item => item.x + 62 * item.scale >= 0 && item.x - 58 * item.scale <= w).forEach(item => horseTag(ctx, props.candidates[item.index].name, props.candidates[item.index].color, item.x, item.y - (motions.get(item.id)?.jump ?? 0) * 24 * item.scale, w, h, w < 520 || h < 250));
   drawRacingIncidentEffects(ctx, incident, locations, elapsed, reduced, 'ground');
   const groundObjects = [...obstacles].sort((a, b) => a.y - b.y);
   let nextGroundObject = 0;

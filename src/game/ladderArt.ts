@@ -57,11 +57,11 @@ function reachable(origin: Point, target: Point, length: number): Point {
   const ratio = Math.min(1, length / Math.max(.01, Math.hypot(target.x - origin.x, target.y - origin.y)));
   return { x: mix(origin.x, target.x, ratio), y: mix(origin.y, target.y, ratio) };
 }
-function armJoint(shoulder: Point, hand: Point, side: number, facing: number, scale: number): Point {
+function armJoint(shoulder: Point, hand: Point, side: number, facing: number, scale: number, running = 0): Point {
   // Raised arms fold away from the head. As an arm turns through the shoulder's
   // height its elbow moves through depth, avoiding a sudden IK branch flip.
   const raised = clamp((hand.y - shoulder.y) / (4 * scale), -1, 1);
-  return joint(shoulder, hand, ARM_LENGTH * scale, ARM_LENGTH * scale, (side ? 1 : -1) * facing * raised);
+  return joint(shoulder, hand, ARM_LENGTH * scale, ARM_LENGTH * scale, mix((side ? 1 : -1) * facing * raised, -facing, running));
 }
 function rectangle(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string) { ctx.fillStyle = color; ctx.fillRect(x, y, w, h); }
 function line(ctx: CanvasRenderingContext2D, a: Point, b: Point, width: number, color: string) {
@@ -361,7 +361,15 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
     }) as [Point, Point];
     const drive = Math.sin(motorDistance / stride * Math.PI * 2), effort = Math.sin(actor.phase * Math.PI);
     hip = { x: .65 * effort, y: -11.3 + Math.abs(drive) * .25 };
-    hands = [{ x: -7 + drive * 3.2, y: -19 - drive }, { x: 7 - drive * 3.2, y: -19 + drive }];
+    hands = [0, 1].map(side => {
+      // The upper arm swings from the shoulder; the bent forearm follows it.
+      // Opposite arms and legs share the distance-driven stride, including
+      // acceleration and braking, rather than translating two rigid wrists.
+      const upper = -.12 + (side ? 1 : -1) * drive * .62 * (.35 + effort * .65);
+      const forearm = upper + 1.72 + drive * (side ? 1 : -1) * .08;
+      const shoulder = { x: hip.x + (side ? 4.2 : -4.2), y: hip.y - 10 };
+      return { x: shoulder.x + ARM_LENGTH * (Math.sin(upper) + Math.sin(forearm)), y: shoulder.y + ARM_LENGTH * (Math.cos(upper) + Math.cos(forearm)) };
+    }) as [Point, Point];
     angle = .07 * effort * facing;
   } else if (actor.pose === 'bridge') {
     const distance = Math.abs(actor.lane - (actor.fromLane ?? actor.lane)) * geometry.laneGap / scale;
@@ -485,7 +493,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
     if (Math.hypot(target.x - point.x, target.y - point.y) > .001) footContact[side] = false;
     return target;
   }) as [Point, Point];
-  const elbows = handsReached.map((point, side) => armJoint(shoulders[side], point, side, facing, scale)) as [Point, Point];
+  const elbows = handsReached.map((point, side) => armJoint(shoulders[side], point, side, facing, scale, actor.pose === 'run' ? 1 : 0)) as [Point, Point];
   const knees = footWorld.map((point, side) => joint(legRoots[side], point, LEG_LENGTH * scale, LEG_LENGTH * scale, legPole(actor, side, facing))) as [Point, Point];
   return { hip: hipWorld, legRoots, shoulders, elbows, hands: handsReached, knees, feet: footWorld, head: toWorld({ x: hip.x, y: hip.y - 17.5 }), angle, facing, scale, handContact, footContact };
 }
@@ -508,7 +516,8 @@ export function sampleLadderRig(actor: LadderArtActor, geometry: LadderGeometry,
     return reachable(legRoots[index], foot, LEG_REACH * current.scale);
   }) as [Point, Point];
   const elbowFacing = mix(previous.facing, current.facing, p);
-  const elbows = hands.map((point, index) => armJoint(shoulders[index], point, index, elbowFacing, current.scale)) as [Point, Point];
+  const running = mix(transition.from.pose === 'run' ? 1 : 0, actor.pose === 'run' ? 1 : 0, p);
+  const elbows = hands.map((point, index) => armJoint(shoulders[index], point, index, elbowFacing, current.scale, running)) as [Point, Point];
   const knees = feet.map((point, index) => joint(legRoots[index], point, LEG_LENGTH * current.scale, LEG_LENGTH * current.scale, mix(legPole(transition.from, index, previous.facing), legPole(actor, index, current.facing), p))) as [Point, Point];
   const same = (a: Point, b: Point) => Math.hypot(a.x + transition.shift.x - b.x, a.y + transition.shift.y - b.y) < .001;
   return { ...current, hip, legRoots, head, angle, shoulders, hands, elbows, knees, feet, handContact: current.handContact.map((contact, index) => contact && (fixedHand[index] || same(previous.hands[side(index)], current.hands[index]))) as [boolean, boolean], footContact: current.footContact.map((contact, index) => contact && same(previous.feet[side(index)], current.feet[index])) as [boolean, boolean] };

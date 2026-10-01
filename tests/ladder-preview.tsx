@@ -41,7 +41,7 @@ function Preview() {
     id: String(index + 1), color,
     name: longNames ? index === 0 ? '가나다라마바사아자차카타파하다라' : index === 6 ? 'WWWWWWWWWWWWWWWW' : `이름이아주긴참가자${String(index + 1).padStart(2, '0')}번` : `참가자 ${index + 1}`,
   })), [count, longNames]);
-  const order = useMemo(() => inputOrderArrival ? candidates.map(candidate => candidate.id) : doorOrder.filter(id => Number(id) <= count), [count, candidates, inputOrderArrival]);
+  const order = useMemo(() => inputOrderArrival ? candidates.map(candidate => candidate.id) : count === 2 ? ['2', '1'] : doorOrder.filter(id => Number(id) <= count), [count, candidates, inputOrderArrival]);
   const selectTarget = (lane: number) => {
     setTargetLane(Math.max(0, Math.min(count - 1, lane))); setPlaying(false); setPreview(true); setElapsed(0); setRunId(id => id + 1);
   };
@@ -71,7 +71,7 @@ function Preview() {
       {[0, 5, 12, 20, 28, 36, 40, 44].map(second => <button type="button" key={second} onClick={() => seek(second * 1000)}>{second}초</button>)}
       <button type="button" onClick={togglePlay}>{playing ? '정지' : '재생'}</button>
       <button type="button" onClick={() => { setPreview(false); setElapsed(0); setPlaying(true); setRunId(id => id + 1); }}>처음부터</button>
-      <button type="button" onClick={() => { setCount(5); setLongNames(false); setInputOrderArrival(false); setTargetLane(0); setStorySeed(4); setPreview(false); setElapsed(38_000); setPlaying(false); setRunId(id => id + 1); }}>희귀 보물 쟁탈</button>
+      <button type="button" onClick={() => { setCount(2); setLongNames(false); setInputOrderArrival(false); setTargetLane(0); setStorySeed(439); setPreview(false); setElapsed(37_400); setPlaying(false); setRunId(id => id + 1); }}>희귀 보물 쟁탈</button>
     </nav>
     <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, flex: 'none' }}>
       <output style={{ minWidth: 39 }}>{(elapsed / 1000).toFixed(1)}초</output>

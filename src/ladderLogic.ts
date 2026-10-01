@@ -1,6 +1,7 @@
 import type { Candidate } from './election';
 
 export const LADDER_DURATION = 44_000;
+export const LADDER_START_DELAY = 900;
 export const LADDER_RUNGS = 24;
 export const LADDER_ROOF_STEAL_CHANCE = .05;
 export type LadderEventKind = 'loose-rung' | 'trapdoor' | 'wind' | 'pendulum' | 'spring' | 'bird' | 'paint' | 'sticky' | 'rope-tangle' | 'balloon' | 'false-sign' | 'bucket' | 'banana' | 'zipline' | 'lights-out' | 'safety-net' | 'leap-grapple' | 'crumbling-step' | 'rocket-boots';
@@ -93,7 +94,7 @@ export function ladderActionPhase(type: LadderMotionType, value: number) {
   return t;
 }
 
-export const ladderLeapHeight = (fromRow: number) => Math.min(3.2, Math.max(.9, LADDER_RUNGS + .6 - fromRow));
+export const ladderLeapHeight = (fromRow: number) => Math.min(2.4, Math.max(.9, LADDER_RUNGS + .6 - fromRow));
 
 /** Destinations are already uniformly drawn. Every route change below conserves that draw. */
 function buildLadderPlan(candidates: readonly Candidate[], order: readonly string[], duration = LADDER_DURATION, storySeed = 1, finishTarget?: number, pounceTarget?: { bridgeId: string; eventIndex?: number }): LadderTimeline {
@@ -122,11 +123,7 @@ function buildLadderPlan(candidates: readonly Candidate[], order: readonly strin
   const addWave = (lanes: number[]) => addPairs(lanes.map(left => [left, left + 1]));
   // Everyone takes at least two real crossings; sorting continues from this weave.
   if (laneCount > 1) {
-    if (laneCount > 2) {
-      const distance = 2 + Math.floor(random() * (laneCount - 2)), left = Math.floor(random() * (laneCount - distance));
-      addPairs([[left, left + distance]]);
-    }
-    for (const parity of [0, 1, 0]) addWave(Array.from({ length: Math.floor((laneCount - parity) / 2) }, (_, index) => parity + index * 2));
+    for (const parity of [0, 1, 0, 1]) addWave(Array.from({ length: Math.floor((laneCount - parity) / 2) }, (_, index) => parity + index * 2));
     if (laneCount === 2) { addWave([0]); addWave([0]); }
     const ranks = new Map(ladderOrder.map((id, index) => [id, index]));
     for (let pass = 0; pass < laneCount; pass++) {
@@ -197,9 +194,9 @@ function buildLadderPlan(candidates: readonly Candidate[], order: readonly strin
     previousDrop = Math.max(0, ...timeline.bridges.filter(bridge => wave.bridgeIds.includes(bridge.id)).map(bridge => bridge.fromRow - Math.min(bridge.landingRow, bridge.partnerLandingRow)));
     return weight;
   });
-  const totalWeight = climbWeights.reduce((sum, weight) => sum + weight, 0), climbPerRow = totalWeight ? (lastWaveEnd - 3000 * unit - transferBudget) / totalWeight : 0;
+  const totalWeight = climbWeights.reduce((sum, weight) => sum + weight, 0), climbPerRow = totalWeight ? (lastWaveEnd - LADDER_START_DELAY * unit - transferBudget) / totalWeight : 0;
   if (climbPerRow < 0) throw new Error('Ladder transfers exceed the route time budget');
-  let cursor = 3000 * unit;
+  let cursor = LADDER_START_DELAY * unit;
   for (const wave of timeline.waves) {
     wave.start = cursor + climbWeights[wave.index] * climbPerRow; wave.end = wave.start + waveDuration(wave);
     for (const bridge of timeline.bridges.filter(item => wave.bridgeIds.includes(item.id))) {
@@ -257,7 +254,7 @@ function buildLadderPlan(candidates: readonly Candidate[], order: readonly strin
     const times = new Map<string, { start: number; end: number }>();
     for (const pairs of pairOrders) {
       const firingTimes: { start: number; action: number }[] = [];
-      const earliest = (bridge: LadderBridge) => Math.max(...dependencies.get(bridge.id)!.map(dependency => (dependency.previous ? times.get(dependency.previous)!.end : (3000 + ids.indexOf(dependency.id) % 4 * 45) * unit) + dependency.gap * climbScale));
+      const earliest = (bridge: LadderBridge) => Math.max(...dependencies.get(bridge.id)!.map(dependency => (dependency.previous ? times.get(dependency.previous)!.end : (LADDER_START_DELAY + ids.indexOf(dependency.id) % 4 * 45) * unit) + dependency.gap * climbScale));
       const ordered = strategy === 1 ? [...pairs].sort((a, b) => earliest(a) - earliest(b)) : strategy === 2 ? [...pairs].sort((a, b) => earliest(b) + remainingWork.get(b.id)! - earliest(a) - remainingWork.get(a.id)!) : strategy === 3 ? [...pairs].reverse() : pairs;
       for (const bridge of ordered) {
         let start = earliest(bridge);
@@ -276,7 +273,7 @@ function buildLadderPlan(candidates: readonly Candidate[], order: readonly strin
     }
     // Reserve the final hand-over-hand climb before filling the device budget.
     // Actors that leave their last device lower down need to depart sooner.
-    return { times, end: Math.max(3000 * unit, ...[...times].map(([id, time]) => time.end + Math.max(0, (finalClimbTails.get(id) ?? 0) - arrivalHeadroom))) };
+    return { times, end: Math.max(LADDER_START_DELAY * unit, ...[...times].map(([id, time]) => time.end + Math.max(0, (finalClimbTails.get(id) ?? 0) - arrivalHeadroom))) };
   };
   let strategy = 0;
   if (schedule(1).end > lastWaveEnd + .01) {
@@ -302,7 +299,7 @@ function buildLadderPlan(candidates: readonly Candidate[], order: readonly strin
     wave.start = Math.min(...pairs.map(bridge => bridge.start)); wave.end = Math.max(...pairs.map(bridge => bridge.end));
   }
   for (let index = 0; index < laneCount; index++) {
-    const id = ids[index], startAt = (3000 + index % 4 * 45) * unit;
+    const id = ids[index], startAt = (LADDER_START_DELAY + index % 4 * 45) * unit;
     const ownBridges = timeline.bridges.filter(item => item.actorIds.includes(id)), last = ownBridges.at(-1);
     const finalClimbMinimum = last ? Math.max(600 * unit, (LADDER_RUNGS - landingFor(last, id)) * 300 * unit) : 0, runDuration = roofDuration(id);
     const ordinaryArrival = (39_500 + random() * 1700) * unit;
@@ -338,25 +335,11 @@ function buildLadderPlan(candidates: readonly Candidate[], order: readonly strin
     bridge.partnerMotionType = bridge.motionType === 'launch' ? difference > 1.8 ? 'launch' : 'swing'
       : bridge.motionType === 'swing' ? difference < -1.8 ? 'swing' : 'launch'
       : ['drop', 'slide'].includes(bridge.motionType) ? source < (bridge.fromRow + bridge.landingRow - 1.2) / 2 ? 'swing' : 'launch'
-      : difference < -1.8 ? 'swing' : 'launch';
+      : difference < -.4 ? 'swing' : 'launch';
   }
   if (roofFinish) {
-    const winner = timeline.paths[roofFinish.actorId], other = timeline.paths[roofFinish.otherId], roof = winner.segments.at(-1)!;
+    const winner = timeline.paths[roofFinish.actorId], roof = winner.segments.at(-1)!;
     roofFinish.runStart = roof.start; roofFinish.claimAt = winner.arrivalAt;
-    // The runner gets the gold while the climber on that ladder is still below
-    // the edge. The climber then crosses the terrace to their original chest.
-    const otherRoof = other.segments.at(-1)!, otherClimb = other.segments.at(-2)!;
-    otherRoof.start = Math.max(otherRoof.start, winner.arrivalAt + 1000 * unit);
-    otherClimb.end = otherRoof.start; otherRoof.end = otherRoof.start + roofDuration(other.id); other.arrivalAt = otherRoof.end;
-    // Hold below the edge while the nearby runner grabs the gold. Without this
-    // pause the terrace's top-out pose would make both look already arrived.
-    const holdRow = Math.max(otherClimb.fromRow, LADDER_RUNGS - 2.6);
-    const riseStart = otherRoof.start - (LADDER_RUNGS - holdRow) * 300 * unit;
-    const approachEnd = Math.min(riseStart, Math.max(roof.start, otherClimb.start + (holdRow - otherClimb.fromRow) * 300 * unit));
-    other.segments.splice(other.segments.length - 2, 1,
-      { ...otherClimb, end: approachEnd, toRow: holdRow },
-      { ...otherClimb, id: otherClimb.id + '-wait', start: approachEnd, end: riseStart, fromRow: holdRow, toRow: holdRow },
-      { ...otherClimb, id: otherClimb.id + '-edge', start: riseStart, fromRow: holdRow });
   }
   return timeline;
 }
@@ -422,6 +405,14 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
     if (!close) break;
     const eventIndex = timeline.events.findIndex(event => event.bridgeId === close.id);
     timeline = buildLadderPlan(candidates, order, duration, storySeed, finishTarget, { bridgeId: close.id, eventIndex: eventIndex < 0 ? undefined : eventIndex });
+  }
+  if (timeline.roofFinish) {
+    const finish = timeline.roofFinish;
+    const rivalRoof = timeline.paths[finish.otherId].segments.find(segment => segment.kind === 'roof')!;
+    const rival = ladderFrame(timeline, finish.claimAt, finish.targetLane).actors.find(actor => actor.id === finish.otherId)!;
+    // Top-out plants its first boot at row 22.26, before the logical roof segment.
+    // Leave visible clearance below that step; nobody waits or slows to stage a steal.
+    if (finish.claimAt >= rivalRoof.start || rival.rungProgress >= LADDER_RUNGS - 2) return buildLadderTimeline(candidates, order, duration, storySeed);
   }
   return timeline;
 }

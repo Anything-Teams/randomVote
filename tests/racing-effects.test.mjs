@@ -6,12 +6,12 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { buildRacingTimeline, createRacingIncidents, readRacingDistance, racingStandings, racingTrickLoss, RACING_STORIES } = await source('src/racingNarrative.ts');
+const { buildRacingTimeline, createRacingIncidents, readRacingDistance, racingStandings, readRacingTravel, racingTrickLoss, RACING_STORIES } = await source('src/racingNarrative.ts');
 const { createRacingCamera, placeRacingField } = await source('src/racingCamera.ts');
 const { combineRacingHorseMotion, drawRacingTrickEffects, racingIncidentMotion, placeRacingDuel, placeRacingTrick, racingTrickMotion, racingTrickProjectile } = await source('src/racingEffects.ts');
 const { raceHorseAttachments, drawRaceHorse, drawRaceDust } = await source('src/racingArt.ts');
 const { racingObstacleMotion } = await source('src/racingObstacles.ts');
-const { drawRacingTopView } = await source('src/racingCourse.ts');
+const { drawRacingTopView, racingLaneStart, racingStartingLayout, racingCoursePoint, drawRacingStartingGate } = await source('src/racingCourse.ts');
 const players = Array.from({ length: 10 }, (_, index) => ({ id: String(index), name: `선수 ${index}`, color: '#abcdef' }));
 
 test('a reversed ten-horse field overtakes gradually without a late speed surge', () => {
@@ -24,22 +24,28 @@ test('a reversed ten-horse field overtakes gradually without a late speed surge'
     for (const player of list) for (let at = timeline.straight.start; at < timeline.finish - 16; at += 16) {
       const speed = (readRacingDistance(timeline, player.id, at + 16) - readRacingDistance(timeline, player.id, at)) / 16;
       const chasing = timeline.obstacles.some(item => item.actorId === player.id && item.catchupEnd > at);
-      assert.ok(speed >= pace * .5 && speed <= pace * (chasing ? 1.9 : 1.5), `sudden late surge: ${count}/${seed}/${player.id}/${at}: ${speed / pace}`);
+      const falling = timeline.lateFall?.actorId === player.id && at >= timeline.lateFall.impact;
+      assert.ok(speed >= pace * (falling ? -.000001 : .5) && speed <= pace * (chasing ? 1.9 : 1.5), `sudden late surge: ${count}/${seed}/${player.id}/${at}: ${speed / pace}`);
       const previousSpeed = (readRacingDistance(timeline, player.id, at) - readRacingDistance(timeline, player.id, at - 16)) / 16;
       assert.ok(Math.abs(speed - previousSpeed) < pace * .12, 'a chasing horse gains speed progressively through the final straight');
     }
   }
 });
 
-test('the camera keeps every named horse visible throughout the live race on small and large screens', () => {
+test('the camera keeps near leaders visible and lets stopped rear horses leave without slowing the ground', () => {
   for (const [width, height] of [[320, 180], [960, 540]]) for (let count = 2; count <= 10; count++) {
     const list = players.slice(0, count), order = list.map(player => player.id).reverse();
     const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, count));
     const camera = createRacingCamera();
+    let previousCenter, previousLead;
     for (let at = timeline.start; at <= 41_000; at += 16) {
+      const lead = Math.max(...list.map(player => readRacingTravel(timeline, player.id, at)));
       for (const horse of placeRacingField(camera, list, timeline, at, width, height, 16)) {
-        assert.ok(horse.x <= width && horse.x - 109 * horse.scale >= 0, `offscreen horse: ${width}/${count}/${horse.id}/${at}`);
+        if (horse.featured) assert.ok(horse.x <= width && horse.x - 109 * horse.scale >= 0, `offscreen horse: ${width}/${count}/${horse.id}/${at}`);
       }
+      assert.equal(camera.span, .075, 'a stopped horse cannot widen the camera');
+      if (previousCenter !== undefined) assert.ok(Math.abs((camera.center - previousCenter) - (lead - previousLead)) < 1e-9, 'ground scroll follows actual lead travel');
+      previousCenter = camera.center; previousLead = lead;
     }
   }
 });
@@ -99,7 +105,7 @@ test('opponents close the lane, respond to a pass, and separate without changing
 
 
 function recordingContext() {
-  let matrix = [1, 0, 0, 1, 0, 0], stack = [], lines = [], arcs = [], fills = [], labels = [], points = [];
+  let matrix = [1, 0, 0, 1, 0, 0], stack = [], lines = [], arcs = [], fills = [], labels = [], ellipses = [], points = [];
   const transform = (x, y) => ({ x: matrix[0] * x + matrix[2] * y + matrix[4], y: matrix[1] * x + matrix[3] * y + matrix[5] });
   const ctx = { globalAlpha: 1, strokeStyle: '', lineWidth: 1,
     save() { stack.push({ matrix: [...matrix], strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, globalAlpha: this.globalAlpha }); },
@@ -113,9 +119,9 @@ function recordingContext() {
     createLinearGradient() { return { addColorStop() {} }; },
     transform(a, b, c, d, e, f) { const m = [...matrix]; matrix = [m[0] * a + m[2] * b, m[1] * a + m[3] * b, m[0] * c + m[2] * d, m[1] * c + m[3] * d, m[0] * e + m[2] * f + m[4], m[1] * e + m[3] * f + m[5]]; },
     fill() { fills.push({ color: this.fillStyle, alpha: this.globalAlpha }); }, fillRect() { fills.push({ color: this.fillStyle, alpha: this.globalAlpha }); },
-    closePath() {}, roundRect() {}, strokeRect() {}, clip() {}, bezierCurveTo() {}, quadraticCurveTo() {}, ellipse() {}, fillText(text, x, y) { labels.push({ text, x, y, color: this.fillStyle }); },
+    closePath() {}, roundRect() {}, strokeRect() {}, clip() {}, bezierCurveTo() {}, quadraticCurveTo() {}, ellipse(x, y, rx, ry) { ellipses.push({ ...transform(x, y), rx, ry }); }, fillText(text, x, y) { labels.push({ text, x, y, color: this.fillStyle }); },
   };
-  return { ctx, lines, arcs, fills, labels };
+  return { ctx, lines, arcs, fills, labels, ellipses };
 }
 
 function physicalField(timeline, list, elapsed, width = 960, height = 540) {
@@ -274,4 +280,89 @@ test('hoof-contact dust fades in continuously instead of adding a bright particl
     return recording.fills.reduce((sum, fill) => sum + Number(String(fill.color).match(/rgba\([^,]+,[^,]+,[^,]+,([^)]*)\)/)?.[1] ?? 0) * fill.alpha, 0);
   };
   for (const at of [.05, .18, .40, .54].map(phase => phase * 560)) assert.ok(Math.abs(opacity(at + .01) - opacity(at - .01)) < .001, 'new dust leaves zero opacity while the previous cloud keeps fading');
+});
+
+
+test('staggered gate mouths, oval start markers and equal remaining lane distance share their geometry', () => {
+  for (const count of [2, 6, 10]) for (const [w, h] of [[320, 180], [960, 540]]) {
+    const layout = racingStartingLayout(w, h, count), { ctx, lines, ellipses } = recordingContext();
+    drawRacingStartingGate(ctx, w, h, players.slice(0, count), 5000, true, 5000);
+    const heads = ellipses.filter(item => item.rx === 3 && item.ry === 4.4);
+    assert.equal(heads.length, count);
+    const scale = Math.max(.1, Math.min(layout.slotWidth / 15, h / 135));
+    for (let index = 0; index < count; index++) {
+      const lane = racingLaneStart(index, count), start = racingCoursePoint(w, h, 0, index, count), finish = racingCoursePoint(w, h, 1, index, count);
+      assert.ok(Math.abs((1 - lane.advance) * lane.lap - 1600) < 1e-9, 'outer start compensates the longer route');
+      const mark = layout.slots[index], head = heads[index], forward = { x: Math.cos(mark.angle), y: Math.sin(mark.angle) };
+      const nose = { x: head.x + forward.x * 4.4 * scale, y: head.y + forward.y * 4.4 * scale };
+      assert.ok(Math.abs((nose.x - mark.x) * forward.x + (nose.y - mark.y) * forward.y) < 1e-7, 'the painted nose meets its own staggered stripe');
+      assert.ok(lines.some(line => line.color === '#eee3bc' && Math.hypot((line.points[0].x + line.points[1].x) / 2 - mark.x, (line.points[0].y + line.points[1].y) / 2 - mark.y) < 1e-7), 'the rendered start stripe uses the horse marker');
+      if (index) {
+        assert.ok(mark.y > layout.slots[index - 1].y, 'outside is visibly farther forward');
+        assert.ok(start.y > racingCoursePoint(w, h, 0, index - 1, count).y, 'the map shows the same stagger direction');
+      }
+      assert.ok(Math.abs(finish.angle - Math.PI / 2) < .0001, 'all lane finishes return to one transverse line');
+    }
+    for (const rail of [layout.innerRail, layout.outerRail]) {
+      const first = rail[0], middle = rail[40], last = rail[80];
+      assert.ok(Math.abs(middle.x - (first.x + last.x) / 2) > w * .02, 'the gate view visibly turns around a real curved rail');
+    }
+  }
+});
+
+test('a fallen horse leaves the leading focus and returns only by recovering actual ground', () => {
+  const list = players, order = list.map(player => player.id).reverse();
+  const timeline = buildRacingTimeline(list, order, 44000, createRacingIncidents(list, order, 44000, 2));
+  const fall = timeline.obstacles.find(item => item.outcome !== 'clear'), camera = createRacingCamera();
+  let left = false, returned = false;
+  for (let at = fall.impact; at <= fall.catchupEnd; at += 16) {
+    const field = placeRacingField(camera, list, timeline, at, 960, 540, 16), horse = field.find(item => item.id === fall.actorId);
+    assert.equal(camera.span, .075);
+    if (!horse.featured && horse.x - 109 * horse.scale < 0) left = true;
+    if (left && horse.featured) returned = true;
+  }
+  assert.ok(left, 'the stalled rear body can leave the picture without widening it');
+  assert.ok(returned, 'actual catch-up brings the horse back into the leading picture');
+});
+
+test('each finisher carries its incoming speed through the line before easing into run-out', () => {
+  for (const count of [2, 10]) for (const seed of [1, 7, 45]) {
+    const list = players.slice(0, count), order = list.map(player => player.id).reverse();
+    const timeline = buildRacingTimeline(list, order, 44000, createRacingIncidents(list, order, 44000, seed));
+    for (const id of order) {
+      const at = timeline.finishTimes[id], incoming = (readRacingTravel(timeline, id, at) - readRacingTravel(timeline, id, at - 16)) / 16;
+      const outgoing = (readRacingTravel(timeline, id, at + 16) - readRacingTravel(timeline, id, at)) / 16;
+      assert.ok(Math.abs(outgoing - incoming) < incoming * .008, 'finish cannot abruptly slow the camera leader and advance all rivals');
+    }
+  }
+});
+
+test('rare finish-line falls happen inside the leading picture, lose every place and finish last by actual travel', () => {
+  const fixture = Array.from({ length: 10 }, (_, index) => ({ id: String(index + 1), name: `선수${index + 1}`, color: '#abc' }));
+  const finishOrder = ['4', '1', '7', '2', '9', '3', '5', '10', '6', '8'];
+  for (const [count, seed] of [[2, 6], [10, 14]]) {
+    const list = fixture.slice(0, count), order = finishOrder.filter(id => list.some(player => player.id === id));
+    const timeline = buildRacingTimeline(list, order, 44000, createRacingIncidents(list, order, 44000, seed));
+    const fall = timeline.lateFall; assert.ok(fall, 'the visible eligible fixture receives the rare event');
+    const camera = createRacingCamera(), field = placeRacingField(camera, list, timeline, fall.impact, 960, 540, 0, true);
+    const horse = field.find(item => item.id === fall.actorId), line = 480 + (1 - camera.center) / camera.span * 960 * .65;
+    assert.ok(line > horse.x && line < 960, 'the finish stripe is visible ahead before the misstep');
+    assert.equal(racingStandings(timeline, fall.impact).find(item => item.id === fall.actorId).rank, 1);
+    assert.equal(racingStandings(timeline, fall.lowest).find(item => item.id === fall.actorId).rank, count);
+    assert.ok(racingObstacleMotion(fall, fall.impact + 450).fall > .98, 'the horse visibly collapses while the field passes');
+    assert.equal(readRacingDistance(timeline, fall.actorId, fall.impact + 1000), readRacingDistance(timeline, fall.actorId, fall.impact + 1500), 'standing up cannot refund lost distance');
+    let prior, previousPose = {}, rank = 1, passed = 0;
+    const pace = 1 / (timeline.finish - timeline.start);
+    for (let at = timeline.straight.start; at <= timeline.finishTimes[fall.actorId]; at += 16) {
+      const distance = readRacingTravel(timeline, fall.actorId, at), currentRank = racingStandings(timeline, at).find(item => item.id === fall.actorId).rank;
+      const pose = racingObstacleMotion(fall, at);
+      if (at >= fall.impact && currentRank > rank) passed += currentRank - rank;
+      if (prior !== undefined) assert.ok(distance >= prior - 1e-10 && distance - prior < pace * 16 * 1.6, 'recovery uses bounded actual speed');
+      for (const key of new Set([...Object.keys(pose), ...Object.keys(previousPose)])) assert.ok(Math.abs((pose[key] ?? 0) - (previousPose[key] ?? 0)) < .09, 'fall and rising blend through every live frame');
+      prior = distance; previousPose = pose; rank = currentRank;
+    }
+    assert.equal(passed, count - 1, 'every opponent actually passes the stopped runner');
+    assert.equal(timeline.finishTimes[fall.actorId], 41200);
+    assert.deepEqual(racingStandings(timeline, 41400).map(item => item.id), order);
+  }
 });

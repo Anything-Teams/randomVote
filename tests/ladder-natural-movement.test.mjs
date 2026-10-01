@@ -6,8 +6,8 @@ async function load(entry) {
   const result = await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { buildLadderTimeline, ladderFrame } = await load('src/ladderLogic.ts');
-const { createLadderGeometry, ladderArtActors, sampleLadderRig } = await load('src/game/ladderArt.ts');
+const { buildLadderTimeline, ladderFrame, LADDER_START_DELAY } = await load('src/ladderLogic.ts');
+const { createLadderGeometry, ladderArtActors, sampleLadderRig, LADDER_ARM_LENGTH } = await load('src/game/ladderArt.ts');
 const { drawLadderAdventure } = await load('src/game/ladderAdventureArt.ts');
 const candidates = count => Array.from({ length: count }, (_, index) => ({ id: String(index + 1), name: `참가자 ${index + 1}`, color: '#83c7de' }));
 const orderFor = count => ['4', '1', '7', '2', '9', '3', '5', '10', '6', '8'].filter(id => Number(id) <= count);
@@ -37,8 +37,8 @@ test('neighbor preparations do not stretch one rung over several seconds or brak
 });
 
 test('roof running plants a fixed-length boot on the terrace without sliding its supporting foot', () => {
-  const crew = candidates(5), timeline = buildLadderTimeline(crew, orderFor(5), 44_000, 4, 0), finish = timeline.roofFinish;
-  const roof = timeline.paths[finish.actorId].segments.at(-1), geometry = createLadderGeometry(800, 600, 5), deck = geometry.rowY(24), read = time => ladderFrame(timeline, time);
+  const crew = candidates(2), timeline = buildLadderTimeline(crew, ['2', '1'], 44_000, 439, 0), finish = timeline.roofFinish;
+  const roof = timeline.paths[finish.actorId].segments.at(-1), geometry = createLadderGeometry(800, 600, 2), deck = geometry.rowY(24), read = time => ladderFrame(timeline, time);
   const at = time => {
     const actor = ladderArtActors(timeline, read(time), crew, time, geometry, false, read).find(actor => actor.id === finish.actorId);
     return sampleLadderRig(actor, geometry, time);
@@ -53,8 +53,53 @@ test('roof running plants a fixed-length boot on the terrace without sliding its
     }
   }
   assert.ok(contacts > 50, 'both supporting phases are sampled across the roof dash');
-  const rival = read((roof.start + roof.end) / 2).actors.find(actor => actor.id === finish.otherId);
-  assert.ok(rival.rungProgress < 22 && !rival.arrived, 'the rival remains below the terrace during this rare dash');
+  const rivalPath = timeline.paths[finish.otherId], finalAscent = rivalPath.segments.at(-2);
+  assert.equal(finalAscent.kind, 'climb');
+  assert.equal(finalAscent.toRow, 24);
+  assert.ok(finalAscent.toRow > finalAscent.fromRow, 'the rival climbs continuously to the roof');
+  assert.ok(finish.claimAt < finalAscent.end, 'the runner takes the gold before the rival actually reaches it');
+  for (let time = finish.runStart; time <= finish.claimAt; time += 16) {
+    const rival = ladderArtActors(timeline, read(time), crew, time, geometry, false, read).find(actor => actor.id === finish.otherId);
+    const rig = sampleLadderRig(rival, geometry, time);
+    assert.ok(rival.rungProgress < 22, 'the neighbor has not entered the visible standing top-out');
+    assert.ok(rig.feet.every(foot => foot.y > deck + geometry.scale * 4), 'both neighboring boots stay visibly below the roof until the gold is taken');
+  }
+  assert.equal(buildLadderTimeline(candidates(5), orderFor(5), 44_000, 73, 0).roofFinish, undefined, 'the old fixture falls back because its rival already appears on the terrace');
+  const before = read(finish.runStart - 25).actors.find(actor => actor.id === finish.otherId), after = read(finish.runStart + 25).actors.find(actor => actor.id === finish.otherId);
+  assert.ok(after.rungProgress > before.rungProgress, 'the neighbor keeps moving as the other runner starts the roof dash');
+});
+
+test('climbing begins after a brief shared preparation and all staggered starters move by 1.1 seconds', () => {
+  assert.equal(LADDER_START_DELAY, 900);
+  const crew = candidates(10), timeline = buildLadderTimeline(crew, orderFor(10), 44_000, 4);
+  assert.ok(ladderFrame(timeline, LADDER_START_DELAY - 1).actors.every(actor => actor.pose === 'idle'));
+  const moving = ladderFrame(timeline, 1100).actors;
+  assert.ok(moving.every(actor => actor.pose === 'climb' && actor.rungProgress > 0));
+});
+
+test('roof arms rotate from the shoulders with a bent elbow and unchanged limb lengths in both directions', () => {
+  const geometry = createLadderGeometry(800, 600, 5), crew = candidates(5);
+  for (const direction of [-1, 1]) {
+    const samples = [];
+    for (let sample = 0; sample <= 80; sample++) {
+      const fraction = sample / 80, fromLane = direction > 0 ? 1 : 2, toLane = fromLane + direction;
+      const actor = { id: '1', index: 0, candidate: crew[0], fromLane, toLane, lane: fromLane + direction * fraction, rungProgress: 24, height: 1, pose: 'run', phase: .5, arrived: false };
+      const rig = sampleLadderRig(actor, geometry, 1000);
+      for (const side of [0, 1]) {
+        const upper = Math.hypot(rig.elbows[side].x - rig.shoulders[side].x, rig.elbows[side].y - rig.shoulders[side].y) / geometry.scale;
+        const lower = Math.hypot(rig.hands[side].x - rig.elbows[side].x, rig.hands[side].y - rig.elbows[side].y) / geometry.scale;
+        assert.ok(Math.abs(upper - LADDER_ARM_LENGTH) < .001 && Math.abs(lower - LADDER_ARM_LENGTH) < .001, 'swinging the arm never stretches its segments');
+        assert.ok(rig.elbows[side].y > rig.shoulders[side].y, 'the elbow swings below the shoulder');
+        assert.ok((rig.hands[side].x - rig.elbows[side].x) * direction > 0, 'the forearm stays folded forward instead of flipping behind the elbow');
+      }
+      samples.push(rig);
+    }
+    for (const side of [0, 1]) {
+      const rotations = samples.map(rig => (rig.elbows[side].x - rig.shoulders[side].x) / geometry.scale), wristHeights = samples.map(rig => (rig.hands[side].y - rig.shoulders[side].y) / geometry.scale);
+      assert.ok(Math.max(...rotations) - Math.min(...rotations) > 5, 'each upper arm actually pivots through the running stride');
+      assert.ok(Math.max(...wristHeights) - Math.min(...wristHeights) > 4, 'the bent forearm follows the shoulder swing');
+    }
+  }
 });
 
 test('revealed platform ends match each climber height and source lane', () => {

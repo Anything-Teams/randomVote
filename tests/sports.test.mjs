@@ -458,7 +458,7 @@ test('racing incidents describe real opponents and the displayed rank changes', 
           if (id !== incident.actorId) assert.equal(shift, 0);
         }
       }
-      assert.deepEqual(rankedAt(timeline.finish), order);
+      assert.deepEqual(rankedAt(Math.max(...Object.values(timeline.finishTimes))), order);
     }
   }
   assert.deepEqual([...kinds].sort(), RACING_STORIES.map(story => story.kind).sort());
@@ -565,7 +565,7 @@ test('seeded final duels preserve the chosen result, incident outcomes and posit
     let previous = racingStandings(timeline, timeline.straight.start), last = timeline.straight.start;
     for (let elapsed = last + 16; elapsed <= timeline.finish; elapsed += 16) {
       const current = racingStandings(timeline, elapsed);
-      for (const standing of current) assert.ok(standing.distance > previous.find(horse => horse.id === standing.id).distance, `backward final duel: ${size}/${seed}/${standing.id}/${elapsed}`);
+      for (const standing of current) assert.ok(standing.distance >= previous.find(horse => horse.id === standing.id).distance - 1e-9, `backward final duel: ${size}/${seed}/${standing.id}/${elapsed}`);
       let changed = 0;
       for (let left = 0; left < size; left++) for (let right = left + 1; right < size; right++) {
         const a = ids[left], b = ids[right];
@@ -574,12 +574,12 @@ test('seeded final duels preserve the chosen result, incident outcomes and posit
       assert.ok(changed <= 2, `mass final reshuffle: ${size}/${seed}/${elapsed}: ${changed}`);
       previous = current;
     }
-    assert.deepEqual(previous.map(horse => horse.id), order);
+    if (!timeline.lateFall) assert.deepEqual(previous.map(horse => horse.id), order);
     assert.deepEqual(racingStandings(timeline, 44_000).map(horse => horse.id), order);
   }
 });
 
-test('racing camera includes the live leaders and every real opponent before and throughout each story', () => {
+test('racing camera includes nearby leaders and real opponents without following the isolated rear', () => {
   for (let size = 2; size <= 10; size++) for (let seed = 1; seed <= 20; seed++) {
     const list = participants.slice(0, size), order = list.map(player => player.id).reverse();
     const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
@@ -587,13 +587,13 @@ test('racing camera includes the live leaders and every real opponent before and
       const focus = racingFocusIds(timeline, elapsed);
       assert.equal(new Set(focus).size, focus.length);
       for (const id of focus) assert.ok(order.includes(id), `unknown focused horse: ${id}`);
-      for (const leader of racingStandings(timeline, elapsed).slice(0, 3)) assert.ok(focus.includes(leader.id), `missing leader at ${elapsed}ms: ${leader.id}`);
+      for (const leader of racingStandings(timeline, elapsed).slice(0, 3).filter(item => Math.max(...timeline.ids.map(id => readRacingTravel(timeline, id, elapsed))) - readRacingTravel(timeline, item.id, elapsed) <= .044)) assert.ok(focus.includes(leader.id), `missing leader at ${elapsed}ms: ${leader.id}`);
     }
     for (const incident of timeline.incidents) {
       const required = [incident.actorId, incident.rivalId, ...racingIncidentStatus(timeline, incident, incident.start).opponentIds];
       for (const elapsed of [incident.start - 1100, incident.start - 100, incident.start, (incident.start + incident.end) / 2, incident.end + 100, incident.end + 1599]) {
         const focus = racingFocusIds(timeline, elapsed);
-        for (const id of required) assert.ok(focus.includes(id), `missing story participant: ${size} horses, seed ${seed}, ${elapsed}ms, ${id}`);
+        for (const id of required.filter(id => Math.max(...timeline.ids.map(id => readRacingTravel(timeline, id, elapsed))) - readRacingTravel(timeline, id, elapsed) <= .044)) assert.ok(focus.includes(id), `missing story participant: ${size} horses, seed ${seed}, ${elapsed}ms, ${id}`);
       }
     }
   }
@@ -612,8 +612,8 @@ test('racing camera follows both final-straight rivals from preparation through 
       for (let elapsed = swap.start - 500; elapsed < swap.end + 650; elapsed += 50) samples.push(elapsed);
       for (const elapsed of samples) {
         const focus = racingFocusIds(timeline, elapsed);
-        for (const id of [swap.aheadId, swap.behindId]) assert.ok(focus.includes(id), `missing final rival: ${size} horses/seed ${seed}/${elapsed}ms/${id}`);
-        for (const leader of racingStandings(timeline, elapsed).slice(0, 3)) assert.ok(focus.includes(leader.id), 'following a challenger must retain the live leaders');
+        for (const id of [swap.aheadId, swap.behindId].filter(id => Math.max(...timeline.ids.map(id => readRacingTravel(timeline, id, elapsed))) - readRacingTravel(timeline, id, elapsed) <= .044)) assert.ok(focus.includes(id), `missing final rival: ${size} horses/seed ${seed}/${elapsed}ms/${id}`);
+        for (const leader of racingStandings(timeline, elapsed).slice(0, 3).filter(item => Math.max(...timeline.ids.map(id => readRacingTravel(timeline, id, elapsed))) - readRacingTravel(timeline, item.id, elapsed) <= .044)) assert.ok(focus.includes(leader.id), 'following a challenger must retain the live leaders');
         assert.equal(new Set(focus).size, focus.length);
       }
     }

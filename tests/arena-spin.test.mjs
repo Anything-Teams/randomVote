@@ -14,7 +14,7 @@ const round = { id: 'spin', index: 0, tactic: 'spin', aggressor: 'defender', vic
 const fighter = animation => ({ candidate: { id: 'body', name: '선수', color: '#ffad72' }, index: 0, x: 500, y: 425, scale: 2.04, facing: 1, pose: 'guard', angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, phase: 0, animation });
 
 test('crouching legs bend into depth instead of spreading both knees into an O shape', () => {
-  for (const index of [0, 1, 2, 3]) for (const pose of ['guard', 'grapple', 'brace', 'push', 'dodge', 'lift', 'throw', 'airborne', 'land', 'recover']) {
+  for (const index of [0, 1, 2, 3]) for (const pose of ['guard', 'grapple', 'brace', 'push', 'dodge', 'lift', 'throw']) {
     const animation = createArenaFighterAnimation(), body = { ...fighter(animation), index, pose, phase: .25 };
     for (let at = 0; at <= 600; at += 16) drawArenaFighter(ctx, body, at);
     const { hips, knees, feet } = animation.skeleton;

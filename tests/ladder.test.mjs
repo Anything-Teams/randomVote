@@ -135,10 +135,14 @@ test('the treasure terrace is connected to tower columns and a lower foundation 
 
 test('the rare adjacent-ladder dash preserves every assigned treasure and the arrival budget', () => {
   assert.equal(LADDER_ROOF_STEAL_CHANCE, .05);
-  for (let count = 2; count <= 10; count++) for (const seed of [4, 19, 35, 56, 73]) for (let target = 0; target < count; target++) {
+  for (let count = 2; count <= 10; count++) for (const seed of [4, 19, 35, 56, 73, 144, 439]) for (let target = 0; target < count; target++) {
     const candidates = participants.slice(0, count), order = candidates.map(person => person.id).reverse();
     const timeline = buildLadderTimeline(candidates, order, 44_000, seed, target), finish = timeline.roofFinish;
-    assert.ok(finish, 'the replay seeds exercise the rare branch');
+    if (!finish) {
+      assert.ok(Object.values(timeline.paths).every(path => path.segments.every(segment => segment.kind !== 'roof')), 'an impossible steal uses the normal drawn route');
+      assert.equal(ladderFrame(timeline, 44_000, target).winnerId, order[target]);
+      continue;
+    }
     assert.equal(finish.actorId, order[target]);
     assert.equal(Math.abs(finish.entryLane - target), 1, 'the runner climbs the neighboring ladder');
     const roof = timeline.paths[finish.actorId].segments.at(-1);
@@ -147,9 +151,10 @@ test('the rare adjacent-ladder dash preserves every assigned treasure and the ar
     assert.equal(roof.toLane, target);
     const middle = ladderFrame(timeline, (roof.start + roof.end) / 2, target);
     assert.equal(middle.actors.find(actor => actor.id === finish.actorId).pose, 'run');
-    const rival = middle.actors.find(actor => actor.id === finish.otherId);
-    assert.ok(!rival.arrived && rival.pose !== 'run', 'the rival has not stepped onto the terrace while the runner dashes');
-    if (rival.pose === 'climb') assert.ok(rival.rungProgress < 22, 'a climbing rival is visibly below the terrace, rather than standing at the edge');
+    const rivalPath = timeline.paths[finish.otherId], rivalRoof = rivalPath.segments.at(-1);
+    assert.ok(finish.claimAt < rivalRoof.start, 'the gold is taken before the neighboring climber reaches that roof');
+    assert.ok(ladderFrame(timeline, finish.claimAt, target).actors.find(actor => actor.id === finish.otherId).rungProgress < 22, 'the rival has not already stepped onto the roof in its top-out pose');
+    assert.ok(rivalPath.segments.filter(segment => segment.kind === 'climb').every(segment => segment.toRow > segment.fromRow), 'the rival never waits in a zero-distance roof approach');
     assert.equal(middle.winnerId, undefined, 'running toward the treasure does not reveal the result before contact');
     assert.equal(ladderFrame(timeline, finish.claimAt, target).winnerId, order[target]);
     for (let selected = 0; selected < count; selected++) assert.equal(ladderFrame(timeline, 44_000, selected).winnerId, order[selected], 'all selected outcomes retain the original uniformly drawn assignment');
@@ -160,23 +165,23 @@ test('the rare adjacent-ladder dash preserves every assigned treasure and the ar
         for (const boundary of [segment.start, segment.end]) {
           const before = ladderFrame(timeline, boundary - .001, target).actors.find(actor => actor.id === path.id);
           const after = ladderFrame(timeline, boundary + .001, target).actors.find(actor => actor.id === path.id);
-          assert.ok(Math.abs(before.lane - after.lane) < .001 && Math.abs(before.rungProgress - after.rungProgress) < .001, 'the runner, rival pause and edge climb never teleport');
+          assert.ok(Math.abs(before.lane - after.lane) < .001 && Math.abs(before.rungProgress - after.rungProgress) < .001, 'the uninterrupted ascent and roof run never teleport');
         }
       }
     }
     assert.ok(ladderFrame(timeline, 44_000, target).complete);
   }
   let rare = 0;
-  const candidates = participants.slice(0, 5), order = candidates.map(person => person.id);
+  const candidates = participants.slice(0, 2), order = candidates.map(person => person.id).reverse();
   for (let seed = 0; seed < 2000; seed++) if (buildLadderTimeline(candidates, order, 44_000, seed, 0).roofFinish) rare++;
-  assert.ok(rare >= 60 && rare <= 140, 'the independently seeded 5% branch remains rare across a broad replay sample');
+  assert.ok(rare > 0 && rare <= 140, 'the 5% attempt only becomes a roof steal when natural arrival timing permits it');
 });
 
 test('roof runners lean forward, plant their boots and turn into the award without a limb snap', () => {
-  const candidates = participants.slice(0, 5), order = candidates.map(person => person.id).reverse();
-  for (const target of [0, 4]) {
-    const timeline = buildLadderTimeline(candidates, order, 44_000, 4, target), finish = timeline.roofFinish;
-    const geometry = createLadderGeometry(800, 600, 5), read = time => ladderFrame(timeline, time, target);
+  const candidates = participants.slice(0, 2), order = candidates.map(person => person.id).reverse();
+  for (const [target, seed] of [[0, 439], [1, 144]]) {
+    const timeline = buildLadderTimeline(candidates, order, 44_000, seed, target), finish = timeline.roofFinish;
+    const geometry = createLadderGeometry(800, 600, 2), read = time => ladderFrame(timeline, time, target);
     const rigAt = (id, time) => {
       const actor = ladderArtActors(timeline, read(time), candidates, time, geometry, false, read).find(item => item.id === id);
       return { actor, rig: sampleLadderRig(actor, geometry, time) };
@@ -765,27 +770,22 @@ test('the danger has distinct acceleration while climbers keep their own hand-ov
   }
 });
 
-test('each multiplayer route can cross several ladders instead of moving only to the next column', () => {
-  const distances = new Set();
-  for (const count of [3, 4, 10]) for (let seed = 0; seed < 40; seed++) {
+test('every transfer crosses exactly one neighboring ladder while preserving the drawn destination', () => {
+  for (let count = 2; count <= 10; count++) for (let seed = 0; seed < 40; seed++) {
     const candidates = participants.slice(0, count), order = candidates.map(candidate => candidate.id).reverse();
     const timeline = buildLadderTimeline(candidates, order, 44_000, seed);
-    const long = timeline.bridges.find(bridge => bridge.rightLane - bridge.leftLane >= 2);
-    assert.ok(long, 'there is always a real nonadjacent route');
-    assert.ok(Math.max(long.fromRow, long.partnerFromRow) < 21, 'a broad airborne route leaves headroom below the roof at each actual starting height');
-    assert.ok(long.motionType === 'launch' || long.motionType === 'swing', 'a long route is physically airborne');
-    if (count === 10) distances.add(long.rightLane - long.leftLane);
-    for (const id of long.actorIds) {
-      const segment = timeline.paths[id].segments.find(part => part.bridgeId === long.id);
-      assert.ok(Math.abs(segment.toLane - segment.fromLane) >= 2);
+    assert.ok(timeline.bridges.every(bridge => bridge.rightLane - bridge.leftLane === 1), 'no jump, deck or throw skips an intervening ladder');
+    for (const path of Object.values(timeline.paths)) for (const segment of path.segments.filter(segment => ['bridge', 'event'].includes(segment.kind))) {
+      const id = path.id;
+      assert.equal(Math.abs(segment.toLane - segment.fromLane), 1);
       const event = timeline.events.find(item => item.id === segment.eventId), duration = segment.end - segment.start;
       const action = event?.action ?? segment.start + duration * .14, resolve = event?.resolve ?? segment.start + duration * .84;
-      const middle = ladderFrame(timeline, action + (resolve - action) * .4, 0).actors.find(actor => actor.id === id);
-      assert.ok(middle.lane > long.leftLane && middle.lane < long.rightLane, 'the body passes through the intervening columns rather than teleporting');
+      const travel = [.1, .2, .4, .65, .75].map(fraction => ladderFrame(timeline, action + (resolve - action) * fraction, 0).actors.find(actor => actor.id === id));
+      assert.ok(travel.every(actor => actor.lane >= Math.min(segment.fromLane, segment.toLane) && actor.lane <= Math.max(segment.fromLane, segment.toLane)), 'the body stays within its one neighboring gap');
+      assert.ok(travel.some(actor => actor.lane > Math.min(segment.fromLane, segment.toLane) && actor.lane < Math.max(segment.fromLane, segment.toLane)), 'the body physically traverses the actual adjacent gap');
     }
     assert.equal(ladderFrame(timeline, 44_000).winnerId, order[0]);
   }
-  assert.ok(distances.size >= 5, 'the longer destinations vary with each story seed');
 });
 
 test('a jump really grabs and throws the other climber before both take their assigned paths', () => {

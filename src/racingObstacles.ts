@@ -27,14 +27,14 @@ export function racingObstacleStatus(timeline: RacingTimeline, obstacle: RacingC
 }
 
 /** Failed landings gather the legs, check the reins, regain balance, then chase the lost ground. */
-export function racingObstacleMotion(obstacle: RacingCourseChallenge, elapsed: number, reduced = false): RaceHorseMotion {
+export function racingObstacleMotion(obstacle: Pick<RacingCourseChallenge, 'outcome' | 'impact' | 'lowest' | 'recovered'>, elapsed: number, reduced = false): RaceHorseMotion {
   if (reduced || obstacle.outcome === 'clear' || elapsed < obstacle.impact || elapsed >= obstacle.recovered) return {};
-  const scale = (obstacle.recovered - obstacle.lowest) / 1500, age = (elapsed - obstacle.impact) / (1100 * scale);
+  const scale = Math.max(.8, (obstacle.recovered - obstacle.lowest) / 1500), age = (elapsed - obstacle.impact) / (1100 * scale);
   const ease = (value: number) => { const p = Math.max(0, Math.min(1, value)); return p * p * (3 - 2 * p); };
   const stagger = age < .95 ? Math.sin(Math.PI * ease(age / .95)) : age < 1.6 ? -.38 * Math.sin(Math.PI * ease((age - .95) / .65)) : 0;
   const recovery = ease((elapsed - obstacle.lowest) / Math.max(1, obstacle.recovered - obstacle.lowest));
   const missedStep = Math.sin(Math.PI * ease(Math.min(1, age / 1.1)));
-  const fall = ease(age / .38) * (1 - ease((elapsed - obstacle.lowest) / (1100 * scale)));
+  const fall = ease(age / .38) * (1 - ease((elapsed - obstacle.lowest) / Math.min(1100 * scale, obstacle.recovered - obstacle.lowest)));
   const check = Math.max(Math.sin(Math.PI * ease(Math.min(1, age / 1.3))) * .95, fall * .58);
   return { fall, spill: fall, stumble: stagger * .28, check, trip: obstacle.outcome === 'clip' ? missedStep : 0, slip: obstacle.outcome === 'slip' ? missedStep : 0, crouch: Math.sin(Math.PI * recovery) * .9 };
 }

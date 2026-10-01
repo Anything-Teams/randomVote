@@ -63,8 +63,9 @@ test('course obstacles enter from the right, travel left with the ground, and pe
         previous = obstacle.x;
       }
       assert.ok(seenFromRight && visibleBefore && beforeStory && leftAfter, 'the complete approach and departure follow the fixed course, including a delayed fall recovery');
-      const field = placeRacingField(createRacingCamera(), list, timeline, expected.encounter, width, height, 0, true);
-      const obstacle = placeRacingObstacles(timeline, { center: (Math.max(...field.map(item => item.distance)) + Math.min(...field.map(item => item.distance))) / 2, span: Math.max(.067, (Math.max(...field.map(item => item.distance)) - Math.min(...field.map(item => item.distance))) * 1.35 + .016) }, field, width).find(item => item.actorId === incident.actorId);
+      const contactCamera = createRacingCamera();
+      const field = placeRacingField(contactCamera, list, timeline, expected.encounter, width, height, 0, true);
+      const obstacle = placeRacingObstacles(timeline, contactCamera, field, width).find(item => item.actorId === incident.actorId);
       const actor = field.find(item => item.id === incident.actorId);
       assert.ok(Math.abs(obstacle.x - actor.x) < .001, 'the actor reaches the physical obstacle at the planned encounter');
       const body = { ...actor, x: actor.x - 57 * actor.scale };

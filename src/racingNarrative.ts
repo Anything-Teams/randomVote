@@ -1,4 +1,5 @@
 import type { Candidate } from './election';
+import { RACING_CONTACT_ADVANCE } from './racingFraming';
 
 export type RacingIncidentKind = 'blocked' | 'inside' | 'outside' | 'chase' | 'gust' | 'balance' | 'draft' | 'fatigue' | 'patience' | 'lead-change' | 'rail' | 'last-kick' | 'hay-jump' | 'puddle';
 export type RacingIncident = {
@@ -15,7 +16,8 @@ export type RacingStraightSwap = { aheadId: string; behindId: string; start: num
 export type RacingStraightWave = { start: number; end: number; beforeOrder: string[]; swaps: RacingStraightSwap[] };
 export type RacingCourseChallenge = { id: string; kind: 'hay-jump' | 'puddle'; actorId: string; distance: number; encounter: number; outcome: 'clear' | 'clip' | 'slip'; impact: number; lowest: number; recovered: number; loss: number; lossCurve?: { at: number; lost: number }[]; catchupStart?: number; catchupEnd?: number };
 export type RacingTrick = { id: string; kind: 'rear-kick' | 'beanbag'; actorId: string; targetId: string; start: number; release: number; impact: number; lowest: number; recovered: number; loss: number };
-export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[]; obstacles: RacingCourseChallenge[]; tricks: RacingTrick[]; straight: { start: number; waves: RacingStraightWave[] } };
+export type RacingLateFall = { actorId: string; impact: number; lowest: number; recovered: number; outcome: 'clip'; approachOrder: string[]; distanceCurve?: { at: number; distance: number }[] };
+export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[]; obstacles: RacingCourseChallenge[]; tricks: RacingTrick[]; lateFall?: RacingLateFall; straight: { start: number; waves: RacingStraightWave[] } };
 export type RacingStanding = { id: string; distance: number; rank: number; finished: boolean; finishTime: number };
 export type RacingIncidentStatus = { stage: 'setup' | 'action' | 'outcome'; beforeRank: number; currentRank: number; afterRank: number; opponentIds: string[]; overtakenIds: string[]; passedByIds: string[]; nextRivalId?: string };
 export const RACING_STORIES: { kind: RacingIncidentKind; title: string; setup: string; action: string; outcome: string }[] = [
@@ -82,6 +84,29 @@ export function createRacingIncidents(candidates: Candidate[], order: string[], 
   return result;
 }
 
+function planStraightWaves(straightOrder: string[], finishOrder: string[], straightStart: number, finish: number): RacingStraightWave[] {
+  // Adjacent duels retain the other horses' full gaps. A reversed field cannot collapse at one midpoint.
+  const ids = straightOrder;
+  const positions = [...straightOrder], targetRanks = new Map(finishOrder.map((id, rank) => [id, rank]));
+  const waveDuration = (finish - straightStart) / Math.max(1, ids.length), waves: RacingStraightWave[] = [];
+  for (let pass = 0; pass < ids.length && positions.some((id, rank) => id !== finishOrder[rank]); pass++) {
+    const beforeOrder = [...positions], pairs: { aheadId: string; behindId: string }[] = [];
+    for (let rank = pass % 2; rank < positions.length - 1; rank += 2) {
+      const aheadId = positions[rank], behindId = positions[rank + 1];
+      if (targetRanks.get(aheadId)! < targetRanks.get(behindId)!) continue;
+      pairs.push({ aheadId, behindId });
+      [positions[rank], positions[rank + 1]] = [behindId, aheadId];
+    }
+    const at = straightStart + pass * waveDuration, moveDuration = waveDuration * .8;
+    const swaps = pairs.map((pair, index) => {
+      const start = at + waveDuration * .2 * (pairs.length < 2 ? .5 : index / (pairs.length - 1));
+      return { ...pair, start, end: start + moveDuration };
+    });
+    waves.push({ start: at, end: at + waveDuration, beforeOrder, swaps });
+  }
+  return waves;
+}
+
 /** Smooth rank knots use bounded separation: every horse moves forward, including during a setback. */
 export function buildRacingTimeline(candidates: Candidate[], order: string[], duration = 44_000, incidents: RacingIncident[] = []): RacingTimeline {
   const ids = candidates.map(candidate => candidate.id), finishOrder = normalizedOrder(candidates, order);
@@ -106,24 +131,7 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   // Move the field's common origin before the straight, without changing any actual gap.
   knots.push(makeKnot(straightStart, straightOrder, true));
   knots.push(makeKnot(finish, finishOrder, true));
-  // Adjacent duels retain the other horses' full gaps. A reversed field cannot collapse at one midpoint.
-  const positions = [...straightOrder], targetRanks = new Map(finishOrder.map((id, rank) => [id, rank]));
-  const waveDuration = (finish - straightStart) / Math.max(1, ids.length), waves: RacingStraightWave[] = [];
-  for (let pass = 0; pass < ids.length && positions.some((id, rank) => id !== finishOrder[rank]); pass++) {
-    const beforeOrder = [...positions], pairs: { aheadId: string; behindId: string }[] = [];
-    for (let rank = pass % 2; rank < positions.length - 1; rank += 2) {
-      const aheadId = positions[rank], behindId = positions[rank + 1];
-      if (targetRanks.get(aheadId)! < targetRanks.get(behindId)!) continue;
-      pairs.push({ aheadId, behindId });
-      [positions[rank], positions[rank + 1]] = [behindId, aheadId];
-    }
-    const at = straightStart + pass * waveDuration, moveDuration = waveDuration * .8;
-    const swaps = pairs.map((pair, index) => {
-      const start = at + waveDuration * .2 * (pairs.length < 2 ? .5 : index / (pairs.length - 1));
-      return { ...pair, start, end: start + moveDuration };
-    });
-    waves.push({ start: at, end: at + waveDuration, beforeOrder, swaps });
-  }
+  const waves = planStraightWaves(straightOrder, finishOrder, straightStart, finish);
   const finishStep = Math.min(240 * scale, 2000 / Math.max(1, ids.length - 1));
   const finishTimes = Object.fromEntries(finishOrder.map((id, rank) => [id, finish + rank * finishStep]));
   const timeline: RacingTimeline = { start, finish, ids, finishOrder, finishTimes, knots: knots.sort((a, b) => a.at - b.at), incidents, obstacles: [], tricks: [], straight: { start: straightStart, waves } };
@@ -133,6 +141,7 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   planRacingTricks(timeline);
   reconcileCourseChallenges(timeline);
   planFallRecoveries(timeline);
+  planLateFall(timeline);
   return timeline;
 }
 
@@ -146,10 +155,11 @@ function plannedDistance(timeline: RacingTimeline, id: string, elapsed: number):
   }
   if (elapsed >= timeline.straight.start) {
     const wave = timeline.straight.waves.find(item => elapsed < item.end);
-    const ranking = wave?.beforeOrder ?? timeline.finishOrder, rank = ranking.indexOf(id);
+    const ranking = wave?.beforeOrder ?? timeline.lateFall?.approachOrder ?? timeline.finishOrder, rank = ranking.indexOf(id);
     const swap = wave?.swaps.find(item => item.aheadId === id || item.behindId === id);
     const change = swap ? (swap.aheadId === id ? -1 : 1) * RANK_GAP * smooth((elapsed - swap.start) / (swap.end - swap.start)) : 0;
-    return clamp((elapsed - timeline.start) / (timeline.finish - timeline.start) - rank * RANK_GAP + change);
+    const origin = timeline.lateFall ? RANK_GAP * smooth((elapsed - timeline.straight.start) / 5500) : 0;
+    return clamp((elapsed - timeline.start) / (timeline.finish - timeline.start) - rank * RANK_GAP + change + origin);
   }
   const rightIndex = timeline.knots.findIndex(knot => knot.at >= elapsed);
   if (rightIndex < 0) return timeline.knots[timeline.knots.length - 1].distances[id];
@@ -189,10 +199,63 @@ export function racingObstacleLoss(obstacle: RacingCourseChallenge, elapsed: num
 }
 
 export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed: number): number {
+  const late = timeline.lateFall;
+  if (late?.actorId === id && late.distanceCurve && elapsed >= late.impact) {
+    if (elapsed >= timeline.finishTimes[id]) return 1;
+    const index = Math.min(late.distanceCurve.length - 2, Math.max(0, Math.floor((elapsed - late.impact) / 16)));
+    const left = late.distanceCurve[index], right = late.distanceCurve[index + 1];
+    return left.distance + (right.distance - left.distance) * clamp((elapsed - left.at) / (right.at - left.at));
+  }
   const lost = timeline.incidents.reduce((sum, incident) => sum + racingIncidentSetback(incident, id, elapsed), 0)
     + timeline.obstacles.filter(obstacle => obstacle.actorId === id).reduce((sum, obstacle) => sum + racingObstacleLoss(obstacle, elapsed), 0)
     + (timeline.tricks ?? []).filter(trick => trick.targetId === id).reduce((sum, trick) => sum + racingTrickLoss(trick, elapsed), 0);
   return clamp(plannedDistance(timeline, id, elapsed) - lost);
+}
+
+/** A rare runner already near the front stays in contention until a visible finish-line misstep. */
+function planLateFall(timeline: RacingTimeline) {
+  if (timeline.ids.length < 2 || !timeline.incidents.length) return;
+  const actorId = timeline.finishOrder.at(-1)!;
+  const signature = timeline.incidents.map(item => item.kind + ':' + item.actorId + ':' + item.beforeOrder.join(',')).join('|');
+  const hash = signature.split('').reduce((value, character) => (Math.imul(value, 31) + character.charCodeAt(0)) >>> 0, 17);
+  if (hash % 8 !== 0) return;
+  const ranking = racingStandings(timeline, timeline.straight.start), actor = ranking.find(item => item.id === actorId)!;
+  if (actor.rank > 3 || ranking[0].distance - actor.distance > .012) return;
+  const scale = (timeline.finish - timeline.start) / 33_500;
+  const impact = timeline.finish - 1450 * scale, lowest = timeline.finish + 650 * scale, recovered = timeline.finish + 1350 * scale;
+  const approachOrder = [actorId, ...timeline.finishOrder.filter(id => id !== actorId)];
+  const beforeOrder = timeline.straight.waves[0]?.beforeOrder ?? timeline.finishOrder;
+  timeline.straight.waves = planStraightWaves(beforeOrder, approachOrder, timeline.straight.start, timeline.finish);
+  timeline.finishTimes[actorId] = timeline.finish + 2200 * scale;
+  const late: RacingLateFall = { actorId, impact, lowest, recovered, outcome: 'clip', approachOrder };
+  timeline.lateFall = late;
+  const pace = 1 / (timeline.finish - timeline.start), step = 16;
+  const initial = readRacingDistance(timeline, actorId, impact);
+  const positions = [{ at: impact, distance: initial }];
+  let distance = initial, previous = impact;
+  for (let at = impact + step; at < recovered + step; at += step) {
+    const current = Math.min(at, recovered), age = (current + previous) / 2;
+    const speed = age < lowest ? pace * (1 - smooth((age - impact) / (300 * scale))) : pace * smooth((age - lowest) / (recovered - lowest));
+    distance += speed * (current - previous); positions.push({ at: current, distance }); previous = current;
+    if (current === recovered) break;
+  }
+  const remaining = 1 - distance, finishTime = timeline.finishTimes[actorId], length = finishTime - recovered;
+  const runner = timeline.finishOrder[1], interval = timeline.finishTimes[runner] - timeline.finish;
+  const endSpeed = RANK_GAP / Math.max(1, interval);
+  const from = distance;
+  for (let at = recovered + step; at < finishTime + step; at += step) {
+    const current = Math.min(at, finishTime), t = (current - recovered) / length;
+    const position = from + remaining * (-2 * t ** 3 + 3 * t ** 2) + pace * length * (t ** 3 - 2 * t ** 2 + t) + endSpeed * length * (t ** 3 - t ** 2);
+    positions.push({ at: current, distance: position });
+    if (current === finishTime) break;
+  }
+  // Resample on one clock so seeking and live playback reproduce the same continuous path.
+  late.distanceCurve = Array.from({ length: Math.ceil((finishTime - impact) / step) + 1 }, (_, index) => {
+    const at = Math.min(finishTime, impact + index * step);
+    let rightIndex = positions.findIndex(point => point.at >= at); if (rightIndex < 1) rightIndex = 1;
+    const left = positions[rightIndex - 1], right = positions[rightIndex];
+    return { at, distance: left.distance + (right.distance - left.distance) * clamp((at - left.at) / (right.at - left.at)) };
+  });
 }
 
 /** A fall stops actual forward travel. Standing up does not restore the ground already lost. */
@@ -258,9 +321,8 @@ function reconcileCourseChallenges(timeline: RacingTimeline) {
     obstacle.distance = readRacingDistance(without, obstacle.actorId, obstacle.encounter);
     let left = obstacle.encounter, right = Math.min(timeline.straight.start - 1, left + 1800 * scale);
     for (let iteration = 0; iteration < 32; iteration++) {
-      const middle = (left + right) / 2, field = timeline.ids.map(id => readRacingDistance(without, id, middle));
-      const span = Math.max(.067, (Math.max(...field) - Math.min(...field)) * 1.35 + .016);
-      if (readRacingDistance(without, obstacle.actorId, middle) < obstacle.distance + span * .0718) left = middle; else right = middle;
+      const middle = (left + right) / 2;
+      if (readRacingDistance(without, obstacle.actorId, middle) < obstacle.distance + RACING_CONTACT_ADVANCE) left = middle; else right = middle;
     }
     obstacle.impact = (left + right) / 2;
     obstacle.lowest = obstacle.impact + (obstacle.outcome === 'clear' ? 350 : 3300) * scale;
@@ -308,9 +370,8 @@ function planCourseChallenges(timeline: RacingTimeline) {
     // The front feet trail the nose. Resolve the physical contact from course progress.
     let left = encounter, right = Math.min(timeline.straight.start - 1, encounter + 1800 * scale);
     for (let iteration = 0; iteration < 32; iteration++) {
-      const middle = (left + right) / 2, field = timeline.ids.map(id => readRacingDistance(timeline, id, middle));
-      const span = Math.max(.067, (Math.max(...field) - Math.min(...field)) * 1.35 + .016);
-      if (readRacingDistance(timeline, actorId, middle) < distance + span * .0718) left = middle; else right = middle;
+      const middle = (left + right) / 2;
+      if (readRacingDistance(timeline, actorId, middle) < distance + RACING_CONTACT_ADVANCE) left = middle; else right = middle;
     }
     const impact = (left + right) / 2, lowest = impact + (failed ? 3300 : 350) * scale;
     const recovered = impact + (failed ? 5000 : 1000) * scale;
@@ -327,9 +388,7 @@ export function racerFinishTime(timeline: RacingTimeline, id: string): number {
 export function readRacingTravel(timeline: RacingTimeline, id: string, elapsed: number): number {
   const finishTime = racerFinishTime(timeline, id);
   if (!Number.isFinite(finishTime) || elapsed <= finishTime) return readRacingDistance(timeline, id, elapsed);
-  const runner = timeline.finishOrder[1];
-  const interval = runner ? timeline.finishTimes[runner] - timeline.finish : 240;
-  const speed = RANK_GAP / Math.max(1, interval);
+  const speed = Math.max(0, (readRacingDistance(timeline, id, finishTime) - readRacingDistance(timeline, id, finishTime - 16)) / 16);
   const age = Math.max(0, elapsed - finishTime);
   return 1 + speed * 1100 * (1 - Math.exp(-age / 1100));
 }

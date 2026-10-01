@@ -14,7 +14,7 @@ const radius = point => (point.x - 500) ** 2 / 303 ** 2 + (point.y - 416) ** 2 /
 const actor = animation => ({ candidate: { id: 'fighter', name: '선수', color: '#ffad72' }, index: 0, x: 500, y: 425, scale: 2, facing: 1, pose: 'guard', angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, phase: 0, animation });
 
 test('edge pushing keeps both feet grounded at contact, reaches the rim and drops only the drawn loser', () => {
-  const order = ['1', '2', '3'];
+  const order = ['1', '2', '3-4'];
   for (const duration of [40_000, 44_000, 62_000]) {
     const round = arenaRounds(order, duration).at(-1), span = round.impact - round.start;
     assert.equal(round.tactic, 'edge');
@@ -48,7 +48,7 @@ test('edge pushing keeps both feet grounded at contact, reaches the rim and drop
     }
     assert.match(arenaStoryState(round, round.impact + 100).action, /뒷발.*경계/);
     const ranks = arenaRanks(order, round.resolve, duration);
-    assert.equal(ranks['1'], 1); assert.equal(ranks['2'], 2); assert.equal(ranks['3'], 3);
+    assert.equal(ranks['1'], 1); assert.equal(ranks['2'], 2); assert.equal(ranks[order[2]], 3);
   }
 });
 
