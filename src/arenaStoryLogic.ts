@@ -42,9 +42,9 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
         state.step = opening ? 0 : technique.stage === 'wrist' ? 1 : technique.stage === 'pivot' ? 2 : 3;
         state.action = ['가볍게 밀어 봅니다. 상대가 버티며 손을 풀어 다시 거리를 잽니다.', '팔을 뻗은 순간 손목을 잡았습니다! 잡은 팔을 놓지 않습니다.', '발을 번갈아 디디며 몸을 돌립니다. 잡힌 상대도 함께 돌아갑니다.', '회전이 붙은 순간 손을 놓았습니다! 상대가 장외로 날아갑니다.'][state.step];
       } else if (round.tactic === 'trip') {
-        state.steps = ['견제 · 회피', '몸통 맞잡기', '발목 걸기', '넘어뜨려 굴리기'];
-        state.step = opening ? 0 : technique.stage === 'grip' ? 1 : technique.stage === 'hook' ? 2 : 3;
-        state.action = ['첫 밀기를 버텼습니다. 손을 풀고 다시 파고듭니다.', '몸통을 잡고 한 발 가까이 들어갑니다. 상대는 뒤로 버팁니다.', '뻗은 발이 상대 발목에 걸렸습니다! 손은 반대쪽으로 밀어 중심을 무너뜨립니다.', '발이 걸려 넘어진 상대가 모래판을 굴러 경계 밖으로 떨어집니다.'][state.step];
+        state.steps = ['견제 · 회피', '몸통 맞잡기', '발목 걸기', '몸통 발차기', '뒤구르기 · 장외'];
+        state.step = opening ? 0 : technique.stage === 'grip' ? 1 : technique.stage === 'hook' ? 2 : technique.stage === 'kick' ? 3 : 4;
+        state.action = ['첫 밀기를 버텼습니다. 손을 풀고 다시 파고듭니다.', '몸통을 잡고 한 발 가까이 들어갑니다. 상대는 뒤로 버팁니다.', '뻗은 발이 상대 발목에 걸렸습니다! 지지발이 흔들립니다.', '잡은 손을 풀고 몸통을 발로 찹니다. 발끝이 상대에게 실제로 닿습니다.', '발차기를 받은 상대가 그 방향으로 뒤구르며 경계 밖으로 떨어집니다.'][state.step];
       } else if (round.tactic === 'suplex') {
         state.steps = ['견제 · 회피', '허리 잡아 들기', '뒤로 넘기기', '잠깐 기절', '경계까지 끌기', '안에서 던지기'];
         state.step = opening ? 0 : technique.stage === 'grip' || technique.stage === 'lift' ? 1 : technique.stage === 'arch' ? 2 : elapsed < round.impact + 300 * round.end / 44000 ? 3 : elapsed < round.impact + 2600 * round.end / 44000 ? 4 : 5;

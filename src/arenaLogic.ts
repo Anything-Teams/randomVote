@@ -3,7 +3,8 @@ import { arenaFinalTechniques, arenaTechniqueExit, arenaTechniqueTargets, isAren
 export { arenaTechniqueTargets, arenaTechniqueExit, isArenaFinalTechnique } from './arenaTechniques';
 
 export type ArenaTactic = 'team' | 'bait' | 'catch' | 'ram' | 'spin' | 'shove' | 'double-shove' | 'edge' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final' | 'armspin' | 'trip' | 'suplex' | 'sidekick';
-export type ArenaRound = { id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; secondaryVictim?: string; counterSide?: 'front' | 'back'; counterFailed?: boolean; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
+export type ArenaChargeSetup = { charger: ArenaPoint; receiver: ArenaPoint; side: 1 | -1 };
+export type ArenaRound = { id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; secondaryVictim?: string; counterSide?: 'front' | 'back'; counterFailed?: boolean; contactSide?: 1 | -1; chargeSetup?: ArenaChargeSetup; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
 export type ArenaPoint = { x: number; y: number };
 export type ArenaMovingBody = ArenaPoint & { facing: number; motorX?: number; motorY?: number };
 export type ArenaPodiumPlace = ArenaPoint & { id: string; rank: 1 | 2 | 3; readyAt: number };
@@ -43,6 +44,11 @@ export function arenaMove(body: ArenaMovingBody, target: ArenaPoint, seconds: nu
   if (Math.abs(body.motorX) > 25) body.facing = body.motorX < 0 ? -1 : 1;
 }
 
+/** Back steps and sidesteps keep the opponent in view instead of following travel direction. */
+export function arenaFaceOpponent(body: ArenaMovingBody, opponent: ArenaPoint): void {
+  if (Math.abs(opponent.x - body.x) > 8) body.facing = opponent.x < body.x ? -1 : 1;
+}
+
 /** Shared by the actors and commentary, so a label describes the visible action. */
 export function arenaBeat(round: ArenaRound, elapsed: number): ArenaBeat {
   const progress = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
@@ -61,6 +67,14 @@ export function arenaChargeState(round: ArenaRound, elapsed: number): ArenaCharg
 
 /** The charging loser runs toward the nearest edge while the opponent moves across its path. */
 export function arenaChargeTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
+  if (round.chargeSetup) {
+    const state = arenaChargeState(round, elapsed), { charger, receiver, side } = round.chargeSetup;
+    const across = receiver.y >= 416 ? -1 : 1;
+    const evade = arenaInsidePoint({ x: receiver.x, y: receiver.y + across * 61 }, 12);
+    const rim = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((charger.y - 416) / 112) ** 2));
+    const endX = round.exchange ? receiver.x + side * 43 : rim - side * 13;
+    return { ...state, side, target: { x: mix(receiver.x, evade.x, state.dodge), y: mix(receiver.y, evade.y, state.dodge) }, charger: { x: mix(charger.x, endX, state.charge), y: charger.y } };
+  }
   const state = arenaChargeState(round, elapsed), side = center.x >= 500 ? 1 : -1;
   const across = center.y >= 430 ? -1 : 1;
   const edgeX = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((center.y - 416) / 112) ** 2));
@@ -71,7 +85,7 @@ export function arenaChargeTargets(round: ArenaRound, elapsed: number, center: A
 /** Both wrestlers travel together toward the rim; the loser never gets lifted. */
 export function arenaEdgeTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
   const p = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
-  const side = center.x >= 500 ? 1 : -1;
+  const side = round.contactSide ?? (center.x >= 500 ? 1 : -1);
   const rim = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((center.y - 416) / 112) ** 2));
   const pressure = ease((p - .48) / .52), shift = Math.sin(ease((p - .28) / .20) * Math.PI * 2) * 3 * (1 - pressure);
   const victimX = mix(center.x + side * 26, rim - side * 3, pressure) + side * shift;
@@ -81,6 +95,12 @@ export function arenaEdgeTargets(round: ArenaRound, elapsed: number, center: Are
 /** The receiver absorbs a charge, steps across it, then lifts from an established grip. */
 export function arenaCatchTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
   const p = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
+  if (round.chargeSetup) {
+    const { charger, receiver, side } = round.chargeSetup, charge = ease((p - .18) / .37), turn = ease((p - .60) / .25);
+    return { side, charge, turn, stage: p < .18 ? 'prepare' as const : p < .55 ? 'charge' as const : p < .72 ? 'catch' as const : 'turn' as const, preparation: ease(p / .18),
+      receiver: { x: receiver.x - side * turn * 8, y: receiver.y + turn * 10 },
+      charger: { x: mix(charger.x, receiver.x - side * 50, charge) + side * turn * 11, y: mix(charger.y, receiver.y, charge) - turn * 13 } };
+  }
   const side = center.x >= 500 ? 1 : -1, charge = ease((p - .18) / .37), turn = ease((p - .60) / .25);
   const receiver = { x: center.x + side * (26 - turn * 8), y: center.y + turn * 10 };
   const charger = { x: mix(center.x - side * 92, center.x - side * 24, charge) + side * turn * 11, y: center.y - turn * 13 };
@@ -90,6 +110,13 @@ export function arenaCatchTargets(round: ArenaRound, elapsed: number, center: Ar
 /** A successful shoulder charge transfers its momentum at contact; neither fighter takes a grip. */
 export function arenaRamTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
   const span = Math.max(1, round.impact - round.start), p = clamp((elapsed - round.start) / span);
+  if (round.chargeSetup) {
+    const { charger, receiver, side } = round.chargeSetup, charge = ease((p - .32) / .50), impact = ease((p - .82) / .18);
+    return { side, charge, impact, preparation: ease((p - .16) / .16),
+      stage: p < .32 ? 'prepare' as const : p < .82 ? 'charge' as const : p < 1 ? 'contact' as const : 'release' as const,
+      driver: { x: mix(charger.x, receiver.x - side * 38, charge) + side * impact * 10, y: mix(charger.y, receiver.y, charge) },
+      victim: { x: receiver.x + side * impact * 18, y: receiver.y + impact * 3 } };
+  }
   const side = center.x >= 500 ? 1 : -1, charge = ease((p - .32) / .50), impact = ease((p - .82) / .18);
   const approach = Math.max(68, Math.min(122, span * .021));
   return { side, charge, impact, preparation: ease((p - .16) / .16),
@@ -101,7 +128,7 @@ export function arenaRamTargets(round: ArenaRound, elapsed: number, center: Aren
 /** The first lift fails before its defender plants, changes the grip and turns once around the vertical axis. */
 export function arenaSpinTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
   const p = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
-  const side = center.x >= 500 ? 1 : -1;
+  const side = round.contactSide ?? (center.x >= 500 ? 1 : -1);
   const lift = ease((p - .26) / .12) * (1 - ease((p - .38) / .06));
   const turnProgress = clamp((p - .52) / .48), ramp = .12;
   // Constant middle speed, eased first/last steps. A complete turn fits inside a normal bout.
@@ -119,7 +146,7 @@ export function arenaSpinTargets(round: ArenaRound, elapsed: number, center: Are
 /** A third fighter bumps a wrestling pair; one catches their footing while the drawn loser is pushed out. */
 export function arenaShoveTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
   const p = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
-  const side = center.x >= 500 ? 1 : -1;
+  const side = round.contactSide ?? (center.x >= 500 ? 1 : -1);
   const rim = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((center.y - 416) / 112) ** 2));
   const approach = ease((p - .18) / .40), pressure = ease((p - .62) / .38);
   const victimX = mix(center.x + side * 26, rim - side * 3, pressure);
@@ -131,7 +158,7 @@ export function arenaShoveTargets(round: ArenaRound, elapsed: number, center: Ar
 
 /** A third person's contact passes through the locked pair before both lose their back steps. */
 export function arenaDoubleShoveTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
-  const p = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start)), side = center.x >= 500 ? 1 : -1;
+  const p = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start)), side = round.contactSide ?? (center.x >= 500 ? 1 : -1);
   const approach = ease((p - .15) / .30), pressure = ease((p - .49) / .51);
   const rimAt = (y: number) => 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((y - 416) / 112) ** 2));
   const victimY = center.y + 14, helperY = center.y - 14;
@@ -158,7 +185,7 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
     const linked = !!technique.grip;
     action.stage = technique.stage === 'approach' || technique.stage === 'reset' ? 'approach' : linked ? 'link' : post ? 'throw' : 'counter';
     action.lift = technique.lift; action.liftedId = technique.lift > 0 ? v : undefined;
-    const ap: ArenaActionPose = technique.stage === 'probe' ? 'push' : technique.stage === 'reset' ? 'guard' : round.tactic === 'armspin' ? technique.stage === 'pivot' ? 'grapple' : post ? 'throw' : 'grapple' : round.tactic === 'trip' ? technique.stage === 'hook' ? 'trip' : post ? 'guard' : 'push' : round.tactic === 'suplex' ? post ? 'drag' : technique.stage === 'lift' || technique.stage === 'arch' ? 'suplex' : 'grapple' : technique.stage === 'first-kick' || technique.stage === 'second-kick' || technique.stage === 'impact' ? 'sidekick' : 'guard';
+    const ap: ArenaActionPose = technique.stage === 'probe' ? 'push' : technique.stage === 'reset' ? 'guard' : round.tactic === 'armspin' ? technique.stage === 'pivot' ? 'grapple' : post ? 'throw' : 'grapple' : round.tactic === 'trip' ? technique.stage === 'hook' || technique.stage === 'kick' ? 'trip' : post ? 'guard' : 'push' : round.tactic === 'suplex' ? post ? 'drag' : technique.stage === 'lift' || technique.stage === 'arch' ? 'suplex' : 'grapple' : technique.stage === 'first-kick' || technique.stage === 'second-kick' || technique.stage === 'impact' ? 'sidekick' : 'guard';
     const vp: ArenaActionPose = technique.stage === 'reset' ? 'dodge' : technique.stage === 'stunned' || round.tactic === 'suplex' && post ? 'stunned' : 'brace';
     action.actors = [
       { ...actor(a, 'aggressor', technique.aggressor.x - 500, technique.aggressor.y - 416, ap, technique.phase, linked ? v : undefined, '최종 기술'), turn: technique.yaw },
@@ -243,6 +270,7 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
   else if (post && !isArenaFinalTechnique(round)) action.actors.forEach(part => { if (part.id !== v && part.id !== round.secondaryVictim) { part.pose = round.tactic === 'ram' ? 'brace' : round.tactic === 'bait' ? 'dodge' : round.tactic === 'double-shove' ? 'push' : round.tactic === 'edge' || round.tactic === 'shove' ? part.id === h ? 'dodge' : 'push' : elapsed - round.impact < 350 * (round.resolve - round.impact) / 1100 ? 'throw' : 'guard'; part.gripId = undefined; } });
   if (post && round.tactic === 'spin') action.actors.forEach(part => { part.gripId = undefined; });
   if (action.stage === 'approach' && round.tactic !== 'catch' && round.tactic !== 'shove' && round.tactic !== 'double-shove' && round.tactic !== 'ram') action.actors.forEach(part => { if (round.tactic !== 'bait' || part.pose !== 'brace') part.pose = 'guard'; part.gripId = undefined; });
+  if (round.contactSide === -1 && !isArenaFinalTechnique(round) && !['bait', 'catch', 'ram', 'spin', 'shove', 'double-shove', 'edge'].includes(round.tactic)) action.actors.forEach(part => { part.offset.x *= -1; });
   return action;
 }
 
@@ -344,7 +372,7 @@ export function arenaActionWords(round: ArenaRound, elapsed: number): { id: stri
   if (round.tactic === 'trip' || round.tactic === 'suplex') {
     const tech = arenaTechniqueTargets(round, elapsed, { x: 500, y: 416 });
     const exit = elapsed >= round.impact ? arenaTechniqueExit(round, elapsed - round.impact, { x: 500, y: 416 }, { x: 885, y: 436 }, 1, unit) : undefined;
-    if (round.tactic === 'trip') return exit?.stage === 'roll' ? [{ id: v, word: '구르기!' }] : tech.stage === 'hook' && !exit ? [{ id: a, word: '발걸기!' }] : tech.stage === 'fall' && !exit ? [{ id: v, word: '넘어진다!' }] : [];
+    if (round.tactic === 'trip') return exit?.stage === 'roll' ? [{ id: v, word: '구르기!' }] : tech.stage === 'hook' && !exit ? [{ id: a, word: '발걸기!' }] : tech.stage === 'kick' && !exit ? [{ id: a, word: '발차기!' }] : tech.stage === 'fall' && !exit ? [{ id: v, word: '넘어진다!' }] : [];
     if (exit) return exit.stage === 'drag' ? [{ id: a, word: '끌기!' }] : exit.stage === 'rim-toss' && exit.phase < .40 ? [{ id: a, word: '던지기!' }] : [];
     return tech.stage === 'lift' || tech.stage === 'arch' ? [{ id: a, word: '던지기!' }] : [];
   }
@@ -357,7 +385,14 @@ export function arenaActionWords(round: ArenaRound, elapsed: number): { id: stri
     const ram = arenaRamTargets(round, elapsed, { x: 500, y: 416 });
     return ram.stage === 'charge' || ram.stage === 'contact' || ram.stage === 'release' ? [{ id: a, word: ram.stage === 'charge' ? '돌진!' : '박치기!' }] : [];
   }
-  if (round.tactic === 'catch' && arenaCatchTargets(round, elapsed, { x: 500, y: 416 }).stage === 'charge') return [{ id: v, word: '돌진!' }];
+  if (round.tactic === 'catch') {
+    const caught = arenaCatchTargets(round, elapsed, { x: 500, y: 416 });
+    return elapsed >= round.impact ? [{ id: a, word: '던지기!' }] : caught.stage === 'charge' ? [{ id: v, word: '돌진!' }] : caught.stage === 'catch' ? [{ id: a, word: '막기!' }] : caught.stage === 'turn' ? [{ id: a, word: '되치기!' }] : [];
+  }
+  if (round.tactic === 'spin') {
+    const spin = arenaSpinTargets(round, elapsed, { x: 500, y: 416 });
+    return spin.stage === 'plant' ? [{ id: a, word: '막기!' }] : spin.stage === 'reverse' || spin.stage === 'spin' ? [{ id: a, word: '되치기!' }] : spin.stage === 'release' ? [{ id: a, word: '던지기!' }] : [];
+  }
   if (action.stage === 'failed-counter') return [{ id: a, word: '막혔다!' }, { id: v, word: '버티기!' }];
   if (action.stage === 'reset') return [{ id: v, word: '회피!' }];
   if ((round.tactic === 'shove' || round.tactic === 'double-shove' || round.tactic === 'edge') && (action.stage === 'joint-attack' || elapsed >= round.impact)) return [{ id: a, word: '밀기!' }];
@@ -365,11 +400,30 @@ export function arenaActionWords(round: ArenaRound, elapsed: number): { id: stri
     const tech = arenaTechniqueTargets(round, elapsed, { x: 500, y: 416 });
     return tech.stage === 'first-kick' || tech.stage === 'second-kick' || tech.stage === 'impact' ? [{ id: a, word: '옆차기!' }] : [];
   }
+  if (round.tactic === 'brace' || round.tactic === 'counter') return action.stage === 'approach' ? [] : elapsed >= round.impact ? [{ id: a, word: '던지기!' }] : action.lift > 4 ? [{ id: a, word: '되치기!' }] : [{ id: a, word: '막기!' }];
   return action.actors.filter(part => action.attackers.includes(part.id) && (part.pose === 'lift' && part.phase > .25 || part.pose === 'throw' || part.pose === 'suplex')).map(part => ({ id: part.id, word: '던지기!' }));
 }
 
 /** The actual encounter chooses its finish; a central pair never walks to a prescribed rim. */
-export function arenaContactRound(round: ArenaRound, center: ArenaPoint): ArenaRound {
+export function arenaContactRound(round: ArenaRound, center: ArenaPoint, participants?: { aggressor: ArenaPoint; victim: ArenaPoint }): ArenaRound {
+  if (participants) {
+    const contactSide = participants.victim.x >= participants.aggressor.x ? 1 : -1;
+    const actual: ArenaRound = { ...round, contactSide };
+    if (['bait', 'catch', 'ram'].includes(round.tactic)) {
+      const charger = round.tactic === 'ram' ? participants.aggressor : participants.victim;
+      const receiver = round.tactic === 'ram' ? participants.victim : participants.aggressor;
+      const side = receiver.x >= charger.x ? 1 : -1, distance = Math.abs(receiver.x - charger.x);
+      const runTime = round.tactic === 'bait' ? Math.min(1600, (round.impact - round.start) * .64) : (round.impact - round.start) * (round.tactic === 'catch' ? .37 : .50);
+      const rim = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((charger.y - 416) / 112) ** 2));
+      const chargeTravel = round.tactic === 'bait' && !round.exchange ? Math.abs(rim - side * 13 - charger.x) : Math.max(0, distance - 38);
+      const clearRun = distance >= 86 && distance <= 215 && Math.abs(receiver.y - charger.y) <= 22 && chargeTravel / Math.max(.001, runTime / 1000) <= 140;
+      const nearEdge = round.tactic !== 'bait' || round.exchange || Math.abs(rim - receiver.x) <= 95;
+      if (clearRun && nearEdge) return { ...actual, chargeSetup: { charger: { x: charger.x, y: charger.y }, receiver: { x: receiver.x, y: receiver.y }, side } };
+      return { ...actual, tactic: round.tactic === 'ram' ? 'counter' : 'brace', helper: undefined, chargeSetup: undefined };
+    }
+    if (['edge', 'shove'].includes(round.tactic) && (arenaRimDistance(center) > 112 || contactSide !== (center.x >= 500 ? 1 : -1))) return { ...actual, tactic: 'brace', helper: undefined };
+    round = actual;
+  }
   if (round.exchange || arenaRimDistance(center) <= 112) return round;
   const tactic = round.tactic === 'bait' || round.tactic === 'shove' ? 'catch' : round.tactic === 'edge' ? 'brace' : round.tactic;
   return tactic === round.tactic ? round : { ...round, tactic, helper: undefined };
@@ -598,7 +652,7 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
     lift: `${a}, ${v}의 몸통을 잡습니다. 무릎을 굽혀 체중을 싣고 들어 올립니다.`,
     final: `${a} · ${v}, 팽팽한 힘겨루기. 한 번의 중심 이동이 승부를 가릅니다.`,
     armspin: `${a}가 ${v}의 손목을 잡습니다. 발을 바꿔 디디며 회전해 손을 놓아 날립니다.`,
-    trip: `${a}가 몸을 맞잡고 ${v}의 발목을 겁니다. 넘어진 상대를 굴려 장외로 보냅니다.`,
+    trip: `${a}가 ${v}의 발목을 건 뒤 몸통을 발로 찹니다. ${v}는 차인 방향으로 뒤구르며 장외로 나갑니다.`,
     suplex: `${a}가 허리를 잡아 뒤로 넘깁니다. 기절한 ${v}의 발목을 잡고 경계까지 끈 뒤, 모래판 안에 남아 상대만 밖으로 넘깁니다.`,
     sidekick: `${a}가 첫 차기로 거리를 재고 도약합니다. 두 번째 옆차기가 ${v}의 몸통에 닿아 장외로 날립니다.`,
   };

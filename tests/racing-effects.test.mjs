@@ -99,7 +99,7 @@ test('opponents close the lane, respond to a pass, and separate without changing
     const joined = placeRacingDuel(incident, base, [], 12_000);
     assert.ok(Math.abs(joined[0].y - joined[1].y) < 50, 'the defence and attempted pass occur together on screen');
     assert.ok(racingIncidentMotion(incident, '0', 11_600).check > .6 || racingIncidentMotion(incident, '0', 13_700).crouch > .6);
-    assert.ok(racingIncidentMotion(incident, '1', 13_800).crouch > .5, 'the defending rider responds to the attack');
+    assert.ok(racingIncidentMotion(incident, '1', 14_800).crouch > .5, 'the defending rider pursues after regaining balance and holding the lost gap');
     assert.deepEqual(placeRacingDuel(incident, base, [], incident.end), base);
   }
 });
@@ -180,7 +180,7 @@ test('shoulder bumps select a close real crossing and impede only the contacted 
 test('bump approach, weight shift and separation keep their course positions and fixed neighbouring rows', () => {
   const fixture = Array.from({ length: 10 }, (_, index) => ({ ...players[index], id: String(index + 1) }));
   const finish = ['4', '1', '7', '2', '9', '3', '5', '10', '6', '8'];
-  for (const [count, seed] of [[2, 1], [10, 3]]) for (const [width, height] of [[320, 180], [960, 540]]) {
+  for (const [count, seed] of [[2, 1], [10, 2]]) for (const [width, height] of [[320, 180], [960, 540]]) {
     const list = fixture.slice(0, count), order = finish.filter(id => list.some(item => item.id === id));
     const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed)), bump = timeline.bumps[0];
     assert.ok(bump, 'the verified replay includes the physical check');
@@ -208,7 +208,7 @@ test('bump approach, weight shift and separation keep their course positions and
 test('a bump connects the painted shoulder contours and an out-of-reach rider never braces', () => {
   const fixture = Array.from({ length: 10 }, (_, index) => ({ ...players[index], id: String(index + 1) }));
   const finish = ['4', '1', '7', '2', '9', '3', '5', '10', '6', '8'];
-  for (const [count, seed] of [[2, 1], [10, 3]]) {
+  for (const [count, seed] of [[2, 1], [10, 2]]) {
     const list = fixture.slice(0, count), order = finish.filter(id => list.some(item => item.id === id));
     const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed)), bump = timeline.bumps[0];
     for (const age of [0, 64, 100]) {
@@ -343,12 +343,15 @@ test('live incident, obstacle and trick boundaries blend without resetting the r
     const poseAt = (id, index, elapsed) => {
       const incident = timeline.incidents.find(item => elapsed >= item.start && elapsed < item.end + 1600), trick = timeline.tricks.find(item => elapsed >= item.start && elapsed < item.recovered);
       const motion = combineRacingHorseMotion(racingIncidentMotion(incident, id, elapsed), racingTrickMotion(trick, id, elapsed, field), ...timeline.obstacles.filter(item => item.actorId === id).map(item => racingObstacleMotion(item, elapsed)));
-      return raceHorseAttachments(index, elapsed, .9, false, { phase: readRacingDistance(timeline, id, elapsed) * 62 + index * .193, ...motion });
+      return raceHorseAttachments(index, elapsed, .9, false, { phase: racingGaitPhase(index, elapsed), ...motion });
     };
     for (const at of boundaries) for (const [index, player] of list.entries()) {
       const left = poseAt(player.id, index, at - 1), right = poseAt(player.id, index, at + 1);
       for (const point of ['hand', 'helmet', 'boot']) assert.ok(Math.hypot(right[point].x - left[point].x, right[point].y - left[point].y) < .65, `pose reset: ${count}/${seed}/${player.id}/${at}/${point}`);
-      assert.ok(Math.abs(right.bounce - left.bounce) < .12 && Math.abs(right.pitch - left.pitch) < .012, 'body position and angle also remain continuous');
+      // Approach the boundary closely so an ongoing fall's vertical speed is
+      // measured separately from an instantaneous reset of the body transform.
+      const beforeBoundary = poseAt(player.id, index, at - .001), afterBoundary = poseAt(player.id, index, at + .001);
+      assert.ok(Math.abs(afterBoundary.bounce - beforeBoundary.bounce) < .001 && Math.abs(afterBoundary.pitch - beforeBoundary.pitch) < .00001, `body reset: ${count}/${seed}/${player.id}/${at}`);
     }
   }
 });
@@ -377,18 +380,25 @@ test('hoof-contact dust fades in continuously instead of adding a bright particl
 });
 
 
-test('staggered gate mouths, oval start markers and equal remaining lane distance share their geometry', () => {
-  for (const count of [2, 6, 10]) for (const [w, h] of [[320, 180], [960, 540]]) {
+test('every gate front and painted nose meets one straight start line, with equal remaining lane distance', () => {
+  for (const count of [2, 3, 6, 10]) for (const [w, h] of [[320, 180], [706, 543], [960, 540]]) {
     const layout = racingStartingLayout(w, h, count), { ctx, lines, ellipses } = recordingContext();
     drawRacingStartingGate(ctx, w, h, players.slice(0, count), 5000, true, 5000);
     const heads = ellipses.filter(item => item.rx === 3 && item.ry === 4.4);
     assert.equal(heads.length, count);
     const scale = Math.max(.1, Math.min(layout.slotWidth / 15, h / 135));
+    const [lineStart, lineEnd] = layout.startLine;
+    const dx = lineEnd.x - lineStart.x, dy = lineEnd.y - lineStart.y;
+    const distanceToLine = point => Math.abs(dx * (point.y - lineStart.y) - dy * (point.x - lineStart.x)) / Math.hypot(dx, dy);
+    for (const line of lines.filter(line => line.color === '#eee3bc')) {
+      for (const endpoint of line.points) assert.ok(distanceToLine(endpoint) < 1e-7, 'a gate front cannot tilt away from the continuous track start line');
+    }
     for (let index = 0; index < count; index++) {
       const lane = racingLaneStart(index, count), start = racingCoursePoint(w, h, 0, index, count), finish = racingCoursePoint(w, h, 1, index, count);
       assert.ok(Math.abs((1 - lane.advance) * lane.lap - 1600) < 1e-9, 'outer start compensates the longer route');
       const mark = layout.slots[index], head = heads[index], forward = { x: Math.cos(mark.angle), y: Math.sin(mark.angle) };
       const nose = { x: head.x + forward.x * 4.4 * scale, y: head.y + forward.y * 4.4 * scale };
+      assert.ok(distanceToLine(nose) < 1e-7, 'every actual nose starts at the same transverse boundary');
       assert.ok(Math.abs((nose.x - mark.x) * forward.x + (nose.y - mark.y) * forward.y) < 1e-7, 'the painted nose meets its own staggered stripe');
       assert.ok(lines.some(line => line.color === '#eee3bc' && Math.hypot((line.points[0].x + line.points[1].x) / 2 - mark.x, (line.points[0].y + line.points[1].y) / 2 - mark.y) < 1e-7), 'the rendered start stripe uses the horse marker');
       if (index) {

@@ -478,7 +478,7 @@ function rawLadderRig(actor: LadderArtActor, geometry: LadderGeometry, clock: nu
   const hipWorld = toWorld(hip);
   const shoulderRise = actor.pose === 'climb' ? mix(12, 10, ease(topOut)) : 10;
   const shoulders = [{ x: hip.x - 4.2, y: hip.y - shoulderRise }, { x: hip.x + 4.2, y: hip.y - shoulderRise }].map(toWorld) as [Point, Point];
-  if (actor.pose === 'win') shoulders[1].y -= 2 * scale; // a raised shoulder supports the treasure above the helmet
+  if (actor.pose === 'win') shoulders[1].y -= 2 * scale; // a raised shoulder supports the treasure above the head
   let handWorld = hands.map(toWorld) as [Point, Point];
   let footWorld = feet.map(point => ({ x: base.x + point.x * facing * scale, y: base.y + point.y * scale })) as [Point, Point];
   if (actor.floating && (actor.pose === 'hang' || actor.pose === 'clamber')) {
@@ -543,10 +543,9 @@ export function sampleLadderRig(actor: LadderArtActor, geometry: LadderGeometry,
 }
 
 /** A separate clothed climbing rig; all exposed parts share the same skin palette. */
-export function drawLadderActor(ctx: CanvasRenderingContext2D, actor: LadderArtActor, geometry: LadderGeometry, clock: number, reduced = false, focused = false) {
+export function drawLadderActor(ctx: CanvasRenderingContext2D, actor: LadderArtActor, geometry: LadderGeometry, clock: number, reduced = false, _focused = false) {
   const rig = sampleLadderRig(actor, geometry, clock, reduced), s = rig.scale;
   const skin = colors[actor.index % colors.length], shade = tint(skin, .79), light = tint(skin, 1.12), uniform = actor.candidate.color;
-  if (focused) { rectangle(ctx, rig.head.x - 4 * s, rig.head.y - 11 * s, 8 * s, 1.2 * s, '#f4d58c'); }
   rig.feet.forEach((foot, side) => {
     line(ctx, rig.legRoots[side], rig.knees[side], 4.4 * s, tint(uniform, side ? .72 : .59));
     line(ctx, rig.knees[side], foot, 3.9 * s, '#283e50');
@@ -596,23 +595,19 @@ export function drawLadderActor(ctx: CanvasRenderingContext2D, actor: LadderArtA
     rectangle(ctx, -headWidth / 2, -3.8, headWidth, 7.2, hair[actor.index % 4]);
     rectangle(ctx, -headWidth / 2 + .7, .5, headWidth - 1.4, 2.6, tint(hair[actor.index % 4], .75));
     rectangle(ctx, -headWidth / 2 - .6, -.1, .8, 1.8, shade); rectangle(ctx, headWidth / 2 - .2, -.1, .8, 1.8, shade);
-    rectangle(ctx, -headWidth / 2 - .8, -7, headWidth + 1.6, 5.2, '#d4bc7d');
-    rectangle(ctx, -headWidth / 2 + .2, -6.4, headWidth - .4, 3.5, '#ead38f');
-    rectangle(ctx, -.7, -6.4, 1.4, 4.4, '#b8a36e'); // rear helmet seam
-    rectangle(ctx, -headWidth / 2 - 1.2, -2.6, headWidth + 2.4, 1, '#80714e');
+    rectangle(ctx, -headWidth / 2 + .5, -4.2, headWidth - 1, 1.3, tint(hair[actor.index % 4], 1.18));
   } else {
     rectangle(ctx, -2, 2.9, 4, 3, skin); rectangle(ctx, -headWidth / 2, -4, headWidth, 8, skin);
     rectangle(ctx, -headWidth / 2 + 1.1, -3, headWidth - 3, 1.3, light); rectangle(ctx, headWidth / 2 - 1.5, -2, 1.5, 5.6, shade);
     rectangle(ctx, -headWidth / 2 - .6, -5, headWidth + 1.2, 2.4, hair[actor.index % 4]);
-    rectangle(ctx, -headWidth / 2 - 1, -7, headWidth + 2, 3.2, '#ead38f'); rectangle(ctx, -headWidth / 2 - 1.7, -4.1, headWidth + 3.4, 1.1, '#6f6149');
-    rectangle(ctx, -2, -6.2, 2.4, .7, '#fff5d0');
+    rectangle(ctx, -headWidth / 2 + .8, -5.1, headWidth - 1.6, 1, tint(hair[actor.index % 4], 1.18));
     // Both eyes remain visible in a three-quarter turn. The facial plane and
-    // helmet brim shift together instead of deleting half of a front face.
+    // hairline shift together instead of deleting half of a front face.
     rectangle(ctx, -2.7 + quarter * 1.2, -.7, 1.2, 1.3, '#172d3d'); rectangle(ctx, 1.8 + quarter * .5, -.7, 1.2, 1.3, '#172d3d');
     rectangle(ctx, -.9 + quarter, 2.4, 2.3, actor.pose === 'fall' || actor.pose === 'hang' ? 1.6 : .8, '#694e3a');
     if (quarter > .01) {
       rectangle(ctx, -headWidth / 2, -2.5, 1.2, 4.8, hair[actor.index % 4]);
-      rectangle(ctx, headWidth / 2, -4.1, quarter * 1.3, 1.1, '#6f6149');
+      rectangle(ctx, headWidth / 2 - .3, -4.1, quarter * 1.3, 1.1, hair[actor.index % 4]);
     }
   }
   ctx.restore();

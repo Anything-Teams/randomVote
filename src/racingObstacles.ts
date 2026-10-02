@@ -1,4 +1,4 @@
-import { racingObstacleLoss, racingStandings, type RacingIncident, type RacingTimeline, type RacingCourseChallenge } from './racingNarrative';
+import { racingObstacleLoss, racingStandings, racingRecoveryEffort, type RacingIncident, type RacingTimeline, type RacingCourseChallenge } from './racingNarrative';
 import type { RaceHorseMotion } from './racingArt';
 import type { RacingCamera } from './racingCamera';
 import type { RacingEffectPlacement } from './racingEffects';
@@ -22,21 +22,24 @@ export function racingObstacleStatus(timeline: RacingTimeline, obstacle: RacingC
   const currentRank = racingStandings(timeline, elapsed).find(item => item.id === obstacle.actorId)?.rank ?? 1;
   const scale = (timeline.finish - timeline.start) / 33_500;
   const stage = elapsed < obstacle.encounter ? 'approach' : elapsed < obstacle.impact ? 'jump' : obstacle.outcome === 'clear' ? 'clear'
-    : elapsed < obstacle.impact + 750 * scale ? 'impact' : elapsed < obstacle.recovered ? 'recover' : elapsed < (obstacle.catchupEnd ?? obstacle.recovered) ? 'chase' : 'clear';
+    : elapsed < obstacle.impact + 750 * scale ? 'impact' : elapsed < obstacle.recovered ? 'recover' : elapsed < (obstacle.catchupStart ?? obstacle.recovered) ? 'rhythm' : elapsed < (obstacle.catchupEnd ?? obstacle.recovered) ? 'chase' : 'clear';
   return { stage, beforeRank, currentRank, lost: racingObstacleLoss(obstacle, elapsed) };
 }
 
 /** Failed landings gather the legs, check the reins, regain balance, then chase the lost ground. */
-export function racingObstacleMotion(obstacle: Pick<RacingCourseChallenge, 'outcome' | 'impact' | 'lowest' | 'recovered'>, elapsed: number, reduced = false): RaceHorseMotion {
-  if (reduced || obstacle.outcome === 'clear' || elapsed < obstacle.impact || elapsed >= obstacle.recovered) return {};
+export function racingObstacleMotion(obstacle: Pick<RacingCourseChallenge, 'outcome' | 'impact' | 'lowest' | 'recovered' | 'catchupStart' | 'catchupEnd'>, elapsed: number, reduced = false): RaceHorseMotion {
+  if (reduced || obstacle.outcome === 'clear' || elapsed < obstacle.impact) return {};
+  if (elapsed >= obstacle.recovered) {
+    if (obstacle.catchupStart === undefined || obstacle.catchupEnd === undefined || elapsed <= obstacle.catchupStart || elapsed >= obstacle.catchupEnd) return {};
+    return { crouch: racingRecoveryEffort(elapsed, obstacle.catchupStart, obstacle.catchupEnd) * .72 };
+  }
   const scale = Math.max(.8, (obstacle.recovered - obstacle.lowest) / 1500), age = (elapsed - obstacle.impact) / (1100 * scale);
   const ease = (value: number) => { const p = Math.max(0, Math.min(1, value)); return p * p * (3 - 2 * p); };
   const stagger = age < .95 ? Math.sin(Math.PI * ease(age / .95)) : age < 1.6 ? -.38 * Math.sin(Math.PI * ease((age - .95) / .65)) : 0;
-  const recovery = ease((elapsed - obstacle.lowest) / Math.max(1, obstacle.recovered - obstacle.lowest));
   const missedStep = Math.sin(Math.PI * ease(Math.min(1, age / 1.1)));
   const fall = ease(age / .38) * (1 - ease((elapsed - obstacle.lowest) / Math.min(1100 * scale, obstacle.recovered - obstacle.lowest)));
   const check = Math.max(Math.sin(Math.PI * ease(Math.min(1, age / 1.3))) * .95, fall * .58);
-  return { fall, spill: fall, stumble: stagger * .28, check, trip: obstacle.outcome === 'clip' ? missedStep : 0, slip: obstacle.outcome === 'slip' ? missedStep : 0, crouch: Math.sin(Math.PI * recovery) * .9 };
+  return { fall, spill: fall, stumble: stagger * .28, check, trip: obstacle.outcome === 'clip' ? missedStep : 0, slip: obstacle.outcome === 'slip' ? missedStep : 0 };
 }
 
 /** The collapsed body stays on its course row while passing horses gain real forward distance. */

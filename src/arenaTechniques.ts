@@ -10,7 +10,7 @@ const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
 /** A short blocked attempt precedes the finishing contact. All targets stay relative to the current pair. */
 export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
   const phase = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
-  const side = center.x < 500 ? -1 : 1;
+  const side = round.contactSide ?? (center.x < 500 ? -1 : 1);
   const probe = Math.sin(clamp((phase - .08) / .20) * Math.PI);
   const frame = {
     stage: phase < .08 ? 'approach' : phase < .20 ? 'probe' : phase < .30 ? 'reset' : 'grip', side, phase,
@@ -23,25 +23,26 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
   if (phase < .30) return frame;
   if (round.tactic === 'armspin') {
     const turn = ease((phase - .44) / .56), angle = turn * Math.PI * 1.35;
-    const radius = Math.min(50, Math.max(26, (round.impact - round.start) / 1000 * .56 * 118 / (Math.PI * 1.35 * 1.5)));
+    const radius = Math.min(72, Math.max(54, (round.impact - round.start) / 1000 * .56 * 165 / (Math.PI * 1.35 * 1.5)));
     const take = ease((phase - .30) / .14);
     frame.aggressor.x = center.x - side * mix(24, 14, take);
-    frame.victim = { x: frame.aggressor.x + side * mix(48, radius, take) * Math.cos(angle), y: center.y + Math.sin(angle) * radius * .42 };
-    frame.yaw = angle; frame.lift = ease((phase - .50) / .22) * 10;
-    frame.victimAngle = -side * Math.cos(angle) * ease((phase - .50) / .28) * .86;
+    frame.victim = { x: frame.aggressor.x + side * mix(48, radius, take) * Math.cos(angle), y: center.y + Math.sin(angle) * radius * .28 };
+    frame.yaw = angle; frame.lift = ease((phase - .50) / .22) * 42;
+    // The wrist leads while the torso and extended legs trail outside the turning pivot.
+    frame.victimAngle = -side * Math.cos(angle) * ease((phase - .50) / .28) * 1.2;
     frame.victimPose = phase >= .50 ? 'held' : undefined;
     frame.grip = phase >= .30 && elapsed < round.impact ? 'wrist' : undefined;
     frame.stage = phase < .30 ? frame.stage : phase < .44 ? 'wrist' : elapsed < round.impact ? 'pivot' : 'release';
   } else if (round.tactic === 'trip') {
-    const hook = ease((phase - .43) / .16), fall = ease((phase - .62) / .38);
+    const hook = ease((phase - .43) / .15), kick = ease((phase - .60) / .12), fall = ease((phase - .78) / .22);
     frame.aggressor.x = center.x - side * (24 - hook * 6);
     frame.victim.x = center.x + side * (24 + fall * 8);
-    frame.contact = hook * (1 - fall);
+    frame.contact = phase < .60 ? hook * (1 - ease((phase - .58) / .02)) : kick * (1 - ease((phase - .74) / .04));
     frame.victimAngle = side * Math.PI * .48 * fall;
     frame.lift = Math.sin(fall * Math.PI) * 2;
-    frame.victimPose = phase >= .64 ? 'roll' : undefined;
-    frame.grip = phase >= .30 && phase < .74 ? 'waist' : undefined;
-    frame.stage = phase < .30 ? frame.stage : phase < .43 ? 'grip' : phase < .64 ? 'hook' : elapsed < round.impact ? 'fall' : 'roll';
+    frame.victimPose = phase >= .78 ? 'roll' : undefined;
+    frame.grip = phase >= .30 && phase < .60 ? 'waist' : undefined;
+    frame.stage = phase < .30 ? frame.stage : phase < .43 ? 'grip' : phase < .60 ? 'hook' : phase < .78 ? 'kick' : elapsed < round.impact ? 'fall' : 'roll';
   } else if (round.tactic === 'suplex') {
     const lift = ease((phase - .34) / .22), arch = ease((phase - .56) / .34);
     const take = ease((phase - .30) / .04);
@@ -77,14 +78,14 @@ export function arenaSuplexRim(origin: ArenaPoint, direction: number): ArenaPoin
   return { x: 500 + direction * Math.max(80, outsideFootAllowance - 80), y };
 }
 
-/** A sweep rolls the lying body. A suplex drags to the rim, then releases only the opponent. */
+/** A kick rolls the body backwards in its travel direction. A suplex drags to the rim before release. */
 export function arenaTechniqueExit(round: ArenaRound, age: number, origin: ArenaPoint, landing: ArenaPoint, direction: number, unit = 1, preparation = { lift: 0, angle: 0 }): ArenaThrowFrame | undefined {
   const ms = Math.max(0, age / Math.max(.001, unit));
   if (round.tactic === 'trip') {
     if (ms < 880) {
       const phase = clamp(ms / 880), groundX = mix(origin.x, landing.x, ease(phase)), groundY = mix(origin.y, landing.y, ease(phase));
       const height = preparation.lift * (1 - ease(phase));
-      return { x: groundX, y: groundY - height, groundX, groundY, height, angle: preparation.angle, yaw: direction * Math.PI * 2 * ease(phase), phase, stage: 'roll' };
+      return { x: groundX, y: groundY - height, groundX, groundY, height, angle: preparation.angle + direction * Math.PI * 2 * ease(phase), yaw: 0, phase, stage: 'roll' };
     }
   } else if (round.tactic === 'suplex') {
     const finish = Math.max(700, Math.min(2600, (round.resolve - round.impact) / Math.max(.001, unit) - 1400));
@@ -106,7 +107,8 @@ export function arenaTechniqueExit(round: ArenaRound, age: number, origin: Arena
     if (ms < finish + 1580) return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: landedAngle * (1 - ease((ms - finish - 1080) / 500)), phase: (ms - finish - 1080) / 500, stage: 'recover' };
     return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: 0, phase: 1, stage: 'walk' };
   } else return undefined;
-  if (ms < 1100) return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: preparation.angle, yaw: direction * Math.PI * 2, phase: (ms - 880) / 220, stage: 'land' };
-  if (ms < 1600) return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: preparation.angle * (1 - ease((ms - 1100) / 500)), yaw: direction * Math.PI * 2, phase: (ms - 1100) / 500, stage: 'recover' };
-  return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: 0, yaw: direction * Math.PI * 2, phase: 1, stage: 'walk' };
+  const turn = direction * Math.PI * 2, landedAngle = preparation.angle + turn;
+  if (ms < 1100) return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: landedAngle, yaw: 0, phase: (ms - 880) / 220, stage: 'land' };
+  if (ms < 1600) return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: turn + preparation.angle * (1 - ease((ms - 1100) / 500)), yaw: 0, phase: (ms - 1100) / 500, stage: 'recover' };
+  return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: turn, yaw: 0, phase: 1, stage: 'walk' };
 }

@@ -39,9 +39,9 @@ test('wrist control is established before the pivot and is released only when th
   }
 });
 
-test('the rendered held wrist stays connected through either direction of the airborne pivot', () => {
+test('the rendered held wrist stays connected while the extended opponent rises through either direction of the pivot', () => {
   const round = bout('armspin');
-  for (const center of centers) for (const phase of [.70, .80, .90]) {
+  for (const center of centers) for (let phase = .50; phase < 1; phase += .01) {
     const frame = at(round, phase, center), clock = round.start + (round.impact - round.start) * phase;
     const aggressor = fighter(0, { ...frame.aggressor, facing: frame.side, pose: 'grapple', phase, yaw: frame.yaw, pivotTurn: frame.yaw });
     const victim = fighter(1, { x: frame.victim.x, y: frame.victim.y - frame.lift, depthY: frame.victim.y, facing: aggressor.x > frame.victim.x ? 1 : -1, pose: 'held', phase, angle: frame.victimAngle, gripMode: 'wrist' });
@@ -55,6 +55,31 @@ test('the rendered held wrist stays connected through either direction of the ai
     }
     const gap = distance(aggressor.animation.contactPoints.hands[1], victim.animation.contactPoints.hands[1]);
     assert.ok(gap <= 4, `side ${frame.side}, phase ${phase}: held wrist gap ${gap.toFixed(2)}px`);
+    if (phase >= .78) {
+      assert.ok(frame.lift > 40, 'centrifugal lift raises the body rather than dragging it around the ankles');
+      assert.ok(victim.animation.localFeet.every(foot => foot.y > -3), 'the feet trail the lifted torso instead of using a jumping knee tuck');
+    }
+  }
+});
+
+test('the airborne release preserves the actual head, waist and feet before easing into a floor-aware landing', () => {
+  const round = bout('armspin');
+  for (const center of centers) {
+    const frame = at(round, 1, center), clock = round.impact;
+    const victim = fighter(1, { x: frame.victim.x, y: frame.victim.y - frame.lift, facing: frame.aggressor.x > frame.victim.x ? 1 : -1, pose: 'held', phase: 1, angle: frame.victimAngle, gripMode: 'wrist' });
+    drawArenaFighter(ctx, victim, clock);
+    const held = structuredClone(victim.animation.contactPoints);
+    Object.assign(victim, { pose: 'airborne', gripMode: undefined, suspension: 1, motionImmediate: false });
+    drawArenaFighter(ctx, victim, clock);
+    const released = victim.animation.contactPoints;
+    for (const part of ['head', 'waist']) assert.ok(distance(held[part], released[part]) < 1e-8, `${part} must not jump when the wrist releases`);
+    for (let leg = 0; leg < 2; leg++) assert.ok(distance(held.feet[leg], released.feet[leg]) < 1e-8);
+    const saved = structuredClone(victim.animation);
+    drawArenaFighter(ctx, victim, clock);
+    assert.deepEqual(victim.animation, saved, 'a paused release cannot advance the skeleton or its transform');
+    const landing = fighter(1, { x: 720, y: 500, facing: -frame.side, pose: 'land', phase: 0, angle: frame.side * .7, suspension: 0 });
+    const normal = sampleArenaFighterContacts(landing, clock + 1300);
+    assert.deepEqual(normal, sampleArenaFighterContacts({ ...landing, suspension: undefined }, clock + 1300), 'the settled landing retains the original floor-aware transform');
   }
 });
 
@@ -99,16 +124,26 @@ test('a live suplex holds the current rendered waist without advancing the victi
   }
 });
 
-test('the ankle hook precedes the loss of balance and the tripped fighter rolls on the ground', () => {
+test('an ankle hook is followed by sole contact and a backward somersault in the kicking direction', () => {
   const round = bout('trip');
   for (const center of centers) {
-    const grip = at(round, .36, center), hook = at(round, .57, center), fall = at(round, .88, center), landed = at(round, 1, center);
+    const grip = at(round, .36, center), hook = at(round, .57, center), kick = at(round, .72, center), fall = at(round, .94, center), landed = at(round, 1, center);
     assert.equal(grip.stage, 'grip');
     assert.equal(grip.grip, 'waist');
     assert.equal(grip.contact, 0);
     assert.equal(hook.stage, 'hook');
     assert.ok(hook.contact > .8, 'the attacking foot has made contact before the fall');
     assert.equal(Math.abs(hook.victimAngle), 0, 'the victim cannot already be lying down before the hook');
+    assert.equal(kick.stage, 'kick');
+    assert.equal(kick.grip, undefined, 'the waist is released before the leg pushes the opponent away');
+    assert.ok(kick.contact > .99);
+    const clock = round.start + (round.impact - round.start) * .72;
+    const target = fighter(1, { ...kick.victim, facing: -kick.side, pose: 'brace', phase: .72 });
+    const contacts = sampleArenaFighterContacts(target, clock);
+    const kicker = fighter(0, { ...kick.aggressor, facing: kick.side, pose: 'trip', phase: .72, footTarget: contacts.waist, footStrength: kick.contact, kickLeg: 1 });
+    drawArenaFighter(ctx, kicker, clock);
+    assert.ok(distance(kicker.animation.contactPoints.feet[1], contacts.waist) < .01, 'the visible sole reaches the current waist before the recoil');
+    assert.ok(Math.abs(kicker.animation.contactPoints.feet[0].y - (kicker.y - 2 * kicker.scale)) < .01, 'the other foot stays planted during the waist kick');
     assert.equal(fall.stage, 'fall');
     assert.ok(Math.abs(fall.victimAngle) > .9);
     assert.equal(landed.stage, 'roll');
@@ -119,12 +154,22 @@ test('the ankle hook precedes the loss of balance and the tripped fighter rolls 
       const frame = arenaTechniqueExit(round, age, landed.victim, landing, landed.side, 1, { lift: landed.lift, angle: landed.victimAngle });
       assert.equal(frame.stage, 'roll');
       assert.ok(frame.height < .001, 'a foot sweep has no generic upward throwing arc');
-      assert.equal(frame.angle, landed.victimAngle, 'the lying opponent rolls about the body axis instead of doing a headstand');
-      assert.ok(Math.abs(frame.yaw) > Math.abs(previous.yaw ?? 0), 'the front and back turn along the floor');
+      assert.ok(landed.side * (frame.angle - previous.angle) > 0, 'the head and torso tumble backwards in the same direction as the kick');
+      assert.equal(frame.yaw, 0, 'a backwards somersault must not become a sideways body-axis roll');
       assert.ok(landed.side * (frame.groundX - previous.groundX) >= -1e-8);
       assert.ok(distance(frame, previous) < 8, 'the rolling body travels continuously along the floor');
       previous = frame;
     }
+    assert.ok(Math.abs(previous.angle - landed.victimAngle) > Math.PI * 1.95, 'the body completes a visible backward revolution');
+  }
+});
+
+test('the encounter orientation overrides the arena center for both finishing techniques', () => {
+  for (const tactic of ['trip', 'armspin']) for (const side of [-1, 1]) {
+    const round = { ...bout(tactic), contactSide: side };
+    const frame = at(round, .36, { x: side < 0 ? 650 : 350, y: 416 });
+    assert.equal(frame.side, side);
+    assert.ok(side * (frame.victim.x - frame.aggressor.x) > 0, 'the pair retains the side from which they actually met');
   }
 });
 
@@ -196,7 +241,7 @@ test('two jumping side kicks finish with sole contact rather than turning into a
 test('new finishing contacts and their floor exits remain continuous when the scene clock crosses a stage boundary', () => {
   for (const tactic of arenaFinalTechniques) for (const center of centers) {
     const round = bout(tactic), span = round.impact - round.start;
-    for (const fraction of [.08, .20, .30, .34, .38, .43, .48, .56, .60, .64, .74, .82, .90, 1]) {
+    for (const fraction of [.08, .20, .30, .34, .38, .43, .48, .56, .58, .60, .64, .72, .74, .78, .82, .90, 1]) {
       const time = round.start + span * fraction, before = arenaTechniqueTargets(round, time - .001, center), after = arenaTechniqueTargets(round, time + .001, center);
       for (const key of ['aggressor', 'victim']) assert.ok(distance(before[key], after[key]) < .005, `${tactic}/${fraction} cannot teleport a root`);
       for (const key of ['lift', 'aggressorLift', 'victimAngle', 'aggressorAngle', 'yaw', 'contact']) assert.ok(Math.abs(before[key] - after[key]) < .005, `${tactic}/${fraction}/${key} remains continuous`);

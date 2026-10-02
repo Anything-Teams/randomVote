@@ -122,6 +122,9 @@ test('short head words follow the actual wrist pivot, fall, floor roll and ankle
   assert.deepEqual(arenaActionWords(armspin, at(.70)), [{ id: final.aggressor, word: '회전!' }]);
   const trip = { ...final, tactic: 'trip' };
   assert.deepEqual(arenaActionWords(trip, at(.57)), [{ id: final.aggressor, word: '발걸기!' }]);
+  assert.deepEqual(arenaActionWords(trip, at(.70)), [{ id: final.aggressor, word: '발차기!' }]);
+  assert.match(arenaStoryState(trip, at(.70)).action, /몸통을 발로/);
+  assert.equal(arenaAction(trip, at(.70)).actors.find(actor => actor.id === final.aggressor).pose, 'trip');
   assert.deepEqual(arenaActionWords(trip, at(.88)), [{ id: final.victim, word: '넘어진다!' }]);
   assert.deepEqual(arenaActionWords(trip, final.impact + 700), [{ id: final.victim, word: '구르기!' }]);
   assert.deepEqual(arenaActionWords(trip, final.impact + 900), []);

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { randomInt } from './election';
 import type { SportsStageProps } from './sports';
-import { activeRacingBump, activeRacingIncident, activeRacingTrick, racingTrickStatus, buildRacingTimeline, createRacingIncidents, racingIncidentStatus, racingIncidentSetback, racingStandings, readRacingTravel, RACING_STORIES, type RacingTimeline, type RacingStanding } from './racingNarrative';
+import { activeRacingBump, activeRacingIncident, activeRacingTrick, racingTrickStatus, buildRacingTimeline, createRacingIncidents, racingIncidentStatus, racingIncidentSetback, racingIncidentRecovery, racingBumpRecoveryStart, racingStandings, readRacingTravel, RACING_STORIES, type RacingTimeline, type RacingStanding } from './racingNarrative';
 import { drawRaceDust, drawRaceHorse, raceHorseAttachments, drawRaceStadium, raceBox, raceLabel, type RaceHorseMotion } from './racingArt';
 import { drawRacingCourse, drawRacingStartingGate, drawRacingTopView } from './racingCourse';
 import { createRacingCamera, placeRacingField, racingFocusIds, type RacingCamera } from './racingCamera';
@@ -63,6 +63,10 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
       headline = actor.name + ' · 진로를 막혔습니다';
       detail = '현재 ' + status.currentRank + '위. ' + (rival?.name ?? '앞말') + '가 옆 진로를 지킵니다. 고삐를 당겨 속도를 줄이고 틈을 기다립니다.' + (status.passedByIds.length ? ' 그 사이 뒤의 말이 앞으로 나섰습니다.' : ' 앞말과 간격이 벌어집니다.');
       badge = '진로 견제 · 실제 감속';
+    } else if (checked > 0 && elapsed < (racingIncidentRecovery(incident, incident.actorId)?.recoveryStart ?? incident.start)) {
+      headline = actor.name + ' · 틈을 찾고 보폭을 맞춥니다';
+      detail = '현재 ' + status.currentRank + '위. 진로를 옮겨도 벌어진 간격은 남아 있습니다. 기수가 고삐를 정리하고 안정된 보폭부터 되찾습니다.';
+      badge = '간격 유지 · 리듬 회복';
     } else if (checked > 0 && p < .70) {
       headline = actor.name + ' · 틈으로 빠져 재가속';
       detail = '현재 ' + status.currentRank + '위. ' + template.action + ' 옆 진로로 빠져 잃은 간격을 좁힙니다.';
@@ -77,14 +81,15 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
     const name = subject?.name ?? '경주마', object = challenge.kind === 'hay-jump' ? '건초 장벽' : '물웅덩이';
     const ahead = props.candidates.find(candidate => candidate.id === standings[status.currentRank - 2]?.id);
     const change = status.currentRank > status.beforeRank ? ' · ' + (status.currentRank - status.beforeRank) + '계단 밀렸습니다.' : '';
-    headline = name + ' · ' + (status.stage === 'approach' ? object + ' 접근' : status.stage === 'jump' ? '도약!' : status.stage === 'impact' ? challenge.outcome === 'clip' ? '발이 걸려 앞으로 넘어졌습니다' : '미끄러져 주저앉았습니다' : status.stage === 'recover' ? '넘어진 몸을 다시 일으킵니다' : status.stage === 'chase' ? status.currentRank === standings.length ? '꼴등에서 다시 추격합니다' : '한 마리씩 다시 따라잡습니다' : '코스 통과');
+    headline = name + ' · ' + (status.stage === 'approach' ? object + ' 접근' : status.stage === 'jump' ? '도약!' : status.stage === 'impact' ? challenge.outcome === 'clip' ? '발이 걸려 앞으로 넘어졌습니다' : '미끄러져 주저앉았습니다' : status.stage === 'recover' ? '넘어진 몸을 다시 일으킵니다' : status.stage === 'rhythm' ? '벌어진 간격 뒤에서 리듬을 찾습니다' : status.stage === 'chase' ? status.currentRank === standings.length ? '꼴등에서 다시 추격합니다' : '한 마리씩 다시 따라잡습니다' : '코스 통과');
     detail = '현재 ' + status.currentRank + '위. ' + (status.stage === 'approach' ? '오른쪽에서 ' + object + '이 가까워집니다. 기수가 도약할 보폭을 맞춥니다.'
       : status.stage === 'jump' ? '앞다리를 모아 넘습니다. 착지까지 보폭을 지켜보세요.'
       : status.stage === 'impact' ? (challenge.outcome === 'clip' ? '앞발이 건초에 걸려 무릎을 꿇고 가슴이 땅으로 내려갑니다. 기수도 안장에서 뒤로 미끄러집니다.' : '앞발이 젖은 지면에서 길게 밀립니다. 말이 주저앉고 기수가 몸을 젖혀 버팁니다.') + change
       : status.stage === 'recover' ? (elapsed < challenge.lowest ? '속도가 거의 멈췄습니다. 뒤의 말들이 지나가고 기수가 고삐를 모아 일어날 준비를 합니다.' : '앞발부터 다시 딛고 몸을 일으킵니다. 기수도 안장으로 돌아옵니다.') + change
-      : status.stage === 'chase' ? '잃어버린 거리는 그대로입니다. 고삐를 풀고 보폭을 늘립니다. ' + (ahead ? ahead.name + '와 ' + Math.max(0, (standings[status.currentRank - 2].distance - standings[status.currentRank - 1].distance) * 1600).toFixed(1) + 'M 차이를 좁힙니다.' : '실제 추월 끝에 선두 경합에 합류합니다.')
+      : status.stage === 'rhythm' ? '일어섰지만 잃은 거리는 남아 있습니다. 기수가 안장을 바로 잡고 짧은 보폭을 안정시킨 뒤 추격을 준비합니다.'
+      : status.stage === 'chase' ? '안정된 보폭에서 조금씩 힘을 보탭니다. ' + (ahead ? ahead.name + '와 ' + Math.max(0, (standings[status.currentRank - 2].distance - standings[status.currentRank - 1].distance) * 1600).toFixed(1) + 'M 차이를 좁힙니다.' : '실제 추월 끝에 선두 경합에 합류합니다.')
       : challenge.outcome === 'clear' ? '장애물을 넘으며 착지로 이어집니다. 네 발의 달리는 리듬을 지킵니다.' : '흔들림을 수습하고 달리는 리듬을 되찾았습니다. 실제 간격만큼 추격이 이어집니다.');
-    badge = status.stage === 'impact' || status.stage === 'recover' ? '실제 감속 · 역전 기회' : status.stage === 'chase' ? '회복 · 재추격' : '코스 장애물';
+    badge = status.stage === 'impact' || status.stage === 'recover' ? '실제 감속 · 역전 기회' : status.stage === 'rhythm' ? '간격 유지 · 리듬 회복' : status.stage === 'chase' ? '회복 · 재추격' : '코스 장애물';
     focusId = challenge.actorId;
   }
   const trick = phase === 'race' ? activeRacingTrick(timeline, elapsed) : undefined;
@@ -94,20 +99,21 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
     const status = racingTrickStatus(timeline, trick, elapsed), kick = trick.kind === 'rear-kick';
     headline = status.stage === 'windup' ? striker + (kick ? ' · 뒷발을 모읍니다' : ' · 모래주머니를 꺼냈습니다')
       : status.stage === 'flight' ? striker + (kick ? ' · 뒤로 한 번 차기!' : ' · 앞 기수를 향해 투척!')
-      : status.stage === 'stunned' ? target + ' · 기수가 잠깐 멍해졌습니다' : target + ' · 정신을 차리고 재추격!';
+      : status.stage === 'stunned' ? target + ' · 기수가 잠깐 멍해졌습니다' : status.stage === 'recover' ? target + ' · 고삐를 정리하며 중심을 되찾습니다' : target + ' · 보폭을 늘려 재추격';
     detail = status.stage === 'windup' ? (kick ? '바로 뒤에서 붙는 말을 보고 뒷발을 모아 견제합니다.' : '뒤의 기수가 고삐를 한 손으로 잡고 작은 모래주머니를 들어 올립니다.')
       : status.stage === 'flight' ? (kick ? '뒷발이 뒤 기수의 등자 쪽에 닿습니다. 뒤의 말이 고삐를 당깁니다.' : '작은 모래주머니가 포물선을 그려 바로 앞 기수의 헬멧으로 날아갑니다.')
       : status.stage === 'stunned' ? '현재 ' + status.currentRank + '위. 별이 빙글빙글! 기수가 고삐를 잡은 채 휘청여 말의 속도도 줄어듭니다.' + (status.currentRank > status.beforeRank ? ' 뒤의 말이 지나가며 순위가 밀렸습니다.' : ' 그 사이 상대와 간격이 벌어집니다.')
-      : '현재 ' + status.currentRank + '위. 고개를 바로 세우고 고삐를 풉니다. 잃은 간격을 다시 따라잡습니다.';
-    badge = status.stage === 'stunned' ? '기수 일시 기절 · 실제 감속' : status.stage === 'chase' ? '회복 · 재추격' : kick ? '뒷발차기 견제' : '모래주머니 투척';
+      : status.stage === 'recover' ? '현재 ' + status.currentRank + '위. 잃은 간격을 남겨 둔 채 고개를 바로 세우고 말의 리듬을 맞춥니다. 아직 추격에 힘을 싣지 않습니다.'
+      : '현재 ' + status.currentRank + '위. 고삐를 천천히 풀고 힘을 보탭니다. 잃은 간격을 꾸준히 좁힙니다.';
+    badge = status.stage === 'stunned' ? '기수 일시 기절 · 실제 감속' : status.stage === 'recover' ? '간격 유지 · 중심 회복' : status.stage === 'chase' ? '회복 · 재추격' : kick ? '뒷발차기 견제' : '모래주머니 투척';
     focusId = elapsed < trick.impact ? trick.actorId : trick.targetId;
   }
   const bump = activeRacingBump(timeline, elapsed);
   if (bump && (!challenge || elapsed >= challenge.recovered + 450) && !trick) {
     const defender = props.candidates.find(item => item.id === bump.actorId)?.name ?? '앞말';
     const rival = props.candidates.find(item => item.id === bump.targetId)?.name ?? '추격마';
-    headline = defender + ' · ' + (elapsed < bump.impact ? '어깨로 진로를 지킵니다' : elapsed < bump.lowest ? '몸통을 맞대며 견제!' : '견제를 풀고 다시 질주');
-    detail = elapsed < bump.impact ? rival + '가 옆으로 붙습니다. 앞말도 몸을 기울여 자리를 지킵니다.' : elapsed < bump.lowest ? '두 말의 어깨가 닿습니다. ' + rival + '가 발을 짧게 딛고 중심을 잡는 사이 앞말이 보폭을 이어갑니다.' : '기수가 고삐를 바로 잡고 다시 보폭을 늘립니다. 순위 경쟁은 쉬지 않고 이어집니다.';
+    headline = defender + ' · ' + (elapsed < bump.impact ? '어깨로 진로를 지킵니다' : elapsed < bump.lowest ? '몸통을 맞대며 견제!' : elapsed < racingBumpRecoveryStart(bump) ? '접촉을 풀고 중심을 잡습니다' : '보폭을 되찾으며 경합');
+    detail = elapsed < bump.impact ? rival + '가 옆으로 붙습니다. 앞말도 몸을 기울여 자리를 지킵니다.' : elapsed < bump.lowest ? '두 말의 어깨가 닿습니다. ' + rival + '가 발을 짧게 딛고 중심을 잡는 사이 앞말이 보폭을 이어갑니다.' : elapsed < racingBumpRecoveryStart(bump) ? '접촉으로 벌어진 코끝 간격이 남습니다. 기수가 고삐를 바로 잡고 한 걸음씩 중심을 맞춥니다.' : '안정된 보폭에서 간격을 서서히 좁힙니다. 순위 경쟁이 이어집니다.';
     badge = '몸통 견제 · 실제 접촉'; focusId = bump.actorId;
   }
   const late = timeline.lateFall;

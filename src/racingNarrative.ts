@@ -143,6 +143,7 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   reconcileCourseChallenges(timeline);
   planFallRecoveries(timeline);
   planLateFall(timeline);
+  spaceFallPursuits(timeline);
   planRacingBumps(timeline);
   return timeline;
 }
@@ -175,18 +176,35 @@ function plannedDistance(timeline: RacingTimeline, id: string, elapsed: number):
 }
 
 /** A setback changes forward speed, holds the lost ground, then earns it back gradually. */
-function setbackLoss(elapsed: number, start: number, lowest: number, end: number, loss: number) {
+function setbackLoss(elapsed: number, start: number, lowest: number, end: number, loss: number, recoveryStart = lowest) {
   if (elapsed <= start || elapsed >= end) return 0;
-  return loss * (elapsed < lowest ? smooth((elapsed - start) / (lowest - start)) : 1 - smooth((elapsed - lowest) / (end - lowest)));
+  return loss * (elapsed < lowest ? smooth((elapsed - start) / (lowest - start)) : 1 - smooth((elapsed - recoveryStart) / (end - recoveryStart)));
+}
+
+/** Distance and rider poses share the same check, lost-ground hold and pursuit clock. */
+export function racingIncidentRecovery(incident: RacingIncident, id: string) {
+  const duration = incident.end - incident.start, actor = id === incident.actorId;
+  if (!actor && id !== incident.rivalId) return undefined;
+  const defensive = ['blocked', 'inside', 'outside', 'draft', 'patience', 'lead-change', 'rail', 'chase', 'last-kick'].includes(incident.kind);
+  if (!defensive) return undefined;
+  return {
+    start: incident.start + duration * (actor ? .18 : .40),
+    lowest: incident.start + duration * (actor ? .38 : .64),
+    recoveryStart: incident.start + duration * (actor ? .54 : .78),
+    end: incident.end,
+    loss: actor ? incident.kind === 'blocked' ? .013 : .009 : .004,
+  };
+}
+
+/** One broad effort follows actual gradual ground recovery, with no repeated crouch pulses. */
+export function racingRecoveryEffort(elapsed: number, start: number, end: number) {
+  const phase = clamp((elapsed - start) / Math.max(1, end - start));
+  return 4 * phase * (1 - phase);
 }
 
 export function racingIncidentSetback(incident: RacingIncident, id: string, elapsed: number) {
-  const duration = incident.end - incident.start, actor = id === incident.actorId;
-  if (!actor && id !== incident.rivalId) return 0;
-  const defensive = ['blocked', 'inside', 'outside', 'draft', 'patience', 'lead-change', 'rail', 'chase', 'last-kick'].includes(incident.kind);
-  if (actor && defensive) return setbackLoss(elapsed, incident.start + duration * .18, incident.start + duration * .38, incident.end, incident.kind === 'blocked' ? .013 : .009);
-  if (!actor && defensive) return setbackLoss(elapsed, incident.start + duration * .40, incident.start + duration * .64, incident.end, .004);
-  return 0;
+  const recovery = racingIncidentRecovery(incident, id);
+  return recovery ? setbackLoss(elapsed, recovery.start, recovery.lowest, recovery.end, recovery.loss, recovery.recoveryStart) : 0;
 }
 
 export function racingObstacleLoss(obstacle: RacingCourseChallenge, elapsed: number) {
@@ -216,11 +234,50 @@ export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed
 }
 
 export function racingBumpLoss(bump: RacingBump, elapsed: number) {
-  return setbackLoss(elapsed, bump.impact, bump.lowest, bump.end, bump.loss);
+  return setbackLoss(elapsed, bump.impact, bump.lowest, bump.end, bump.loss, racingBumpRecoveryStart(bump));
+}
+
+export function racingBumpRecoveryStart(bump: RacingBump) {
+  return bump.lowest + (bump.end - bump.lowest) * .22;
 }
 
 export function activeRacingBump(timeline: RacingTimeline, elapsed: number) {
   return timeline.bumps?.find(bump => elapsed >= bump.start && elapsed < bump.end);
+}
+
+/** A returning horse waits for a duel to open instead of passing both fighting noses together. */
+function spaceFallPursuits(timeline: RacingTimeline) {
+  const recovering = timeline.obstacles.find(item => item.outcome !== 'clear' && item.catchupEnd! > timeline.straight.start);
+  if (!recovering) return;
+  const scale = (timeline.finish - timeline.start) / 33500;
+  const crossings = () => {
+    const moments: { at: number; returning: boolean }[] = [];
+    const until = Math.min(timeline.finish, timeline.lateFall?.impact ?? Infinity);
+    for (let left = timeline.straight.start; left < until; left += 64 * scale) {
+      const right = Math.min(until, left + 64 * scale);
+      const before = timeline.ids.map(id => readRacingDistance(timeline, id, left));
+      const after = timeline.ids.map(id => readRacingDistance(timeline, id, right));
+      for (let a = 0; a < timeline.ids.length; a++) for (let b = a + 1; b < timeline.ids.length; b++) {
+        if ((before[a] - before[b]) * (after[a] - after[b]) >= 0) continue;
+        let low = left, high = right;
+        const sign = Math.sign(before[a] - before[b]);
+        for (let iteration = 0; iteration <12; iteration++) {
+          const middle = (low + high) / 2;
+          if (Math.sign(readRacingDistance(timeline, timeline.ids[a], middle) - readRacingDistance(timeline, timeline.ids[b], middle)) === sign) low = middle; else high = middle;
+        }
+        moments.push({ at: (low + high) / 2, returning: timeline.ids[a] === recovering.actorId || timeline.ids[b] === recovering.actorId });
+      }
+    }
+    moments.sort((a, b) => a.at - b.at);
+    return moments.some((item, index) => index > 1 && item.at - moments[index - 2].at < 48 * scale && moments.slice(index - 2, index + 1).some(crossing => crossing.returning));
+  };
+  const original = recovering.catchupEnd!;
+  for (let attempt = 0; attempt <= 24; attempt++) {
+    const shift = attempt === 0 ? 0 : Math.ceil(attempt / 2) * 80 * scale * (attempt % 2 ? -1 : 1);
+    recovering.catchupEnd = Math.min(timeline.finish - 200 * scale, original + shift);
+    if (!crossings()) return;
+  }
+  recovering.catchupEnd = original;
 }
 
 /** A defender makes contact only when an adjacent lane's actual nose catches it. */
@@ -241,7 +298,7 @@ function planRacingBumps(timeline: RacingTimeline) {
       let left = at, right = at + 80 * scale;
       const initialSign = Math.sign(difference(at));
       for (let iteration = 0; iteration < 28; iteration++) { const middle = (left + right) / 2; if (Math.sign(difference(middle)) === initialSign) left = middle; else right = middle; }
-      const impact = (left + right) / 2, start = impact - 1100 * scale, lowest = impact + 350 * scale, end = impact + 1300 * scale;
+      const impact = (left + right) / 2, start = impact - 1100 * scale, lowest = impact + 350 * scale, end = impact + 1700 * scale;
       const actorId = initialSign > 0 ? a : b, targetId = initialSign > 0 ? b : a;
       if (lead - readRacingDistance(timeline, actorId, impact) > .032 || occupied(a, start, end) || occupied(b, start, end)) continue;
       let minimumSpeed = Infinity;
@@ -249,9 +306,10 @@ function planRacingBumps(timeline: RacingTimeline) {
       let loss = Math.min(.0012, Math.max(0, minimumSpeed) * (lowest - impact) / 1.5 * .22);
       // Recovery shares the existing acceleration budget, so a bump cannot add a late burst.
       const pace = 1 / (timeline.finish - timeline.start);
-      for (let sample = lowest + 8; sample < end; sample += 8) {
+      const recoveryStart = racingBumpRecoveryStart({ actorId, targetId, start, impact, lowest, end, loss });
+      for (let sample = recoveryStart + 8; sample < end; sample += 8) {
         const speed = (readRacingDistance(timeline, targetId, sample + 8) - readRacingDistance(timeline, targetId, sample - 8)) / 16;
-        const p = (sample - lowest) / (end - lowest), gainPerLoss = 6 * p * (1 - p) / (end - lowest);
+        const p = (sample - recoveryStart) / (end - recoveryStart), gainPerLoss = 6 * p * (1 - p) / (end - recoveryStart);
         loss = Math.min(loss, Math.max(0, pace * 1.47 - speed) / gainPerLoss);
       }
       if (loss < .00025) continue;
@@ -330,25 +388,34 @@ function planFallRecoveries(timeline: RacingTimeline) {
       previous = at;
     }
     obstacle.loss = lost;
-    obstacle.catchupStart = obstacle.recovered + 500 * scale;
-    obstacle.catchupEnd = obstacle === timeline.obstacles[0] ? Math.min(timeline.finish - 800 * scale, timeline.obstacles[1].encounter + 3500 * scale) : timeline.finish - 800 * scale;
+    obstacle.catchupStart = obstacle.recovered + 1100 * scale;
+    const runnerClock = timeline.ids.indexOf(obstacle.actorId);
+    obstacle.catchupEnd = obstacle === timeline.obstacles[0] ? Math.min(timeline.finish - 800 * scale, timeline.obstacles[1].encounter + 3500 * scale) : timeline.finish - (950 + runnerClock * 85) * scale;
   }
 }
 
 
 /** A kick or a landed beanbag costs actual ground; recovery stays before the final straight. */
 export function racingTrickLoss(trick: RacingTrick, elapsed: number) {
-  return setbackLoss(elapsed, trick.impact, trick.lowest, trick.recovered, trick.loss);
+  return setbackLoss(elapsed, trick.impact, trick.lowest, trick.recovered, trick.loss, racingTrickRecoveryStart(trick));
+}
+
+export function racingTrickRecoveryStart(trick: RacingTrick) {
+  const scale = (trick.lowest - trick.impact) / (trick.kind === 'rear-kick' ? 1350 : 1050);
+  return Math.min(trick.lowest + 900 * scale, trick.recovered - 1000 * scale);
 }
 
 function planRacingTricks(timeline: RacingTimeline) {
   if (timeline.ids.length < 2) return;
   const scale = (timeline.finish - timeline.start) / 33_500;
   for (const [index, kind] of (['rear-kick', 'beanbag'] as const).entries()) {
-    const start = index === 0 ? timeline.start + 1400 * scale : timeline.ids.length === 2 ? timeline.start + 6770 * scale : (timeline.obstacles[0]?.recovered ?? timeline.start + 12_000 * scale) + 120 * scale;
+    // A two-horse retaliation waits until the first rider is steady, before a fall separates the pair.
+    const start = index === 0 ? timeline.start + 1400 * scale : timeline.ids.length === 2 ? timeline.tricks[0].recovered + 120 * scale : (timeline.obstacles[0]?.recovered ?? timeline.start + 12_000 * scale) + 120 * scale;
     const release = start + (index === 0 ? 950 : 450) * scale;
     const impact = start + (index === 0 ? 1850 : 1050) * scale;
-    const lowest = impact + (index === 0 ? 1350 : 1050) * scale, recovered = impact + (index === 0 ? 3400 : 2150) * scale;
+    const lowest = impact + (index === 0 ? 1350 : 1050) * scale;
+    const nextObstacle = timeline.obstacles[index === 0 || timeline.ids.length === 2 ? 0 : 1];
+    const recovered = Math.min(impact + (index === 0 ? 4250 : 3300) * scale, nextObstacle.encounter - 200 * scale);
     const ranking = racingStandings(timeline, impact).map(item => item.id);
     // Avoid asking the same body to fall at a hurdle and receive a trick together.
     const occupied = new Set(timeline.obstacles.filter(item => item.encounter >= impact && item.encounter < recovered || item.outcome !== 'clear' && item.impact < lowest && item.recovered > impact).map(item => item.actorId));
@@ -392,7 +459,7 @@ export function activeRacingTrick(timeline: RacingTimeline, elapsed: number) {
 export function racingTrickStatus(timeline: RacingTimeline, trick: RacingTrick, elapsed: number) {
   const beforeRank = racingStandings(timeline, trick.impact).find(item => item.id === trick.targetId)?.rank ?? 1;
   const currentRank = racingStandings(timeline, elapsed).find(item => item.id === trick.targetId)?.rank ?? 1;
-  const stage = elapsed < trick.release ? 'windup' : elapsed < trick.impact ? 'flight' : elapsed < trick.lowest ? 'stunned' : 'chase';
+  const stage = elapsed < trick.release ? 'windup' : elapsed < trick.impact ? 'flight' : elapsed < trick.lowest ? 'stunned' : elapsed < racingTrickRecoveryStart(trick) ? 'recover' : 'chase';
   return { stage, beforeRank, currentRank, lost: racingTrickLoss(trick, elapsed) };
 }
 
@@ -402,7 +469,7 @@ function planCourseChallenges(timeline: RacingTimeline) {
   const hash = timeline.incidents.map(item => item.kind + item.actorId).join('|').split('').reduce((value, letter) => (value * 31 + letter.charCodeAt(0)) >>> 0, 7);
   const scale = (timeline.finish - timeline.start) / 33_500, first = timeline.incidents[0];
   const firstIsObstacle = first?.kind === 'hay-jump' || first?.kind === 'puddle';
-  const encounters = [timeline.ids.length === 2 ? timeline.start + 10_850 * scale : first ? first.start + (first.end - first.start) * .6 : timeline.start + 7750 * scale,
+  const encounters = [timeline.ids.length === 2 ? timeline.start + 11_850 * scale : first ? first.start + (first.end - first.start) * .6 : timeline.start + 7750 * scale,
     timeline.start + 18_500 * scale,
     timeline.start + 25_300 * scale];
   const firstKind: RacingCourseChallenge['kind'] = first?.kind === 'hay-jump' || first?.kind === 'puddle' ? first.kind : hash % 2 ? 'puddle' : 'hay-jump';

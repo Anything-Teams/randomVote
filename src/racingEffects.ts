@@ -1,6 +1,6 @@
 import { raceHorseAttachments, type RaceHorseMotion } from './racingArt';
 import { racingGaitPhase } from './racingMotionClock';
-import type { RacingIncident, RacingTrick, RacingBump } from './racingNarrative';
+import { racingIncidentRecovery, racingRecoveryEffort, racingTrickRecoveryStart, type RacingIncident, type RacingTrick, type RacingBump } from './racingNarrative';
 import type { RacingObstacle } from './racingObstacles';
 
 export type RacingEffectPlacement = { id: string; x: number; y: number; scale: number; index?: number; hand?: { x: number; y: number }; helmet?: { x: number; y: number }; boot?: { x: number; y: number } };
@@ -29,14 +29,14 @@ export function combineRacingHorseMotion(...motions: RaceHorseMotion[]): RaceHor
 export function racingIncidentMotion(incident: RacingIncident | undefined, id: string, elapsed: number, reduced = false): RaceHorseMotion {
   if (!incident || reduced || elapsed < incident.start || elapsed > incident.end || id !== incident.actorId && id !== incident.rivalId) return {};
   const p = phaseAt(incident, elapsed), kind = incident.kind, actor = id === incident.actorId;
-  if (kind === 'hay-jump' || kind === 'puddle') return actor ? { crouch: pulse(p, .28, .77) * .72 } : {};
+  // The physical obstacle owns its jump, collapse and recovery; its caption adds no second acceleration.
+  if (kind === 'hay-jump' || kind === 'puddle') return actor ? { check: pulse(p, .18, .58) * .28 } : {};
   if (kind === 'gust') return { stumble: pulse(p, .16, .68) * (actor ? .3 : .55), crouch: pulse(p, .13, .76) * (actor ? .75 : .6) };
-  if (kind === 'blocked') return actor
-    ? { check: pulse(p, .14, .43) * .95, crouch: pulse(p, .38, .93) * .9 }
-    : { check: pulse(p, .1, .43) * .4, crouch: pulse(p, .41, .91) * .7 };
-  if (['draft', 'lead-change', 'inside', 'outside', 'rail', 'chase', 'last-kick', 'patience'].includes(kind)) return actor
-    ? { check: pulse(p, .14, .43) * .9, crouch: pulse(p, .38, .93) * .9 }
-    : { check: pulse(p, .38, .72) * .65, crouch: pulse(p, .57, .95) * .85 };
+  const recovery = racingIncidentRecovery(incident, id);
+  if (recovery) {
+    const check = smooth((elapsed - recovery.start) / (recovery.lowest - recovery.start)) * (1 - smooth((elapsed - recovery.lowest) / (recovery.recoveryStart - recovery.lowest)));
+    return { check: check * (actor ? .9 : .65), crouch: racingRecoveryEffort(elapsed, recovery.recoveryStart, recovery.end) * (actor ? .9 : .85) };
+  }
   if (!actor) return {};
   if (kind === 'balance') return { stumble: pulse(p, .08, .56) * Math.sin(clamp((p - .08) / .48) * Math.PI * 3) * .9, crouch: pulse(p, .08, .66) * .6 };
   if (kind === 'fatigue') return { stumble: pulse(p, .1, .76) * .28, crouch: pulse(p, .38, .84) * .25 };
@@ -167,7 +167,7 @@ export function placeRacingTrick<T extends RacingEffectPlacement>(trick: RacingT
 
 export function racingTrickMotion(trick: RacingTrick | undefined, id: string, elapsed: number, placements: RacingEffectPlacement[], reduced = false): RaceHorseMotion {
   if (!trick || reduced || elapsed < trick.start || elapsed >= trick.recovered || id !== trick.actorId && id !== trick.targetId) return {};
-  const scale = (trick.lowest - trick.impact) / 1350, actor = id === trick.actorId;
+  const scale = (trick.lowest - trick.impact) / (trick.kind === 'rear-kick' ? 1350 : 1050), actor = id === trick.actorId;
   if (actor && trick.kind === 'rear-kick') {
     const p = (elapsed - trick.release) / (trick.impact - trick.release);
     const kick = elapsed < trick.impact ? smooth(p) : 1 - smooth((elapsed - trick.impact) / (450 * scale));
@@ -182,8 +182,9 @@ export function racingTrickMotion(trick: RacingTrick | undefined, id: string, el
     const toss = smooth((elapsed - trick.start) / (400 * scale)) * (1 - smooth((elapsed - trick.release - 160 * scale) / (450 * scale)));
     return { toss, tossRelease: smooth((elapsed - trick.release + 200 * scale) / (400 * scale)) };
   }
-  const stun = smooth((elapsed - trick.impact) / (300 * scale)) * (1 - smooth((elapsed - trick.lowest + 150 * scale) / (650 * scale)));
-  const chase = smooth((elapsed - trick.lowest) / (350 * scale)) * (1 - smooth((elapsed - trick.recovered + 400 * scale) / (400 * scale)));
+  const recoveryStart = racingTrickRecoveryStart(trick);
+  const stun = smooth((elapsed - trick.impact) / (300 * scale)) * (1 - smooth((elapsed - trick.lowest) / (recoveryStart - trick.lowest)));
+  const chase = racingRecoveryEffort(elapsed, recoveryStart, trick.recovered);
   return { stun, check: stun * .94, stumble: stun * .16, crouch: chase * .85 };
 }
 

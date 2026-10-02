@@ -58,20 +58,20 @@ export function racingCoursePoint(w: number, h: number, distance: number, laneIn
   return { x, y: cy + Math.sin(theta) * radiusY + (x - cx) * skew, angle: Math.atan2(vy + vx * skew, vx) };
 }
 
-/** Both the close gate and the oval map project these same staggered lane noses. */
+/** Perspective depth varies by lane, while every close-view gate mouth shares one straight line. */
 export function racingStartingLayout(w: number, h: number, count: number) {
-  // A close view uses distance along the bend and lateral lane coordinates.
-  // Keeping these axes separate preserves readable stall widths under perspective.
   const forwardLength = TAU * 11.25;
+  const cross = { x: w * .70, y: h * .29 }, crossLength = Math.hypot(cross.x, cross.y);
+  const forward = { x: -cross.y / Math.max(1, crossLength), y: cross.x / Math.max(1, crossLength) };
   const project = (distance: number, index: number, total: number): RacingCoursePosition => {
-    const lane = total <= 1 ? .5 : index / (total - 1), start = racingLaneStart(index, total);
-    const arc = (start.advance * start.lap + distance * 1600) / forwardLength;
-    const dx = -w * .036 * arc, dy = h * .29;
-    return { x: w * (.15 + lane * .70 - .018 * arc * arc), y: h * (.46 + .29 * arc), angle: Math.atan2(dy, dx) };
+    const lane = total <= 1 ? .5 : index / (total - 1), arc = distance * 1600 / forwardLength;
+    const travel = h * .29 * arc;
+    const dx = forward.x * h * .29 - w * .036 * arc, dy = forward.y * h * .29;
+    return { x: w * .15 + lane * cross.x + forward.x * travel - w * .018 * arc * arc, y: h * .46 + lane * cross.y + forward.y * travel, angle: Math.atan2(dy, dx) };
   };
   const slots = Array.from({ length: Math.max(1, count) }, (_, index) => project(0, index, count));
   const rail = (index: number) => Array.from({ length: 81 }, (_, step) => project(-.042 + step / 80 * .145, index, 10));
-  return { slots, innerRail: rail(-.85), outerRail: rail(9.85), slotWidth: w * .65 / Math.max(1, count) };
+  return { slots, startLine: [project(0, -.85, 10), project(0, 9.85, 10)], innerRail: rail(-.85), outerRail: rail(9.85), slotWidth: w * .65 / Math.max(1, count) };
 }
 
 function gardenTree(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, seed: number) {
@@ -357,7 +357,7 @@ export function drawRacingTopView(ctx: CanvasRenderingContext2D, w: number, h: n
   ctx.restore();
 }
 
-/** The curved inside rail, staggered marks and stall noses share the oval's course geometry. */
+/** The track line, closed gate doors and horse noses use one shared transverse boundary. */
 export function drawRacingStartingGate(ctx: CanvasRenderingContext2D, w: number, h: number, candidates: Candidate[], clock: number, reduced: boolean, elapsed: number, preview = false) {
   if (w <= 0 || h <= 0) return;
   ctx.save();
@@ -377,9 +377,9 @@ export function drawRacingStartingGate(ctx: CanvasRenderingContext2D, w: number,
   label(ctx, '안쪽 · 잔디', w * .10, h * .09, clamp(w / 75, 8, 12), '#d2dfbb');
   label(ctx, '바깥쪽', w * .89, h * .92, clamp(w / 75, 8, 12), '#d1dfd4');
   const marks = layout.slots;
-  trace(marks); ctx.strokeStyle = '#eee3bc88'; ctx.lineWidth = Math.max(1, h * .009); ctx.stroke();
+  trace(layout.startLine); ctx.strokeStyle = '#eee3bc88'; ctx.lineWidth = Math.max(1, h * .009); ctx.stroke();
   const launch = preview ? 0 : reduced ? Number(elapsed >= 5500) : smooth((elapsed - 5500) / 1150), opened = preview ? 0 : smooth((elapsed - 5500) / 430);
-  // Each stall follows its local tangent. Inside stalls stand behind the outside stalls.
+  // All front bars follow the start line; perspective places inside stalls farther away.
   candidates.forEach((candidate, index) => {
     const mark = marks[index], approach = Math.min(44, h * .28 / scale);
     const walk = preview || reduced ? { distance: approach, progress: 1 } : racingGateWalk(elapsed, index, approach);
