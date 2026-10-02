@@ -10,6 +10,7 @@ export type SportsStageProps = {
   paused: boolean;
   preview: boolean;
   arenaRushRoll?: number;
+  arenaEscapeSeed?: number;
 };
 
 /** Every complete ranking is equally likely. Cheering never enters the draw. */

@@ -132,11 +132,11 @@ test('short head words follow the actual wrist pivot, fall, floor roll and ankle
   assert.deepEqual(arenaActionWords(trip, at(.48)), [{ id: final.aggressor, word: '발걸기!' }]);
   assert.deepEqual(arenaActionWords(trip, at(.57)), [{ id: final.victim, word: '넘어진다!' }]);
   assert.match(arenaStoryState(trip, at(.68)).action, /넘어졌습니다/);
-  assert.deepEqual(arenaActionWords(trip, at(.82)), [{ id: final.aggressor, word: '발차기!' }]);
+  assert.deepEqual(arenaActionWords(trip, at(.82)), [{ id: final.aggressor, word: '발차기!' }, { id: final.victim, word: '구르기!' }]);
   assert.match(arenaStoryState(trip, at(.82)).action, /몸통을 발로/);
   assert.equal(arenaAction(trip, at(.82)).actors.find(actor => actor.id === final.aggressor).pose, 'trip');
-  assert.deepEqual(arenaActionWords(trip, final.impact + 700), [{ id: final.victim, word: '구르기!' }]);
-  assert.deepEqual(arenaActionWords(trip, final.impact + 900), []);
+  assert.deepEqual(arenaActionWords(trip, at(.80) + 700), [{ id: final.victim, word: '구르기!' }]);
+  assert.deepEqual(arenaActionWords(trip, at(.80) + 900), []);
   const suplex = { ...final, tactic: 'suplex', impact: 35300 };
   assert.deepEqual(arenaActionWords(suplex, suplex.impact + 150), []);
   assert.deepEqual(arenaActionWords(suplex, suplex.impact + 1500), [{ id: final.aggressor, word: '끌기!' }]);

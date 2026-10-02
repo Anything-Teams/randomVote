@@ -31,6 +31,7 @@ export default function App() {
   const [runTarget, setRunTarget] = useState(0);
   const [order, setOrder] = useState<string[]>([]);
   const [arenaRushRoll, setArenaRushRoll] = useState(7);
+  const [arenaEscapeSeed, setArenaEscapeSeed] = useState<number>();
   const [error, setError] = useState('');
   const [status, setStatus] = useState<Status>('setup');
   const [result, setResult] = useState<ElectionResult | null>(null);
@@ -82,8 +83,10 @@ export default function App() {
     const nextDuration = createPlaybackDuration(mode);
     const nextOrder = mode === 'election' ? [] : createSportsOrder(candidates);
     const nextRushRoll = mode === 'arena' ? randomInt(10) : 7;
-    const nextEnd = mode === 'arena' ? arenaPlaybackEnd(nextOrder, nextDuration, nextRushRoll) : nextDuration;
+    const nextEscapeSeed = mode === 'arena' ? randomInt(1_000_000) : undefined;
+    const nextEnd = mode === 'arena' ? arenaPlaybackEnd(nextOrder, nextDuration, nextRushRoll, nextEscapeSeed) : nextDuration;
     setArenaRushRoll(nextRushRoll);
+    setArenaEscapeSeed(nextEscapeSeed);
     setRunDuration(nextDuration);
     setRunTarget(targetLane);
     if (mode === 'election') {
@@ -168,7 +171,7 @@ export default function App() {
     setMode(next);
   }
 
-  const sportsProps = { candidates, order, elapsed, duration, paused, preview: status === 'setup', arenaRushRoll };
+  const sportsProps = { candidates, order, elapsed, duration, paused, preview: status === 'setup', arenaRushRoll, arenaEscapeSeed };
   const sportsScene = mode === 'racing' ? <RacingShow {...sportsProps} /> : mode === 'ladder' ? <LadderShow {...sportsProps} targetLane={status === 'setup' ? targetLane : runTarget} onTargetChange={status === 'setup' ? setLadderTarget : undefined} /> : <ArenaShow {...sportsProps} />;
 
   return (

@@ -1,5 +1,6 @@
 import { arenaAction, arenaBeat, arenaCatchTargets, arenaChargeState, arenaDoubleShoveTargets, arenaEdgeTargets, arenaRamTargets, arenaShoveTargets, arenaSpinTargets, arenaTechniqueTargets, type ArenaRound } from './arenaLogic';
 import { arenaPairRushTargets } from './arenaPairRush';
+import { arenaEscapeTargets } from './arenaEscape';
 
 export type ArenaStoryState = {
   kind: string;
@@ -18,6 +19,13 @@ export type ArenaStoryState = {
 
 /** The same beat drives the bodies and the explanation of their relationship. */
 export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryState {
+  if (round.escape && elapsed >= round.escape.start && elapsed < round.escape.end) {
+    const escape = arenaEscapeTargets(round, elapsed, { x: 500, y: 416 })!;
+    const stages = ['approach', 'grip', 'break', 'flee', 'chase', 'rejoin'];
+    const step = Math.max(0, stages.indexOf(escape.stage));
+    const ungripped = round.escape.ungripped;
+    return { kind: 'escape', label: ungripped ? '잡히기 전에 피해서 도망!' : '손을 빼고 도망!', action: ['서로 거리를 좁히며 빈틈을 봅니다.', ungripped ? '상대가 손을 뻗습니다. 잡히기 전에 몸을 틉니다.' : '손을 맞잡았습니다. 한 선수가 몸을 낮춥니다.', ungripped ? '뻗은 손을 피했습니다! 첫 공방은 결판이 나지 않았습니다.' : '잡힌 손을 비틀어 빼냈습니다! 첫 공방은 결판이 나지 않았습니다.', '방향을 틀어 모래판 안쪽으로 달아납니다.', '상대가 뒤쫓습니다! 달아난 선수도 뒤를 살피며 방향을 바꿉니다.', '다른 자리에서 다시 맞붙습니다. 다음 승부수를 노립니다.'][step], left: [escape.runnerId], right: [escape.chaserId], relation: step < 2 ? '↔' : '→', relationLabel: step < 2 ? '첫 공방' : step < 5 ? '탈출 · 추격' : '새 접점에서 재대결', leftLabel: '빠져나가는 선수', rightLabel: '뒤쫓는 선수', steps: ['접근', ungripped ? '손 뻗기' : '맞잡기', ungripped ? '견제 회피' : '손 빼기', '도망', '추격', '재대결'], step };
+  }
   const frame = arenaBeat(round, elapsed), action = arenaAction(round, elapsed);
   const beat = frame.stage;
   const step = beat === 'approach' ? 0 : beat === 'hold' ? 1 : 2;
@@ -36,9 +44,9 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
     state.relation = '←';
     if (rush.outcome === 'counter-throw') {
       state.label = '돌진 실패 · 둘이 잡아 던지기'; state.relationLabel = '팔과 다리를 나눠 잡는 반격';
-      state.steps = ['둘이 힘겨루기', '세 번째 선수 돌진', '튕겨 나가 그로기', '팔 · 다리 잡기', '둘이 들어 장외로'];
-      state.step = rush.stage === 'wrestle' ? 0 : rush.stage === 'charge' || rush.stage === 'contact' ? 1 : rush.stage === 'rebound' || rush.stage === 'groggy' ? 2 : rush.stage === 'grip' ? 3 : 4;
-      state.action = ['두 선수가 맞잡고 싸웁니다. 옆의 선수가 틈을 노립니다.', '어깨로 두 사람을 향해 돌진합니다!', '둘이 버텼습니다! 돌진한 선수가 튕겨 나가 쓰러집니다.', '싸우던 두 사람이 잠시 힘을 합칩니다. 한 명은 팔을, 다른 한 명은 다리를 잡았습니다.', '팔과 다리를 잡은 두 사람이 함께 들어 올려 장외로 던집니다.'][state.step];
+      state.steps = ['둘이 힘겨루기', '뒤에서 달려와 충돌', '튕겨 나가 그로기', '손끝 · 발끝 잡기', '머리 위로 들기', '함께 던지기'];
+      state.step = rush.stage === 'wrestle' ? 0 : rush.stage === 'charge' || rush.stage === 'contact' ? 1 : rush.stage === 'rebound' || rush.stage === 'groggy' ? 2 : rush.stage === 'grip' ? 3 : rush.stage === 'lift' || rush.stage === 'overhead' ? 4 : 5;
+      state.action = ['두 선수가 맞잡고 싸웁니다. 뒤의 선수가 틈을 노립니다.', '뒤에서 속도를 붙여 두 사람에게 어깨로 부딪칩니다!', '둘이 버텼습니다! 돌진한 선수가 튕겨 나가 쓰러집니다.', '팔을 만세 자세로 폅니다. 한 명은 두 손끝을, 다른 한 명은 두 발끝을 잡았습니다.', '손끝과 발끝을 잡은 채 둘이 머리 위로 높이 들어 올립니다!', '함께 힘을 실어 던집니다. 붙잡힌 선수만 장외로 날아갑니다.'][state.step];
     } else {
       state.label = '돌진 성공 · 두 명 장외'; state.relationLabel = '맞잡은 둘을 함께 밀어내기';
       state.steps = ['둘이 힘겨루기', '세 번째 선수 돌진', '어깨 정면 충돌', '맞잡은 둘이 장외'];
@@ -65,9 +73,9 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
         state.step = opening ? 0 : technique.stage === 'grip' ? 1 : technique.stage === 'hook' ? 2 : technique.stage === 'fall' || technique.stage === 'stunned' ? 3 : technique.stage === 'kick' ? 4 : 5;
         state.action = ['첫 밀기를 버텼습니다. 손을 풀고 다시 파고듭니다.', '몸통을 잡고 한 발 가까이 들어갑니다. 상대는 뒤로 버팁니다.', '뻗은 발이 상대 발목에 걸렸습니다! 지지발이 흔들립니다.', '걸린 발이 떠서 뒤로 넘어졌습니다. 공격한 선수는 발을 고쳐 디딥니다.', '넘어진 상대의 몸통을 발로 찹니다. 뻗은 발바닥이 몸에 닿습니다.', '발차기를 받은 상대가 차인 방향으로 뒤구르며 경계 밖으로 떨어집니다.'][state.step];
       } else if (round.tactic === 'suplex') {
-        state.steps = ['견제 · 회피', '허리 잡아 들기', '공중에서 뒤집기', '등 · 어깨 충돌', '기절', '경계까지 끌기', '안에서 던지기'];
-        state.step = opening ? 0 : technique.stage === 'grip' || technique.stage === 'lift' ? 1 : technique.stage === 'arch' ? 2 : technique.stage === 'slam' ? 3 : elapsed < round.impact + 300 * (round.timeScale ?? round.end / 44000) ? 4 : elapsed < round.impact + 2600 * (round.timeScale ?? round.end / 44000) ? 5 : 6;
-        state.action = ['밀기를 막았습니다. 자세를 낮춰 상대의 허리를 노립니다.', '허리를 양팔로 감싸고 무릎을 펴 들어 올립니다.', '몸을 뒤로 젖혀 상대를 공중에서 뒤집습니다. 손을 놓은 뒤 바닥으로 떨어집니다!', '쾅! 등과 어깨가 모래판에 부딪쳤습니다. 충격으로 팔과 다리의 힘이 풀립니다.', '바닥에 쓰러진 상대가 잠깐 기절합니다. 공격한 선수는 다시 발을 딛습니다.', '발목을 잡고 모래판 안쪽 경계까지 끕니다. 공격하는 선수는 모래판 안에 남습니다.', '경계 안에 발을 디딘 채 잡은 발목을 놓아 넘깁니다. 상대만 모래판 밖으로 떨어집니다.'][state.step];
+        state.steps = ['견제 · 회피', '허리 잡아 들기', '머리 위로!', '내리찍기', '등 · 어깨 충돌', '기절', '경계까지 끌기', '안에서 던지기'];
+        state.step = opening ? 0 : technique.stage === 'grip' || technique.stage === 'lift' ? 1 : technique.stage === 'overhead' ? 2 : technique.stage === 'slam' ? technique.slamImpact > 0 ? 4 : 3 : elapsed < round.impact + 300 * (round.timeScale ?? round.end / 44000) ? 5 : elapsed < round.impact + 2600 * (round.timeScale ?? round.end / 44000) ? 6 : 7;
+        state.action = ['밀기를 막았습니다. 자세를 낮춰 상대의 허리를 노립니다.', '허리를 양팔로 감싸고 발을 딛어 머리 위로 들어 올립니다.', '상대를 머리 위에 높이 들었습니다! 정점에서 몸을 고정합니다.', '잡고 있던 상대를 아래로 힘껏 내리찍습니다!', '쾅! 등과 어깨가 모래판에 부딪쳤습니다. 충격으로 팔과 다리의 힘이 풀립니다.', '바닥에 쓰러진 상대가 잠깐 기절합니다. 공격한 선수는 다시 발을 딛습니다.', '발목을 잡고 모래판 안쪽 경계까지 끕니다. 공격하는 선수는 모래판 안에 남습니다.', '경계 안에 발을 디딘 채 잡은 발목을 놓아 넘깁니다. 상대만 모래판 밖으로 떨어집니다.'][state.step];
       } else {
         state.steps = ['견제 · 회피', '첫 차기 · 도약', '두 번째 옆차기', '발끝 충돌 · 장외'];
         state.step = opening || technique.stage === 'plant' ? 0 : technique.stage === 'first-kick' ? 1 : technique.stage === 'second-kick' ? 2 : 3;

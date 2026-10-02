@@ -36,10 +36,22 @@ test('the suplex body reaches the sand before it relaxes into a still floor silh
 });
 
 test('the pure suplex rig stays continuous at every lift, landing and slump boundary', () => {
-  for (const side of [-1, 1]) for (const phase of [.34, .56, .70, .82, .88, .94, 1]) {
+  for (const side of [-1, 1]) for (const phase of [.34, .56, .70, .82, .88, .91, .94, 1]) {
     const before = victimAt(phase - .001 / span, side), after = victimAt(phase + .001 / span, side);
     const a = parts(sampleArenaFighterContacts(before.actor, before.time)), b = parts(sampleArenaFighterContacts(after.actor, after.time));
     a.forEach((point, index) => assert.ok(distance(point, b[index]) < .005, `side ${side}, phase ${phase}, body point ${index} cannot pop when the action label changes`));
+  }
+});
+
+test('both suplex legs unfold through full extension without collapsing either connected bone', () => {
+  for (const side of [-1, 1]) for (let step = 0; step <= 60; step++) {
+    const phase = .88 + step / 1000, { actor, time } = victimAt(phase, side);
+    drawArenaFighter(noop, actor, time);
+    const { hips, knees, feet } = actor.animation.skeleton;
+    for (let leg = 0; leg < 2; leg++) {
+      assert.ok(Math.abs(distance(hips[leg], knees[leg]) - 11) < .001, 'the upper leg cannot shrink as the bent knee turns');
+      assert.ok(Math.abs(distance(knees[leg], feet[leg]) - 11) < .001, 'the shin and ankle remain connected at their actual length');
+    }
   }
 });
 
