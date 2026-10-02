@@ -136,3 +136,44 @@ test('the third fighter runs from farther behind and the collision pulse follows
     }
   }
 });
+
+test('a runner faces its real approach from either side, diagonally or vertically', () => {
+  const center = { x: 500, y: 416 };
+  for (const roll of [0, 7]) for (const side of [-1, 1]) {
+    const actual = round(roll, side, 10000), contact = { x: center.x - side * (roll < 3 ? 75 : 53), y: center.y + 5 };
+    const charger = roll < 3 ? 'aggressor' : 'victim';
+    for (const offset of [{ x: -230, y: 0 }, { x: 230, y: 0 }, { x: -180, y: 65 }, { x: 180, y: -65 }, { x: 0, y: -90 }, { x: 0, y: 90 }]) {
+      const origin = { x: contact.x + offset.x, y: contact.y + offset.y };
+      const opening = arenaPairRushTargets(actual, 0, center, origin);
+      assert.deepEqual(opening[charger], origin, 'the runner starts at its actual position');
+      assert.ok(Math.abs(Math.hypot(opening.chargeDirection.x, opening.chargeDirection.y) - 1) < 1e-12);
+      if (offset.x) assert.equal(opening.chargerFacing, -Math.sign(offset.x), 'the body cannot face the rim side while its feet run the other way');
+      else assert.equal(opening.chargeDirection.x, 0, 'a vertical rush retains its vertical trajectory');
+      let previous = opening[charger];
+      for (let elapsed = 16; elapsed < opening.contactAt; elapsed += 16) {
+        const frame = arenaPairRushTargets(actual, elapsed, center, origin), current = frame[charger];
+        const forward = (current.x - previous.x) * opening.chargeDirection.x + (current.y - previous.y) * opening.chargeDirection.y;
+        assert.ok(forward >= -1e-9, 'every approach step advances toward the pair');
+        assert.ok(distance(current, previous) / .016 < 165, 'an arbitrary origin keeps the same bounded running speed');
+        if (frame.stage === 'charge' && roll === 7) assert.equal(frame.victimPose, undefined, 'a running charger cannot be frozen by a brace pose');
+        previous = current;
+      }
+      assert.ok(distance(arenaPairRushTargets(actual, opening.contactAt, center, origin)[charger], contact) < 1e-8, 'the runner reaches the pair without a backwards reset');
+    }
+  }
+});
+
+test('a blocked diagonal or vertical rush recoils back along its path and stays where it fell', () => {
+  const center = { x: 500, y: 416 };
+  for (const side of [-1, 1]) for (const offset of [{ x: 190, y: -50 }, { x: -190, y: 50 }, { x: 0, y: -85 }, { x: 0, y: 85 }]) {
+    const actual = round(7, side, 10000), origin = { x: center.x - side * 53 + offset.x, y: center.y + 5 + offset.y };
+    const opening = arenaPairRushTargets(actual, 0, center, origin), contactPhase = opening.contactAt / actual.impact;
+    const atBeat = beat => arenaPairRushTargets(actual, actual.impact * (contactPhase + (1 - contactPhase) * (beat - .44) / .56), center, origin);
+    const contact = atBeat(.44), fallen = atBeat(.60), grabbed = atBeat(.78), held = atBeat(.93);
+    const recoil = (fallen.victim.x - contact.victim.x) * opening.chargeDirection.x + (fallen.victim.y - contact.victim.y) * opening.chargeDirection.y;
+    assert.ok(Math.abs(recoil + 18) < 1e-8, 'the failed charger bounces against its actual running direction');
+    assert.ok(distance(fallen.victim, grabbed.victim) < 1e-8, 'grabbing the fallen body does not pull it onto a horizontal staging mark');
+    assert.ok(distance(grabbed.victim, held.victim) < 1e-8, 'only the overhead lift changes height while the base stays in place');
+    assert.equal(held.lift, 142, 'the shared overhead height is preserved for every arrival direction');
+  }
+});

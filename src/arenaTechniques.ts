@@ -1,6 +1,6 @@
 import type { ArenaPoint, ArenaRound, ArenaThrowFrame } from './arenaLogic';
 
-export const arenaFinalTechniques = ['armspin', 'trip', 'suplex', 'sidekick'] as const;
+export const arenaFinalTechniques = ['armspin', 'trip', 'suplex', 'sidekick', 'elbow'] as const;
 export type ArenaFinalTechnique = typeof arenaFinalTechniques[number];
 /** The renderer anchors both wrists, then lays the body outward from them. */
 export type ArenaArmSpinFrame = { orbit: number; flatness: number; weight: number };
@@ -29,8 +29,14 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     spin: undefined as ArenaArmSpinFrame | undefined,
     victimSlam: undefined as { tuck: number; slump: number } | undefined,
     slamImpact: 0,
-    aggressorPose: undefined as 'overhead' | undefined,
+    aggressorPose: undefined as 'overhead' | 'elbow' | 'drag' | 'throw' | undefined,
     aggressorOverheadRaise: 0,
+    aggressorFacing: undefined as number | undefined,
+    victimLift: 0,
+    aggressorSuspension: 0,
+    victimGrip: undefined as 'waist' | undefined,
+    elbowContact: 0,
+    elbowImpact: 0,
     kickReactionAt: arenaTechniqueReactionAt(round),
     reactionProgress: 0,
   };
@@ -78,7 +84,7 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     // Bring the waist above the driver's head, read the raised hold, then
     // accelerate straight down into the shoulder landing without a back arch.
     frame.lift = lift * 100 * (1 - slam);
-    frame.victimAngle = -side * Math.PI * .47 * turn;
+    frame.victimAngle = side * Math.PI * .53 * turn;
     frame.aggressorPose = phase >= .34 && phase < .88 ? 'overhead' : undefined;
     frame.aggressorOverheadRaise = lift * (1 - slam);
     frame.victimPose = phase >= .88 ? 'stunned' : phase >= .34 ? 'airborne' : undefined;
@@ -88,18 +94,39 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     frame.grip = phase >= .30 && phase < .76 ? 'waist' : undefined;
     frame.stage = phase < .34 ? 'grip' : phase < .64 ? 'lift' : phase < .76 ? 'overhead' : phase < .94 ? 'slam' : elapsed < round.impact ? 'stunned' : 'drag';
   } else if (round.tactic === 'sidekick') {
-    const jump = ease((phase - .38) / .22), strike = ease((phase - .68) / .14), recoil = ease((phase - .82) / .18);
+    const jump = clamp((phase - .42) / .58), strike = ease((phase - .64) / .18), recoil = ease((phase - .82) / .18);
     frame.aggressor.x = center.x - side * (24 - jump * 11 + recoil * 7);
     frame.victim.x = center.x + side * (24 + recoil * 16);
-    const firstArc = Math.sin(jump * Math.PI), secondArc = Math.sin(clamp((phase - .60) / .40) * Math.PI);
-    frame.aggressorLift = firstArc * 14 + secondArc * 22;
-    frame.aggressorAngle = -side * (firstArc * .13 + secondArc * .20);
-    frame.yaw = firstArc * .35 + secondArc * .70;
+    const arc = Math.sin(jump * Math.PI);
+    frame.aggressorLift = arc * 26;
+    frame.aggressorAngle = -side * arc * .24;
+    frame.yaw = arc * .70;
     frame.contact = strike * (1 - ease((phase - .82) / .025));
     frame.reactionProgress = recoil;
     frame.lift = recoil * 14; frame.victimAngle = side * recoil * .32;
     frame.grip = undefined;
-    frame.stage = phase < .30 ? frame.stage : phase < .38 ? 'plant' : phase < .60 ? 'first-kick' : phase < .82 ? 'second-kick' : elapsed < round.impact ? 'impact' : 'release';
+    frame.stage = phase < .42 ? 'plant' : phase < .64 ? 'jump' : phase < .82 ? 'kick' : elapsed < round.impact ? 'impact' : 'release';
+  } else if (round.tactic === 'elbow') {
+    const close = ease((phase - .30) / .04);
+    const raised = ease((phase - .30) / .15), descend = ease((phase - .55) / .12);
+    const fall = ease((phase - .55) / .12), circle = ease((phase - .69) / .15), take = ease((phase - .84) / .12);
+    frame.aggressorLift = raised * 44 * (1 - descend);
+    frame.aggressorSuspension = raised * (1 - descend);
+    frame.aggressor.x = center.x - side * mix(24, 12, close) + side * 82 * circle;
+    frame.aggressor.y = center.y + Math.sin(circle * Math.PI) * 18 + circle * 6;
+    frame.aggressorFacing = phase >= .76 ? -side : side;
+    frame.victim = { x: center.x + side * mix(24, 22, close), y: center.y };
+    frame.victimAngle = -side * Math.PI * .47 * fall;
+    frame.victimPose = phase >= .55 ? 'stunned' : undefined;
+    frame.victimSuspension = phase >= .84 ? take : phase >= .55 ? 1 - fall : 0;
+    frame.victimGrip = phase >= .30 && phase < .55 ? 'waist' : undefined;
+    frame.victimLift = raised * 44;
+    frame.grip = phase >= .84 && elapsed < round.impact ? 'ankle' : undefined;
+    frame.elbowContact = ease((phase - .45) / .10) * (1 - ease((phase - .55) / .06));
+    frame.elbowImpact = phase >= .55 && phase < .64 ? 1 - ease((phase - .55) / .09) : 0;
+    frame.lift = take * 30;
+    frame.aggressorPose = phase >= .45 && phase < .61 ? 'elbow' : phase >= .84 ? elapsed >= round.impact ? 'throw' : 'drag' : undefined;
+    frame.stage = phase < .45 ? 'lift-counter' : phase < .55 ? 'elbow' : phase < .67 ? 'elbow-impact' : phase < .76 ? 'groggy' : phase < .84 ? 'ankle-approach' : elapsed < round.impact ? 'ankle-grip' : 'release';
   }
   return frame;
 }

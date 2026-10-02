@@ -11,6 +11,7 @@ export type ArenaPairRushFrame = {
   stage: 'wrestle' | 'charge' | 'contact' | 'push' | 'rebound' | 'groggy' | 'grip' | 'lift' | 'overhead' | 'toss' | 'release';
   aggressor: ArenaPoint; helper: ArenaPoint; victim: ArenaPoint;
   chargerId: string; pairIds: [string, string];
+  chargerFacing: 1 | -1; chargeDirection: ArenaPoint;
   chargeStrength: number; pressure: number; rebound: number; groggy: number;
   contactAt: number; impactStrength: number; victimRecoil: number; helperRecoil: number;
   lift: number; victimAngle: number; victimSuspension: number;
@@ -57,6 +58,10 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   // Start where the third fighter actually stands. A longer runway receives
   // more time rather than moving the fighter backwards to a staging mark.
   const distance = Math.hypot(contact.x - origin.x, contact.y - origin.y);
+  // The rim side describes the wrestling/throw layout, not the direction a
+  // fighter runs. An actual origin may be on either side or above the pair.
+  const chargeDirection = distance > .001 ? { x: (contact.x - origin.x) / distance, y: (contact.y - origin.y) / distance } : { x: side, y: 0 };
+  const chargerFacing: 1 | -1 = Math.abs(chargeDirection.x) > .001 ? chargeDirection.x > 0 ? 1 : -1 : side > 0 ? 1 : -1;
   const contactPhase = round.rushContactAt !== undefined ? (round.rushContactAt - round.start) / span : Math.max(.42, .06 + distance * 1500 / (165 * span));
   const contactAt = round.start + span * contactPhase;
   const approach = ease((phase - .06) / Math.max(.001, contactPhase - .06));
@@ -69,6 +74,7 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
     aggressor: { x: center.x, y: center.y }, helper: { x: center.x, y: center.y }, victim: { x: center.x, y: center.y },
     chargerId: outcome === 'double-out' ? round.aggressor : round.victim,
     pairIds: outcome === 'double-out' ? [round.victim, round.helper] : [round.aggressor, round.helper],
+    chargerFacing, chargeDirection,
     chargeStrength, pressure: 0, rebound: 0, groggy: 0, lift: 0,
     contactAt, impactStrength, victimRecoil: 0, helperRecoil: 0,
     victimCarryStretch: 0, overhead: 0,
@@ -91,23 +97,29 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   }
   const rebound = ease((beat - .44) / .08), fallen = ease((beat - .52) / .08), arrive = ease((beat - .44) / .24);
   const stretch = ease((beat - .62) / .16), lifted = ease((beat - .78) / .14), tossed = ease((beat - .96) / .04);
-  const chargerX = mix(origin.x, contact.x, approach) - side * rebound * 18;
-  const carriedX = center.x - side * 71 + side * tossed * 20;
-  frame.victim = { x: mix(chargerX, carriedX, stretch), y: mix(origin.y, center.y + 5, approach) };
+  // A blocked runner recoils along the incoming path, then stays where they
+  // actually fell. Holders approach that body instead of sliding it back to
+  // a horizontal staging position when the approach was diagonal or vertical.
+  const fallenPoint = { x: contact.x - chargeDirection.x * 18, y: contact.y - chargeDirection.y * 18 };
+  const chargerX = mix(origin.x, contact.x, approach) - chargeDirection.x * rebound * 18;
+  const chargerY = mix(origin.y, contact.y, approach) - chargeDirection.y * rebound * 18;
+  const carriedX = fallenPoint.x + side * tossed * 20;
+  frame.victim = { x: mix(chargerX, carriedX, stretch), y: mix(chargerY, fallenPoint.y, stretch) };
   // The former opponents stop wrestling, go to opposite ends of the stunned
   // charger, and keep those arm/ankle holds through the shared lifting stroke.
   // Floor-aware rotation initially shifts the stretched skeleton about 48px
   // toward its toes. Both carriers follow that offset as the body leaves the
   // sand, rather than stretching their arms beyond their anatomical reach.
-  frame.aggressor = { x: mix(center.x + side * 22, carriedX + side * (mix(24, 121, stretch) + lifted * 29.54), arrive), y: center.y + mix(14, mix(10, -4, lifted), arrive) };
-  frame.helper = { x: mix(center.x - side * 22, carriedX - side * (mix(85, 89, stretch) - lifted * 67.54), arrive), y: center.y + mix(-14, mix(6, -2, lifted), arrive) };
+  const carrierShiftY = fallenPoint.y - contact.y;
+  frame.aggressor = { x: mix(center.x + side * 22, carriedX + side * (mix(24, 121, stretch) + lifted * 29.54), arrive), y: center.y + mix(14, mix(10, -4, lifted) + carrierShiftY, arrive) };
+  frame.helper = { x: mix(center.x - side * 22, carriedX - side * (mix(85, 89, stretch) - lifted * 67.54), arrive), y: center.y + mix(-14, mix(6, -2, lifted) + carrierShiftY, arrive) };
   frame.rebound = rebound;
   frame.groggy = rebound * (1 - stretch);
   frame.lift = lifted * 142;
   frame.victimCarryStretch = stretch;
   frame.overhead = lifted;
   frame.victimAngle = side * (mix(rebound * .22, Math.PI * .47, fallen) + stretch * Math.PI * .03);
-  frame.victimPose = beat >= .62 ? 'carried' : beat >= .52 ? 'stunned' : 'brace';
+  frame.victimPose = beat >= .62 ? 'carried' : beat >= .52 ? 'stunned' : phase < contactPhase ? undefined : 'brace';
   frame.victimSuspension = beat >= .62 ? lifted : beat >= .52 && beat < .56 ? 1 - ease((beat - .52) / .04) : 0;
   frame.grip = released ? undefined : beat >= .62 ? 'arms-legs' : beat < .44 ? 'pair' : undefined;
   frame.carrierPose = beat < .62 ? 'drag' : 'overhead';

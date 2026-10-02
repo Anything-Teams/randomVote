@@ -78,3 +78,55 @@ test('the helpers rise from their low limb grip without lifting either support h
     previous = structuredClone(heels);
   }
 });
+
+test('zero carry progress keeps the rushing fighter grounded with alternating steps in every direction', () => {
+  for (const [vx, vy] of [[0, -165], [0, 165], [-100, -130], [100, 130]]) {
+    const animation = createArenaFighterAnimation();
+    const body = fighter({ pose: 'run', angle: 0, facing: vx < 0 ? -1 : 1, carryStretch: 0, suspension: 0, velocityX: vx, velocityY: vy, chargeStrength: 1, animation, motionImmediate: false });
+    let swings = [0, 0], previous = [false, false], highest = 0;
+    for (let frame = 0; frame < 120; frame++) {
+      body.x += vx * .016; body.y += vy * .016; body.gaitDistance += Math.hypot(vx, vy) * .016;
+      drawArenaFighter(ctx, body, frame * 16);
+      assert.equal(animation.airborne, false, 'the carry field cannot freeze a still-running charge into a held pose');
+      for (let leg = 0; leg < 2; leg++) {
+        const foot = animation.feet[leg];
+        if (foot.swinging && !previous[leg]) swings[leg]++;
+        highest = Math.max(highest, foot.lift);
+        previous[leg] = foot.swinging;
+        assert.ok(animation.skeleton.feet[leg].y !== undefined);
+      }
+    }
+    assert.ok(swings.every(count => count >= 3), `both feet take repeated running steps for ${vx}, ${vy}: ${swings}`);
+    assert.ok(highest > 1.2, 'vertical running visibly lifts each foot clear of the sand');
+  }
+});
+
+test('the thrown carry body keeps its thickness when flight yaw crosses an edge-on turn', () => {
+  for (const angle of [-2, -Math.PI / 2, 0, Math.PI / 2, 2]) for (const stretch of [.4, .8, 1]) {
+    const source = fighter({ pose: 'airborne', angle, carryStretch: stretch, suspension: 1, yaw: 0 });
+    const original = sampleArenaFighterContacts(source, 2000);
+    for (const yaw of [-Math.PI / 2, Math.PI / 2, Math.PI]) {
+      const scales = [], matrices = [], draw = { ...ctx, scale: (x, y) => scales.push([x, y]), transform: (...matrix) => matrices.push(matrix) };
+      const flight = { ...source, yaw, animation: createArenaFighterAnimation() };
+      drawArenaFighter(draw, flight, 2000);
+      assert.deepEqual(flight.animation.contactPoints, original, 'airborne yaw cannot add a second squeeze to the carry projection');
+      assert.equal(scales[0][0], 1, 'the torso retains its full width inside the single carry transform');
+      assert.ok(Math.hypot(matrices[0][0], matrices[0][1]) >= source.scale * .5 - .000001, 'the held and flying body never collapses below its intended half-depth thickness');
+    }
+  }
+});
+
+test('a lifted elbow hits the supplied head contact with a connected folded forearm', () => {
+  for (const facing of [-1, 1]) for (const angle of [-.2, 0, .2]) {
+    const body = fighter({ pose: 'elbow', facing, angle, carryStretch: undefined, suspension: 1, y: 370 });
+    const shoulder = sampleArenaFighterContacts(body, 2000).shoulders[1];
+    body.elbowTarget = { x: shoulder.x + facing * body.scale * 5, y: shoulder.y + body.scale * 8 };
+    body.elbowStrength = 1;
+    drawArenaFighter(ctx, body, 2000);
+    const contacts = body.animation.contactPoints;
+    assert.ok(distance(contacts.elbows[1], body.elbowTarget) < .000001, 'the actual elbow reaches the head instead of moving a fist near it');
+    assert.ok(distance(contacts.shoulders[1], contacts.elbows[1]) <= 11 * body.scale + .001);
+    assert.ok(Math.abs(distance(contacts.elbows[1], contacts.hands[1]) - 10.5 * body.scale) < .001, 'the connected forearm cannot shorten during impact');
+    assert.ok(distance(contacts.hands[1], body.elbowTarget) > 18, 'the palm remains folded away from the elbow contact');
+  }
+});

@@ -7,7 +7,7 @@ async function source(path) {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
 const { arenaAction, arenaActionWords, arenaEliminatedIds, arenaFocusRound, arenaMiniExchanges, arenaNarration, arenaPlaybackEnd, arenaPodium, arenaRanks, arenaRounds } = await source('src/arenaLogic.ts');
-const { ARENA_ESCAPE_DURATION, arenaEscapeTargets } = await source('src/arenaEscape.ts');
+const { ARENA_ESCAPE_DURATION, ARENA_ESCAPE_RELEASE_DURATION, arenaEscapeTargets } = await source('src/arenaEscape.ts');
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const radius = p => Math.hypot((p.x - 500) / 303, (p.y - 416) / 112);
 const base = { id: 'escape', index: 0, tactic: 'brace', aggressor: 'a', victim: 'v', start: 3800, impact: 6900, resolve: 8000, end: 8000, final: false, timeScale: 1 };
@@ -17,13 +17,14 @@ test('cosmetic escapes are optional, quarter-probability, finite and never chang
   const pair = ['a', 'v'];
   assert.deepEqual(arenaRounds(pair), arenaRounds(pair, 44_000, 7, undefined));
   assert.ok(arenaRounds(pair).every(round => !round.escape));
-  let escaped = 0;
+  let escaped = 0, separated = 0;
   const runnerRoles = new Set();
   for (let seed = 0; seed < 4000; seed++) {
     const round = arenaRounds(pair, 44_000, 7, seed)[0];
-    if (round.escape) { escaped++; runnerRoles.add(round.escape.runnerId); }
+    if (round.escape) { escaped++; runnerRoles.add(round.escape.runnerId); if (round.escape.outcome === 'separate') separated++; }
   }
   assert.ok(escaped / 4000 > .23 && escaped / 4000 < .27);
+  assert.ok(separated / escaped > .47 && separated / escaped < .53, 'roughly half the escapes break contact completely');
   assert.equal(runnerRoles.size, 2, 'the runner is cosmetic and can be either eventual rank');
   let cappedGames = 0;
   for (const duration of [40_000, 44_000, 62_000]) for (const rushRoll of [0, 7]) for (let count = 2; count <= 10; count++) for (let seed = 0; seed < 24; seed++) {
@@ -39,16 +40,18 @@ test('cosmetic escapes are optional, quarter-probability, finite and never chang
       if (!round.escape) return;
       assert.ok(!round.helper && !round.rushOutcome, 'three-person maneuvers do not invent another escaping pair');
       assert.ok(!rounds[index - 1]?.escape, 'escapes cannot run consecutively');
-      assert.equal(round.escape.end, round.start);
+      assert.equal(round.escape.releasedUntil, round.start);
+      assert.ok(Math.abs(round.start - round.escape.end - (round.escape.outcome === 'separate' ? ARENA_ESCAPE_RELEASE_DURATION * round.timeScale : 0)) < 1e-8);
       assert.ok(Math.abs(round.escape.end - round.escape.start - ARENA_ESCAPE_DURATION * round.timeScale) < 1e-8);
       const ranks = arenaRanks(order, entry, duration, rushRoll, seed);
-      for (const elapsed of [entry, (entry + round.start) / 2, round.start - .001]) {
+      for (const elapsed of [entry, (entry + round.escape.end) / 2, round.escape.end - .001]) {
         assert.deepEqual(arenaRanks(order, elapsed, duration, rushRoll, seed), ranks, 'running away does not eliminate either opponent');
         assert.equal(arenaFocusRound(order, elapsed, duration, rushRoll, seed).id, round.id);
         const action = arenaAction(round, elapsed);
         assert.equal(action.lift, 0); assert.equal(action.liftedId, undefined); assert.equal(action.outcome, 'pending');
-        assert.deepEqual(action.actors.map(part => part.id).sort(), [round.aggressor, round.victim].sort());
+        assert.deepEqual(action.actors.map(part => part.id).sort(), [round.escape.runnerId, round.escape.chaserId].sort());
       }
+      assert.deepEqual(arenaRanks(order, round.start - .001, duration, rushRoll, seed), ranks, 'the released pair stays in the game during the search interval');
       assert.deepEqual(arenaRanks(order, round.resolve - .001, duration, rushRoll, seed), ranks);
       assert.equal(arenaRanks(order, round.resolve, duration, rushRoll, seed)[round.victim], expected[round.victim]);
     });
@@ -59,6 +62,35 @@ test('cosmetic escapes are optional, quarter-probability, finite and never chang
     assert.deepEqual(order, original);
   }
   assert.ok(cappedGames > 0, 'the two-escape limit is exercised in large fields');
+});
+
+test('successful escapes release the original pair and use another surviving opponent when one exists', () => {
+  let switched = 0, twoPlayer = 0;
+  for (const order of [['a', 'v'], ['a', 'b', 'v'], ['a', 'b', 'c', 'v']]) for (let seed = 0; seed < 160; seed++) {
+    const rounds = arenaRounds(order, 44_000, 7, seed);
+    for (const round of rounds.filter(round => round.escape?.outcome === 'separate')) {
+      const { escape } = round, originalPair = [escape.runnerId, escape.chaserId];
+      const survivorAlternatives = order.slice(0, order.indexOf(round.victim)).filter(id => !originalPair.includes(id));
+      if (survivorAlternatives.length) {
+        switched++;
+        assert.ok(survivorAlternatives.includes(round.aggressor), 'the next deciding bout uses a different surviving opponent');
+        assert.ok(!originalPair.includes(round.aggressor));
+      } else {
+        twoPlayer++;
+        assert.ok(originalPair.includes(round.aggressor));
+        assert.ok(round.start > escape.end, 'the final pair can search freely before a later meeting');
+      }
+      const end = arenaEscapeTargets(round, escape.end, { x: 500, y: 416 });
+      assert.equal(end.grip, false); assert.equal(end.separated, true); assert.equal(end.released, true);
+      assert.equal(end.runnerId, escape.runnerId); assert.equal(end.chaserId, escape.chaserId);
+      assert.ok(distance(end.runner, end.chaser) > 140, 'the two runners finish apart instead of returning to a grip');
+      assert.equal(arenaEscapeTargets(round, round.start - .001, { x: 500, y: 416 }).released, true);
+      assert.equal(arenaEscapeTargets(round, round.start, { x: 500, y: 416 }).released, false);
+      assert.equal(arenaPlaybackEnd(order, 44_000, 7, seed), rounds.at(-1).end);
+      assert.deepEqual(arenaRanks(order, 44_000, 44_000, 7, seed), Object.fromEntries(order.map((id, i) => [id, i + 1])));
+    }
+  }
+  assert.ok(switched > 0); assert.ok(twoPlayer > 0);
 });
 
 test('escape paths keep their contacts, bounded running speed and continuous rejoin at the live encounter', () => {
@@ -91,6 +123,33 @@ test('escape paths keep their contacts, bounded running speed and continuous rej
     }
     assert.ok(distance(start.runner, held.runner) > 5);
     assert.ok(distance(at(2500).runner, held.runner) > 25, 'fleeing produces visible travel');
+  }
+});
+
+test('successful routes stay continuous, remain on the sand and never grip again after releasing', () => {
+  for (const unit of [.5, .8, 1, 1.4]) for (const contactSide of [-1, 1]) for (const side of [-1, 1]) for (const runnerId of ['a', 'v']) for (const center of [{ x: 500, y: 416 }, { x: 320, y: 390 }, { x: 680, y: 445 }]) {
+    const round = { ...base, start: (ARENA_ESCAPE_DURATION + ARENA_ESCAPE_RELEASE_DURATION) * unit, timeScale: unit, contactSide, escape: { start: 0, end: ARENA_ESCAPE_DURATION * unit, releasedUntil: (ARENA_ESCAPE_DURATION + ARENA_ESCAPE_RELEASE_DURATION) * unit, runnerId, chaserId: runnerId === 'v' ? 'a' : 'v', side, outcome: 'separate' } };
+    const at = age => arenaEscapeTargets(round, age * unit, center);
+    for (const boundary of boundaries) {
+      const before = at(boundary - 1e-4), after = at(boundary + 1e-4);
+      assert.ok(distance(before.runner, after.runner) < .0001); assert.ok(distance(before.chaser, after.chaser) < .0001);
+    }
+    let previous = at(0);
+    for (let elapsed = 16; elapsed <= round.start; elapsed += 16) {
+      const current = arenaEscapeTargets(round, elapsed, center);
+      assert.deepEqual(current, arenaEscapeTargets(round, elapsed, center));
+      for (const id of ['runner', 'chaser']) {
+        assert.ok(radius(current[id]) < 1);
+        assert.ok(distance(current[id], previous[id]) <= 165 * .016 + .001);
+      }
+      if (elapsed >= 1620 * unit) assert.equal(current.grip, false);
+      previous = current;
+    }
+    const separate = at(3300), end = at(3800);
+    assert.equal(separate.stage, 'separate'); assert.equal(separate.grip, false);
+    assert.equal(end.stage, 'done'); assert.equal(end.released, true);
+    assert.ok(distance(end.runner, end.chaser) > 65 * Math.min(unit, 1), 'even a rim escape leaves physical space between opponents');
+    assert.equal(at(6000).released, false);
   }
 });
 

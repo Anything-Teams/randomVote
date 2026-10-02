@@ -277,17 +277,17 @@ test('an overhead waist lift reads its raised hold before accelerating into a sl
   }
 });
 
-test('two jumping side kicks finish with sole contact rather than turning into a waist lift', () => {
+test('one airborne side kick has a single jump and launches at sole contact', () => {
   const round = bout('sidekick');
   for (const center of centers) {
     const planted = at(round, .34, center), first = at(round, .52, center), second = at(round, .75, center), impact = at(round, .83, center), release = at(round, 1, center);
     assert.equal(planted.stage, 'plant');
     assert.equal(planted.aggressorLift, 0);
-    assert.equal(first.stage, 'first-kick');
+    assert.equal(first.stage, 'jump');
     assert.ok(first.aggressorLift > 10);
-    assert.equal(second.stage, 'second-kick');
+    assert.equal(second.stage, 'kick');
     assert.ok(second.aggressorLift > 20);
-    assert.ok(Math.abs(second.aggressorAngle) > .17 && second.yaw > .6, 'the second kick turns the torso sideways and balances its extended leg');
+    assert.ok(Math.abs(second.aggressorAngle) > .17 && second.yaw > .6, 'the airborne kick turns the torso sideways and balances its extended leg');
     assert.ok(second.contact > .45, 'the second sole reaches the victim before recoil begins');
     assert.equal(second.lift, 0, 'the target stays grounded until the kick hits');
     assert.equal(impact.stage, 'impact');
@@ -300,8 +300,11 @@ test('two jumping side kicks finish with sole contact rather than turning into a
     assert.equal(release.stage, 'release');
     assert.ok(release.aggressorLift < .001, 'the kicker comes down while the opponent exits');
     assert.ok(release.lift > 13 && release.lift <= 14, 'impact gives a short recoil before the actual flight');
-    assert.ok(at(round, .60, center).aggressorLift < .001, 'the first kick comes down before the second push-off');
-    assert.ok(at(round, .80, center).aggressorLift > 21, 'the second push-off has its own readable apex');
+    assert.ok(at(round, .60, center).aggressorLift > 20, 'there is no intermediate landing');
+    assert.ok(at(round, .80, center).aggressorLift > 21);
+    const heights = Array.from({ length: 101 }, (_, i) => at(round, i / 100, center).aggressorLift);
+    const peaks = heights.filter((height, i) => i > 0 && i < 100 && height > heights[i - 1] && height > heights[i + 1]);
+    assert.equal(peaks.length, 1, 'the body has exactly one airborne apex');
     assert.ok([planted, first, second, impact, release].every(frame => frame.grip === undefined), 'a side kick never adopts a lifting grip');
     const strike = arenaAction(round, round.start + (round.impact - round.start) * .75);
     assert.equal(strike.actors.find(actor => actor.id === round.aggressor).pose, 'sidekick');

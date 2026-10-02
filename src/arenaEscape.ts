@@ -1,8 +1,9 @@
 import type { ArenaPoint, ArenaRound } from './arenaLogic';
 
 export const ARENA_ESCAPE_DURATION = 3800;
-export type ArenaEscapeWindow = { start: number; end: number; runnerId: string; side: 1 | -1; ungripped?: boolean };
-export type ArenaEscapeStage = 'approach' | 'grip' | 'break' | 'flee' | 'chase' | 'rejoin' | 'done';
+export const ARENA_ESCAPE_RELEASE_DURATION = 2200;
+export type ArenaEscapeWindow = { start: number; end: number; runnerId: string; chaserId?: string; side: 1 | -1; ungripped?: boolean; outcome?: 'rejoin' | 'separate'; releasedUntil?: number };
+export type ArenaEscapeStage = 'approach' | 'grip' | 'break' | 'flee' | 'chase' | 'rejoin' | 'separate' | 'done';
 export type ArenaEscapeFrame = {
   active: boolean;
   stage: ArenaEscapeStage;
@@ -14,6 +15,9 @@ export type ArenaEscapeFrame = {
   returnCenter: ArenaPoint;
   grip: boolean;
   release: number;
+  separated: boolean;
+  released: boolean;
+  releasedUntil: number;
 };
 
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
@@ -42,7 +46,8 @@ export function arenaEscapeRoll(seed: number, index: number): number {
 export function arenaEscapeTargets(round: ArenaRound, elapsed: number, center: ArenaPoint): ArenaEscapeFrame | undefined {
   const escape = round.escape;
   if (!escape) return undefined;
-  const runnerId = escape.runnerId, chaserId = runnerId === round.victim ? round.aggressor : round.victim;
+  const runnerId = escape.runnerId, chaserId = escape.chaserId ?? (runnerId === round.victim ? round.aggressor : round.victim);
+  const separated = escape.outcome === 'separate', releasedUntil = escape.releasedUntil ?? escape.end;
   const facing = round.contactSide ?? (center.x >= 500 ? 1 : -1), direction = runnerId === round.victim ? facing : -facing;
   const unit = round.timeScale ?? 1, pace = Math.min(1, unit), distance = 120 * pace, bend = escape.side * 14 * pace;
   const runnerGrip = inside({ x: center.x + direction * 25, y: center.y });
@@ -57,8 +62,10 @@ export function arenaEscapeTargets(round: ArenaRound, elapsed: number, center: A
   const far = inside({ x: ray.x, y: ray.y + bend });
   const turn = inside({ x: far.x - dx * .08, y: far.y + bend * .4 });
   const returnCenter = inside({ x: center.x + dx * .50, y: center.y + dy * .45 + bend * .2 });
-  const endRunner = inside({ x: returnCenter.x + direction * 25, y: returnCenter.y });
-  const endChaser = inside({ x: returnCenter.x - direction * 25, y: returnCenter.y });
+  // A successful escape keeps both people apart. The pursuer gives up and
+  // changes direction instead of moving both bodies back to another grip.
+  const endRunner = separated ? inside({ x: far.x + dx * .08, y: far.y + bend * .4 }) : inside({ x: returnCenter.x + direction * 25, y: returnCenter.y });
+  const endChaser = separated ? inside({ x: chaserGrip.x - dx * .10, y: chaserGrip.y - bend }) : inside({ x: returnCenter.x - direction * 25, y: returnCenter.y });
   const chaserFar = inside({ x: chaserGrip.x + dx * .32, y: chaserGrip.y + dy * .32 + bend * .2 });
   const chaserTurn = inside({ x: chaserGrip.x + dx * .57, y: chaserGrip.y + dy * .50 + bend * .25 });
   const duration = Math.max(1, escape.end - escape.start), age = clamp((elapsed - escape.start) / duration) * ARENA_ESCAPE_DURATION;
@@ -80,9 +87,9 @@ export function arenaEscapeTargets(round: ArenaRound, elapsed: number, center: A
     stage = 'chase'; phase = (age - 2520) / 320;
     runner = pointMix(far, turn, cruise(phase)); chaser = pointMix(chaserFar, chaserTurn, cruise(phase));
   } else {
-    phase = (age - 2840) / 960; stage = elapsed >= escape.end ? 'done' : 'rejoin';
+    phase = (age - 2840) / 960; stage = elapsed >= escape.end ? 'done' : separated ? 'separate' : 'rejoin';
     runner = pointMix(turn, endRunner, ease(phase)); chaser = pointMix(chaserTurn, endChaser, ease(phase));
-    grip = stage !== 'done' && phase > .92;
+    grip = !separated && stage !== 'done' && phase > .92;
   }
-  return { active: elapsed >= escape.start && elapsed < escape.end, stage, phase, runnerId, chaserId, runner, chaser, returnCenter, grip, release };
+  return { active: elapsed >= escape.start && elapsed < escape.end, stage, phase, runnerId, chaserId, runner, chaser, returnCenter, grip, release, separated, released: separated && elapsed >= escape.end && elapsed < releasedUntil, releasedUntil };
 }
