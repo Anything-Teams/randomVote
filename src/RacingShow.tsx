@@ -283,7 +283,7 @@ export default function RacingShow(props: SportsStageProps & { storySeed?: numbe
   return <div className={'racing-show racing-phase-' + view.phase + (props.preview ? ' racing-preview' : '') + (props.paused ? ' racing-paused' : '')} style={style}>
     <section className="racing-stage" aria-label="경마 경기장">
       <div className="racing-stage-top"><span><i aria-hidden="true" />{props.preview ? 'DERBY NIGHT' : finished ? 'RACE COMPLETE' : 'DERBY LIVE'}</span><span>{view.speed ? view.speed + ' KM/H' : '1,600 M'}</span></div>
-      <div className="racing-canvas-wrap"><canvas ref={canvas} className="racing-canvas" role="img" aria-label={view.headline} /><div className="racing-phase-badge">{props.paused ? 'Ⅱ 일시정지' : view.badge}</div></div>
+      <div className="racing-canvas-wrap"><canvas ref={canvas} className="racing-canvas" role="img" aria-label={view.headline} /><div className="racing-phase-badge">{props.paused ? <><span className="playback-symbol playback-symbol-pause" aria-hidden="true" /> 일시정지</> : view.badge}</div></div>
       <div className="racing-commentary" aria-live={finished ? 'polite' : 'off'}><div className="racing-story-kicker">{view.focusId ? 'RACE STORY' : view.phase === 'photo' ? 'FINISH LINE' : 'TRACKSIDE COMMENTARY'}</div><strong>{view.headline}</strong><p title={view.detail}>{view.detail}</p><div className="racing-distance-meter" aria-hidden="true"><span /></div></div>
     </section>
     <aside className="racing-board" aria-label={finished ? '경마 최종 순위' : '경마 실시간 순위'}>

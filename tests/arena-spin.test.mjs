@@ -90,6 +90,9 @@ test('pivot steps keep a stance heel planted and yaw reveals a back before facin
       if (!memory.swinging) {
         const world = { x: body.x + feet[leg].x * body.scale * body.facing, y: body.y + feet[leg].y * body.scale };
         assert.ok(distance(world, memory.ground) < .001);
+        assert.ok(memory.lift < .00001, 'the supporting heel has no vertical lift');
+        const paintedHeel = animation.contactPoints.feet[leg];
+        assert.ok(distance({ x: paintedHeel.x, y: paintedHeel.y + 2 * body.scale }, memory.ground) < .001, 'the painted support heel stays on its actual sand contact');
         if (!prior[leg].swinging) assert.ok(distance(memory.ground, prior[leg]) < .001);
         assert.ok(distance(memory.ground, prior[leg]) < 1.7, 'a pivot landing cannot snap a heel');
         planted++;
@@ -100,7 +103,12 @@ test('pivot steps keep a stance heel planted and yaw reveals a back before facin
     }
     assert.ok(planted >= 1, 'every pivot has a support foot on the floor');
   }
-  for (let leg = 0; leg < 2; leg++) assert.ok(Math.abs(animation.feet[leg].ground.y - body.y) < .04, 'both feet complete the turn on the floor');
+  for (let leg = 0; leg < 2; leg++) {
+    const memory = animation.feet[leg], paintedHeel = animation.contactPoints.feet[leg];
+    // The two planted points can have different screen depths around the pivot.
+    assert.ok(memory.lift < .00001, 'both feet finish the turn without hovering');
+    assert.ok(distance({ x: paintedHeel.x, y: paintedHeel.y + 2 * body.scale }, memory.ground) < .001, 'each finished heel touches its own projected floor point');
+  }
   body.pose = 'throw'; body.pivotTurn = undefined; body.yaw = 0;
   for (let at = 2576; at <= 3000; at += 16) {
     drawArenaFighter(ctx, body, at);

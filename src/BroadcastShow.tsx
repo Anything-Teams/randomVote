@@ -1,3 +1,4 @@
+import PlaybackButton from './PlaybackButton';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import GameStage from './GameStage';
 import type { DramaFrame, ElectionEvent, ElectionResult } from './election';
@@ -104,7 +105,7 @@ export default function BroadcastShow({ result, frame, drama, phase, topic, elap
 
   return <div className={`show-layout cinematic-layout phase-${phase} ${sealed ? 'box-sealed' : ''} ${event ? `story-active story-${event.kind} story-stage-${cue!.stage}` : ''} ${finalSprint ? 'final-sprint' : ''} ${paused ? 'is-paused' : ''}`} style={boardStyle}>
     <section className="broadcast-card cinematic-broadcast" aria-label="픽셀 투표 쇼">
-      <div className="broadcast-head"><span className="live-pill"><span />{paused ? 'PAUSED · 잠깐 쉬어가는 중' : finished ? 'ELECTION COMPLETE' : 'LIVE · 특별 개표 방송'}</span><div className="broadcast-tools"><span>PIXEL TV / CH.01</span>{!finished && <button type="button" className="playback-button" onClick={onPause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div></div>
+      <div className="broadcast-head"><span className="live-pill"><span />{paused ? 'PAUSED · 잠깐 쉬어가는 중' : finished ? 'ELECTION COMPLETE' : 'LIVE · 특별 개표 방송'}</span><div className="broadcast-tools"><span>PIXEL TV / CH.01</span>{!finished && <PlaybackButton paused={paused} onClick={onPause} />}</div></div>
       <div className={`stage-screen ${sealed ? 'suspense' : ''}`}>
         <GameStage phase={phase} candidates={result.candidates} winnerId={result.winnerId} topic={topic} percentages={frame.percentages} finalPercentages={result.percentages} finalVotes={result.votes} progress={frame.progress} totalVotes={result.totalVotes} runId={runId} reducedMotion={reducedMotion} elapsed={elapsed} events={result.events} storyOutcomes={outcomes} paused={paused} />
         <div className="cinema-hud" aria-hidden="true"><span>{cue ? `사건 ${String(cue.index).padStart(2, '0')} · ${stageLabels[stageIndex]}` : phase === 'counting' ? finalSprint ? '막판 접전 · 마지막 표' : '실시간 개표' : ['출마 특별판', '전국 투표 현장', '개표 특보', '당선 세리머니'][phases.indexOf(phase)]}</span><span>{paused ? '일시정지' : finished ? '확정' : 'LIVE'}</span></div>

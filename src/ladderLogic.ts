@@ -3,7 +3,8 @@ import type { Candidate } from './election';
 export const LADDER_DURATION = 44_000;
 export const LADDER_START_DELAY = 900;
 export const LADDER_RUNGS = 24;
-export const LADDER_ROOF_STEAL_CHANCE = .05;
+export const LADDER_ROOF_STEAL_CHANCE = .06;
+export const LADDER_CALM_FINISH_CHANCE = .35;
 export type LadderEventKind = 'loose-rung' | 'trapdoor' | 'wind' | 'pendulum' | 'spring' | 'bird' | 'paint' | 'sticky' | 'rope-tangle' | 'balloon' | 'false-sign' | 'bucket' | 'banana' | 'zipline' | 'lights-out' | 'safety-net' | 'leap-grapple' | 'crumbling-step' | 'rocket-boots';
 export type LadderMotionType = 'slide' | 'drop' | 'swing' | 'launch' | 'rotate' | 'conveyor' | 'portal' | 'pounce';
 export type LadderPose = 'idle' | 'climb' | 'bridge' | 'balance' | 'fall' | 'hang' | 'clamber' | 'win' | 'arrived' | 'slide' | 'drop' | 'swing' | 'launch' | 'rotate' | 'ride' | 'transfer' | 'run';
@@ -19,7 +20,7 @@ export type LadderWave = { id: string; index: number; row: number; start: number
 export type LadderPathSegment = { id: string; kind: 'climb' | 'bridge' | 'event' | 'roof'; start: number; end: number; fromLane: number; toLane: number; fromRow: number; toRow: number; bridgeId?: string; eventId?: string; transferRole?: 'primary' | 'partner' };
 export type LadderPath = { id: string; index: number; startLane: number; doorLane: number; startAt: number; arrivalAt: number; segments: LadderPathSegment[] };
 export type LadderRoofFinish = { actorId: string; otherId: string; targetLane: number; entryLane: number; runStart: number; claimAt: number; contactAt?: number; releaseAt?: number; catchAt?: number; recoverAt?: number; fromRow?: number; rivalRow?: number; contactRow?: number; landingRow?: number; rivalRate?: number; rivalArrivalAt?: number };
-export type LadderTimeline = { duration: number; laneCount: number; rungCount: number; ids: string[]; doorOrder: string[]; ladderOrder: string[]; bridges: LadderBridge[]; waves: LadderWave[]; paths: Record<string, LadderPath>; events: LadderEvent[]; roofFinish?: LadderRoofFinish };
+export type LadderTimeline = { duration: number; laneCount: number; rungCount: number; ids: string[]; doorOrder: string[]; ladderOrder: string[]; bridges: LadderBridge[]; waves: LadderWave[]; paths: Record<string, LadderPath>; events: LadderEvent[]; roofFinish?: LadderRoofFinish; calmFinish?: boolean };
 export type LadderActorFrame = { id: string; index: number; lane: number; height: number; rungProgress: number; pose: LadderPose; phase: number; fromLane?: number; toLane?: number; fromRow?: number; toRow?: number; bridgeId?: string; eventId?: string; eventStage?: LadderEventStage; supportRow?: number; fallDepth?: number; tilt: number; arrived: boolean; doorLane?: number; winner: boolean; motionType?: LadderMotionType; motionPhase?: number; actionProgress?: number; transferProgress?: number; transferStage?: LadderTransferStage; transferRole?: 'primary' | 'partner'; gripLane?: number; gripRow?: number; catchRow?: number; landingRow?: number; pivotLane?: number; pivotRow?: number; depthOffset?: number; interaction?: LadderInteraction };
 export type LadderFrame = { elapsed: number; actors: LadderActorFrame[]; activeEvents: LadderActiveEvent[]; winnerId?: string; complete: boolean };
 
@@ -105,14 +106,16 @@ function buildLadderPlan(candidates: readonly Candidate[], order: readonly strin
   if (doorOrder.length !== laneCount || new Set(doorOrder).size !== laneCount || doorOrder.some(id => !ids.includes(id))) throw new RangeError('Every destination must contain one participant');
   if (finishTarget !== undefined && laneCount && (!Number.isInteger(finishTarget) || finishTarget < 0 || finishTarget >= laneCount)) throw new RangeError('Select an existing treasure');
   const ladderOrder = [...doorOrder], finishRandom = seeded(storySeed ^ 0x726f6f66);
+  const finishRoll = finishRandom();
+  const calmFinish = laneCount > 1 && finishTarget !== undefined && finishRoll >= LADDER_ROOF_STEAL_CHANCE && finishRoll < LADDER_ROOF_STEAL_CHANCE + LADDER_CALM_FINISH_CHANCE;
   let roofFinish: LadderRoofFinish | undefined;
-  if (laneCount > 1 && finishTarget !== undefined && finishRandom() < LADDER_ROOF_STEAL_CHANCE) {
+  if (laneCount > 1 && finishTarget !== undefined && finishRoll < LADDER_ROOF_STEAL_CHANCE) {
     const adjacent = [finishTarget - 1, finishTarget + 1].filter(lane => lane >= 0 && lane < laneCount);
     const entryLane = adjacent[Math.floor(finishRandom() * adjacent.length)];
     roofFinish = { actorId: doorOrder[finishTarget], otherId: doorOrder[entryLane], targetLane: finishTarget, entryLane, runStart: 0, claimAt: 0 };
     [ladderOrder[finishTarget], ladderOrder[entryLane]] = [ladderOrder[entryLane], ladderOrder[finishTarget]];
   }
-  const timeline: LadderTimeline = { duration, laneCount, rungCount: LADDER_RUNGS, ids, doorOrder, ladderOrder, bridges: [], waves: [], paths: Object.create(null) as Record<string, LadderPath>, events: [], roofFinish };
+  const timeline: LadderTimeline = { duration, laneCount, rungCount: LADDER_RUNGS, ids, doorOrder, ladderOrder, bridges: [], waves: [], paths: Object.create(null) as Record<string, LadderPath>, events: [], roofFinish, calmFinish };
   if (!laneCount) return timeline;
   const unit = duration / LADDER_DURATION, random = seeded(storySeed), occupants = [...ids], pairWaves: { leftLane: number; rightLane: number; actors: [string, string] }[][] = [];
   const addPairs = (lanes: [number, number][]) => {
@@ -353,7 +356,10 @@ function naturalClimbing(timeline: LadderTimeline) {
     const path = timeline.paths[id], lastTransfer = path.segments.filter(segment => segment.kind === 'bridge' || segment.kind === 'event').at(-1);
     // Leave a real final ascent below the terrace. A last device must not start
     // after the rig has already stepped onto the roof during its top-out pose.
-    const target = lastTransfer ? LADDER_RUNGS - 3.5 : LADDER_RUNGS;
+    // Some stories leave a genuinely uneventful final ascent. Their last
+    // crossing happens lower down; neither a hidden trap nor a late lane swap
+    // can interrupt the climb from there to the selected treasure.
+    const target = lastTransfer ? LADDER_RUNGS - (timeline.calmFinish ? 7 : 3.5) : LADDER_RUNGS;
     const climbTime = path.segments.filter(segment => segment.kind === 'climb' && (!lastTransfer || segment.end <= lastTransfer.start)).reduce((sum, segment) => sum + segment.end - segment.start, 0);
     const rate = target / Math.max(1, climbTime);
     return [id, { row: 0, target, lastTransferAt: lastTransfer?.start, rate, baseRate: rate, at: path.startAt }];
@@ -412,6 +418,29 @@ export function buildLadderTimeline(candidates: readonly Candidate[], order: rea
     if (!close) break;
     const eventIndex = timeline.events.findIndex(event => event.bridgeId === close.id);
     timeline = buildLadderPlan(candidates, order, duration, storySeed, finishTarget, { bridgeId: close.id, eventIndex: eventIndex < 0 ? undefined : eventIndex });
+  }
+  if (timeline.calmFinish) {
+    const finishBy = duration - 300 * duration / LADDER_DURATION;
+    const natural = Object.values(timeline.paths).every(path => Number.isFinite(path.arrivalAt) && path.segments.filter(segment => segment.kind === 'climb').every(segment => segment.toRow > segment.fromRow));
+    const grapple = timeline.bridges.find(bridge => bridge.motionType === 'pounce');
+    // A quieter ending is a cosmetic route choice. If its longer uninterrupted
+    // ascent cannot keep a natural upward motor, use the ordinary route with the same draw.
+    if (!natural || grapple && Math.abs(grapple.fromRow - grapple.partnerFromRow!) > 1.6) return buildLadderTimeline(candidates, order, duration, storySeed);
+    const lastArrival = Math.max(...Object.values(timeline.paths).map(path => path.arrivalAt));
+    if (lastArrival > finishBy) {
+      // Use one continuous story clock for the longer clear ascent. Scaling
+      // every actor and device together preserves contact, climbing cadence,
+      // independent starts and seeking instead of racing only the final rungs.
+      const start = LADDER_START_DELAY * duration / LADDER_DURATION;
+      const factor = (finishBy - start) / (lastArrival - start), at = (time: number) => start + (time - start) * factor;
+      for (const bridge of timeline.bridges) { bridge.start = at(bridge.start); bridge.end = at(bridge.end); }
+      for (const wave of timeline.waves) { wave.start = at(wave.start); wave.end = at(wave.end); }
+      for (const event of timeline.events) { event.setup = at(event.setup); event.action = at(event.action); event.resolve = at(event.resolve); event.end = at(event.end); }
+      for (const path of Object.values(timeline.paths)) {
+        path.startAt = at(path.startAt); path.arrivalAt = at(path.arrivalAt);
+        for (const segment of path.segments) { segment.start = at(segment.start); segment.end = at(segment.end); }
+      }
+    }
   }
   if (timeline.roofFinish) {
     if (!planRoofAmbush(timeline)) return buildLadderTimeline(candidates, order, duration, storySeed);

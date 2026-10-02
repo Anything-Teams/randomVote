@@ -1,4 +1,7 @@
 .game-picker { display: flex; align-items: stretch; gap: 5px; }
+@media (min-width: 761px) {
+  .site-header { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+}
 .game-picker button { display: flex; align-items: center; justify-content: center; gap: 7px; min-width: 83px; padding: 6px 12px; border: 1px solid #48566d; background: #22304b; color: #b9c8dd; font-size: 12px; font-weight: 850; transition: background 180ms, color 180ms; }
 .game-picker small { font: 800 9px monospace; color: #7e93b0; }
 .game-picker button:hover { border-color: #f9d56e; }

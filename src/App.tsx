@@ -4,11 +4,13 @@ import BroadcastShow from './BroadcastShow';
 import RacingShow from './RacingShow';
 import ArenaShow from './ArenaShow';
 import LadderShow from './LadderShow';
-import { CANDIDATE_COLORS, MAX_CANDIDATES, createDrama, createElection, frameAt, type Candidate, type DramaFrame, type ElectionResult } from './election';
+import PlaybackButton from './PlaybackButton';
+import { CANDIDATE_COLORS, MAX_CANDIDATES, createDrama, createElection, frameAt, randomInt, type Candidate, type DramaFrame, type ElectionResult } from './election';
 import { countProgress, phaseFor, SHOW_DURATION } from './show';
 import { readSession, saveSession, type Entry } from './session';
 import { createSportsOrder, type GameMode } from './sports';
 import { basePlaybackDuration, createPlaybackDuration } from './playbackTiming';
+import { arenaPlaybackEnd } from './arenaLogic';
 
 type Status = 'setup' | 'running' | 'finished';
 const templates = ['오늘 커피 쏠 사람은?', '점심값 낼 사람은?', '벌칙 받을 사람은?', '청소 담당은?', '발표할 사람은?'];
@@ -28,6 +30,7 @@ export default function App() {
   const [ladderTarget, setLadderTarget] = useState(() => Math.min(saved.ladderTarget ?? 0, Math.max(2, saved.entries.filter(entry => entry.name.trim()).length) - 1));
   const [runTarget, setRunTarget] = useState(0);
   const [order, setOrder] = useState<string[]>([]);
+  const [arenaRushRoll, setArenaRushRoll] = useState(7);
   const [error, setError] = useState('');
   const [status, setStatus] = useState<Status>('setup');
   const [result, setResult] = useState<ElectionResult | null>(null);
@@ -77,6 +80,10 @@ export default function App() {
       setError('같은 이름이 있어요. 이름을 다르게 입력해 주세요.'); return;
     }
     const nextDuration = createPlaybackDuration(mode);
+    const nextOrder = mode === 'election' ? [] : createSportsOrder(candidates);
+    const nextRushRoll = mode === 'arena' ? randomInt(10) : 7;
+    const nextEnd = mode === 'arena' ? arenaPlaybackEnd(nextOrder, nextDuration, nextRushRoll) : nextDuration;
+    setArenaRushRoll(nextRushRoll);
     setRunDuration(nextDuration);
     setRunTarget(targetLane);
     if (mode === 'election') {
@@ -84,7 +91,7 @@ export default function App() {
       setResult(election);
       setDrama(createDrama(election));
     } else {
-      setOrder(createSportsOrder(candidates));
+      setOrder(nextOrder);
       setResult(null);
       setDrama([]);
     }
@@ -95,10 +102,10 @@ export default function App() {
     window.scrollTo(0, 0);
     if (timer.current !== null) window.clearInterval(timer.current);
     timer.current = null;
-    playback.current = { elapsed: 0, startedAt: performance.now(), paused: false, duration: nextDuration };
+    playback.current = { elapsed: 0, startedAt: performance.now(), paused: false, duration: nextEnd };
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      playback.current.elapsed = nextDuration;
-      setElapsed(nextDuration);
+      playback.current.elapsed = nextEnd;
+      setElapsed(nextEnd);
       setStatus('finished');
       return;
     }
@@ -106,9 +113,9 @@ export default function App() {
     timer.current = window.setInterval(() => {
       const clock = playback.current;
       if (clock.paused) return;
-      const next = Math.min(nextDuration, clock.elapsed + performance.now() - clock.startedAt);
+      const next = Math.min(nextEnd, clock.elapsed + performance.now() - clock.startedAt);
       setElapsed(next);
-      if (next >= nextDuration) {
+      if (next >= nextEnd) {
         if (timer.current !== null) window.clearInterval(timer.current);
         timer.current = null;
         setStatus('finished');
@@ -161,7 +168,7 @@ export default function App() {
     setMode(next);
   }
 
-  const sportsProps = { candidates, order, elapsed, duration, paused, preview: status === 'setup' };
+  const sportsProps = { candidates, order, elapsed, duration, paused, preview: status === 'setup', arenaRushRoll };
   const sportsScene = mode === 'racing' ? <RacingShow {...sportsProps} /> : mode === 'ladder' ? <LadderShow {...sportsProps} targetLane={status === 'setup' ? targetLane : runTarget} onTargetChange={status === 'setup' ? setLadderTarget : undefined} /> : <ArenaShow {...sportsProps} />;
 
   return (
@@ -169,7 +176,6 @@ export default function App() {
       <header className="site-header">
         <div className="brand"><span className="brand-icon" aria-hidden="true"><img src="/favicon.svg?v=2" alt="" /></span><span>픽셀<span className="brand-accent">랜뽑</span></span></div>
         <nav className="game-picker" aria-label="추첨 게임 선택">{gameOrder.map((value, index) => <button type="button" key={value} onClick={() => chooseGame(value)} aria-pressed={mode === value}><small aria-hidden="true">0{index + 1}</small>{games[value].label}</button>)}</nav>
-        <span className="header-badge">RANDOM DRAW SHOW <span className="badge-star">✦</span> 001</span>
       </header>
 
       <main className="page-content">
@@ -229,7 +235,7 @@ export default function App() {
           </div>
         ) : (
           mode === 'election' ? result && snapshot && <BroadcastShow result={result} frame={snapshot} drama={drama} phase={phase} topic={topic} elapsed={elapsed} finished={status === 'finished'} runId={runId} reducedMotion={reducedMotion} paused={paused} onPause={togglePause} onSkip={finishNow} onReplay={start} onReset={reset} /> : <section className={`sports-shell ${paused ? 'is-paused' : ''}`} aria-label={`${game.label} 경기`}>
-            <div className="sports-toolbar"><span><b>{game.label}</b> {status === 'finished' ? mode === 'ladder' ? '보물 주인 확정' : '최종 순위 확정' : paused ? '일시정지' : mode === 'ladder' ? '구름 위 보물을 향해' : '경기 중계 중'}</span>{status !== 'finished' && <button type="button" className="playback-button" onClick={togglePause} aria-pressed={paused}>{paused ? '▶ 계속 보기' : 'Ⅱ 잠깐 멈춤'}</button>}</div>
+            <div className="sports-toolbar"><span><b>{game.label}</b> {status === 'finished' ? mode === 'ladder' ? '보물 주인 확정' : '최종 순위 확정' : paused ? '일시정지' : mode === 'ladder' ? '구름 위 보물을 향해' : '경기 중계 중'}</span>{status !== 'finished' && <PlaybackButton paused={paused} onClick={togglePause} />}</div>
             <div className="sports-body" key={`${mode}-${runId}`}>{sportsScene}</div>
             <div className="sports-actions">{status === 'finished' ? <><button type="button" className="start-button" onClick={start}>같은 명단으로 다시 뽑기 <span aria-hidden="true">▶</span></button><button type="button" className="secondary-button" onClick={reset}>명단 수정하기</button></> : <button type="button" className="secondary-button" onClick={finishNow}>연출 건너뛰고 {mode === 'ladder' ? '당첨자' : '순위'} 보기</button>}</div>
           </section>

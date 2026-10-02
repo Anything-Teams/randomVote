@@ -8,7 +8,7 @@ async function source(path) {
 }
 const { arenaFinalTechniques, arenaTechniqueTargets, arenaTechniqueExit, arenaSuplexRim } = await source('src/arenaTechniques.ts');
 const { arenaAction, arenaRanks, arenaRounds } = await source('src/arenaLogic.ts');
-const { createArenaFighterAnimation, drawArenaFighter, arenaWristGripPoint, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
+const { createArenaFighterAnimation, drawArenaFighter, arenaSpinGripPair, arenaSpinSnapshot, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const ctx = Object.fromEntries(['save', 'restore', 'translate', 'rotate', 'scale', 'fillRect', 'beginPath', 'ellipse', 'fill', 'moveTo', 'lineTo', 'closePath'].map(key => [key, () => {}]));
 const fighter = (index, overrides) => ({ candidate: { id: String(index + 1), name: '선수', color: '#ffad72' }, index, scale: 2.04, angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, power: .55, motionImmediate: true, animation: createArenaFighterAnimation(), ...overrides });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -28,37 +28,58 @@ test('wrist control is established before the pivot and is released only when th
     assert.ok(distance(reaching.aggressor, reaching.victim) < 63, 'the wrist is within the two fighters’ reach');
     assert.equal(turning.stage, 'pivot');
     assert.equal(turning.grip, 'wrist');
-    assert.ok(turning.yaw > Math.PI / 2 && lastGrip.yaw > Math.PI, 'the held opponent actually circles the planted pivot');
-    assert.ok(turning.lift > 0);
+    assert.ok(Math.abs(turning.yaw) > Math.PI / 2 && Math.abs(lastGrip.yaw) > Math.PI * 3, 'the held opponent makes more than one and a half revolutions');
+    assert.equal(turning.lift, 0, 'hand-driven suspension cannot add a second root lift');
+    assert.equal(turning.victimAngle, 0, 'the body is not rotated around its feet');
+    assert.equal(turning.spin.weight, 1);
     assert.equal(lastGrip.grip, 'wrist');
     assert.equal(release.stage, 'release');
     assert.equal(release.grip, undefined, 'release happens after the turn rather than before its motion');
+    assert.ok(Math.abs(Math.abs(release.yaw) - Math.PI * 4) < 1e-8, 'both complete revolutions finish before release');
     const held = arenaAction(round, round.start + (round.impact - round.start) * .70);
     assert.ok(held.actors.every(actor => actor.gripId), 'the visible pivot keeps both participants linked');
     assert.ok(arenaAction(round, round.impact).actors.every(actor => !actor.gripId), 'the linked wrists are released when flight begins');
   }
 });
 
-test('the rendered held wrist stays connected while the extended opponent rises through either direction of the pivot', () => {
+test('both painted hands stay held while the suspended body and extended legs circle outside the driver', () => {
   const round = bout('armspin');
   for (const center of centers) for (let phase = .50; phase < 1; phase += .01) {
     const frame = at(round, phase, center), clock = round.start + (round.impact - round.start) * phase;
     const aggressor = fighter(0, { ...frame.aggressor, facing: frame.side, pose: 'grapple', phase, yaw: frame.yaw, pivotTurn: frame.yaw });
-    const victim = fighter(1, { x: frame.victim.x, y: frame.victim.y - frame.lift, depthY: frame.victim.y, facing: aggressor.x > frame.victim.x ? 1 : -1, pose: 'held', phase, angle: frame.victimAngle, gripMode: 'wrist' });
-    const grip = arenaWristGripPoint(aggressor, victim, clock);
-    for (const actor of [aggressor, victim]) {
-      actor.gripTarget = grip;
-      actor.secondaryGripTarget = { x: grip.x - actor.facing * 3, y: grip.y + 2 };
-      actor.gripStrength = 1;
-      drawArenaFighter(ctx, actor, clock);
-      assert.ok(distance(actor.animation.contactPoints.hands[1], grip) <= 4, `side ${frame.side}, phase ${phase}: a fixed-length arm must reach the shared wrist`);
+    const grips = arenaSpinGripPair(aggressor, frame.spin.orbit, clock, frame.spin.weight);
+    Object.assign(aggressor, { gripTarget: grips[1], secondaryGripTarget: grips[0], gripStrength: 1, gripLocked: true });
+    const victim = fighter(1, { ...frame.victim, facing: -frame.side, pose: 'held', phase, gripMode: 'wrist', spinSuspension: { ...frame.spin, grips } });
+    drawArenaFighter(ctx, aggressor, clock); drawArenaFighter(ctx, victim, clock);
+    const driver = aggressor.animation.contactPoints, suspended = victim.animation.contactPoints;
+    for (let arm = 0; arm < 2; arm++) {
+      assert.ok(distance(driver.hands[arm], grips[arm]) < .01, `side ${frame.side}, phase ${phase}: driver hand ${arm} holds the actual wrist`);
+      assert.ok(distance(suspended.hands[arm], driver.hands[arm]) < .01, `side ${frame.side}, phase ${phase}: both hands must stay held`);
     }
-    const gap = distance(aggressor.animation.contactPoints.hands[1], victim.animation.contactPoints.hands[1]);
-    assert.ok(gap <= 4, `side ${frame.side}, phase ${phase}: held wrist gap ${gap.toFixed(2)}px`);
-    if (phase >= .78) {
-      assert.ok(frame.lift > 40, 'centrifugal lift raises the body rather than dragging it around the ankles');
-      assert.ok(victim.animation.localFeet.every(foot => foot.y > -3), 'the feet trail the lifted torso instead of using a jumping knee tuck');
+    if (frame.spin.weight === 1) {
+      assert.ok(suspended.feet.every(foot => foot.y < aggressor.y - 8), 'neither extended foot drags on the sand');
+      assert.ok(suspended.head.y >= driver.head.y - 4, 'a foot-root rotation cannot launch the face over the driver');
+      if (Math.abs(Math.cos(frame.spin.orbit)) > .5) {
+        const outward = Math.sign(Math.cos(frame.spin.orbit)), waist = suspended.waist.x * outward;
+        assert.ok(suspended.feet.every(foot => foot.x * outward > waist + 14), 'both legs extend outward beyond the torso rather than tucking under the held hands');
+      }
     }
+  }
+});
+
+test('the hand-driven spin accelerates gently before a steady orbit and preserves its exact release geometry', () => {
+  const round = bout('armspin');
+  for (const side of [-1, 1]) {
+    const actual = { ...round, contactSide: side }, center = { x: 500, y: 416 };
+    const phases = [.44, .46, .48, .50], angles = phases.map(phase => at(actual, phase, center).yaw * side);
+    const angularSteps = angles.slice(1).map((angle, index) => angle - angles[index]);
+    assert.ok(angularSteps[0] > 0 && angularSteps[1] > angularSteps[0] && angularSteps[2] > angularSteps[1], 'the hands do not instantly begin at full angular speed');
+    const cruise = [.66, .76, .86, .96].map(phase => at(actual, phase, center).yaw * side);
+    assert.ok(cruise.slice(2).every((angle, index) => Math.abs((angle - cruise[index + 1]) - (cruise[1] - cruise[0])) < 1e-8), 'the visible revolutions have a steady cadence before release');
+    const final = at(actual, 1, center), repeated = at(actual, 1, center);
+    assert.deepEqual(final, repeated, 'pause and direct seek cannot change the spin geometry');
+    assert.ok(side * Math.cos(final.spin.orbit) > .999, 'the body is extended beside the driver when both hands release');
+    assert.ok(final.victim.y < center.y - 20, 'the foot target is already airborne before the throw starts');
   }
 });
 
@@ -66,10 +87,13 @@ test('the airborne release preserves the actual head, waist and feet before easi
   const round = bout('armspin');
   for (const center of centers) {
     const frame = at(round, 1, center), clock = round.impact;
-    const victim = fighter(1, { x: frame.victim.x, y: frame.victim.y - frame.lift, facing: frame.aggressor.x > frame.victim.x ? 1 : -1, pose: 'held', phase: 1, angle: frame.victimAngle, gripMode: 'wrist' });
+    const driver = fighter(0, { ...frame.aggressor, facing: frame.side, pose: 'grapple', phase: 1, yaw: frame.yaw, pivotTurn: frame.yaw });
+    const grips = arenaSpinGripPair(driver, frame.spin.orbit, clock, frame.spin.weight);
+    const victim = fighter(1, { ...frame.victim, facing: -frame.side, pose: 'held', phase: 1, gripMode: 'wrist', spinSuspension: { ...frame.spin, grips } });
     drawArenaFighter(ctx, victim, clock);
     const held = structuredClone(victim.animation.contactPoints);
-    Object.assign(victim, { pose: 'airborne', gripMode: undefined, suspension: 1, motionImmediate: false });
+    const snapshot = arenaSpinSnapshot(victim, clock);
+    Object.assign(victim, { ...held.origin, pose: 'airborne', gripMode: undefined, spinSuspension: undefined, spinRelease: { snapshot, weight: 1 }, motionImmediate: false });
     drawArenaFighter(ctx, victim, clock);
     const released = victim.animation.contactPoints;
     for (const part of ['head', 'waist']) assert.ok(distance(held[part], released[part]) < 1e-8, `${part} must not jump when the wrist releases`);
@@ -104,7 +128,7 @@ test('a live suplex holds the current rendered waist without advancing the victi
     for (let clock = round.start; clock < round.start + (round.impact - round.start) * .89; clock += 16) {
       const frame = arenaTechniqueTargets(round, clock, center), action = arenaAction(round, clock);
       Object.assign(driver, frame.aggressor, { pose: action.actors[0].pose, phase: frame.phase, facing: frame.side, angle: frame.aggressorAngle, motionImmediate: !previous, motionEpoch: 1 });
-      Object.assign(victim, { x: frame.victim.x, y: frame.victim.y - frame.lift, depthY: frame.victim.y, pose: frame.victimPose ?? (frame.lift > 5 ? 'airborne' : 'brace'), phase: frame.phase, facing: -frame.side, angle: frame.victimAngle, motionImmediate: !previous, motionEpoch: 1 });
+      Object.assign(victim, { x: frame.victim.x, y: frame.victim.y - frame.lift, depthY: frame.victim.y, pose: frame.victimPose ?? (frame.lift > 5 ? 'airborne' : 'brace'), phase: frame.phase, facing: -frame.side, angle: frame.victimAngle, suspension: frame.victimSuspension, slamProgress: frame.victimSlam, motionImmediate: !previous, motionEpoch: 1 });
       if (previous) {
         driver.velocityX = (driver.x - previous.driver.x) / .016; driver.velocityY = (driver.y - previous.driver.y) / .016;
         victim.velocityX = (victim.x - previous.victim.x) / .016; victim.velocityY = (victim.y - previous.victim.y) / .016;
@@ -127,25 +151,30 @@ test('a live suplex holds the current rendered waist without advancing the victi
 test('an ankle hook is followed by sole contact and a backward somersault in the kicking direction', () => {
   const round = bout('trip');
   for (const center of centers) {
-    const grip = at(round, .36, center), hook = at(round, .57, center), kick = at(round, .72, center), fall = at(round, .94, center), landed = at(round, 1, center);
+    const grip = at(round, .36, center), hook = at(round, .50, center), fall = at(round, .62, center), grounded = at(round, .68, center), kick = at(round, .82, center), landed = at(round, 1, center);
     assert.equal(grip.stage, 'grip');
     assert.equal(grip.grip, 'waist');
     assert.equal(grip.contact, 0);
     assert.equal(hook.stage, 'hook');
-    assert.ok(hook.contact > .8, 'the attacking foot has made contact before the fall');
+    assert.ok(hook.contact > .99, 'the ankle hook has a readable full-contact beat before the fall');
     assert.equal(Math.abs(hook.victimAngle), 0, 'the victim cannot already be lying down before the hook');
+    assert.equal(fall.stage, 'fall');
+    assert.ok(Math.abs(fall.victimAngle) > 1, 'the hook visibly puts the victim on the ground before a kick');
+    assert.equal(grounded.stage, 'stunned');
+    assert.equal(grounded.victimPose, 'stunned');
+    assert.equal(grounded.contact, 0, 'the fall can be read before the kicking leg begins to reach');
+    assert.ok(Math.abs(grounded.victimAngle) > Math.PI * .46);
     assert.equal(kick.stage, 'kick');
     assert.equal(kick.grip, undefined, 'the waist is released before the leg pushes the opponent away');
     assert.ok(kick.contact > .99);
-    const clock = round.start + (round.impact - round.start) * .72;
-    const target = fighter(1, { ...kick.victim, facing: -kick.side, pose: 'brace', phase: .72 });
+    const clock = round.start + (round.impact - round.start) * .82;
+    const target = fighter(1, { ...kick.victim, facing: -kick.side, pose: kick.victimPose, angle: kick.victimAngle, phase: .82 });
     const contacts = sampleArenaFighterContacts(target, clock);
-    const kicker = fighter(0, { ...kick.aggressor, facing: kick.side, pose: 'trip', phase: .72, footTarget: contacts.waist, footStrength: kick.contact, kickLeg: 1 });
+    const kicker = fighter(0, { ...kick.aggressor, facing: kick.side, pose: 'trip', phase: .82, footTarget: contacts.waist, footStrength: kick.contact, kickLeg: 1 });
     drawArenaFighter(ctx, kicker, clock);
-    assert.ok(distance(kicker.animation.contactPoints.feet[1], contacts.waist) < .01, 'the visible sole reaches the current waist before the recoil');
+    assert.ok(distance(kicker.animation.contactPoints.feet[1], contacts.waist) < .01, 'the visible sole reaches the fallen waist before the recoil');
     assert.ok(Math.abs(kicker.animation.contactPoints.feet[0].y - (kicker.y - 2 * kicker.scale)) < .01, 'the other foot stays planted during the waist kick');
-    assert.equal(fall.stage, 'fall');
-    assert.ok(Math.abs(fall.victimAngle) > .9);
+    assert.ok([.80, .82, .84].every(phase => at(round, phase, center).contact > .999), 'the floor kick maintains a visible contact dwell instead of flashing past');
     assert.equal(landed.stage, 'roll');
     assert.ok(landed.lift < .001);
     const landing = { x: center.x + landed.side * 230, y: center.y + 50 };
@@ -173,6 +202,24 @@ test('the encounter orientation overrides the arena center for both finishing te
   }
 });
 
+test('the grounded ankle fall preserves the live body through its floor-pivot transition', () => {
+  const round = bout('trip');
+  for (const side of [-1, 1]) for (const phase of [.54, .58, .90]) {
+    const actual = { ...round, contactSide: side }, victim = fighter(1, { motionImmediate: false, motionEpoch: 1 });
+    const render = clock => {
+      const frame = arenaTechniqueTargets(actual, clock, { x: 500, y: 416 });
+      Object.assign(victim, frame.victim, { facing: -side, pose: frame.victimPose ?? 'brace', phase: frame.phase, angle: frame.victimAngle, suspension: frame.victimSuspension });
+      drawArenaFighter(ctx, victim, clock);
+      return structuredClone(victim.animation.contactPoints);
+    };
+    const boundary = round.start + (round.impact - round.start) * phase;
+    for (let clock = round.start; clock < boundary - .001; clock += 16) render(clock);
+    const before = render(boundary - .001), after = render(boundary + .001);
+    for (const part of ['head', 'waist']) assert.ok(distance(before[part], after[part]) < .01, `${side}/${phase}/${part}: touching the floor cannot reset the body pivot`);
+    for (let leg = 0; leg < 2; leg++) assert.ok(distance(before.feet[leg], after.feet[leg]) < .01);
+  }
+});
+
 test('a suplex keeps waist contact through the back arc and pauses before dragging the grounded opponent', () => {
   const round = bout('suplex');
   for (const center of centers) {
@@ -184,10 +231,18 @@ test('a suplex keeps waist contact through the back arc and pauses before draggi
     assert.ok(lifted.lift > 36 && lifted.lift <= 40, 'the waist lift is visible without suspending the body high above the hands');
     assert.equal(arched.stage, 'arch');
     assert.equal(arched.grip, 'waist');
-    assert.ok(arched.side * (arched.victim.x - arched.aggressor.x) < 0, 'the held body crosses behind the thrower');
+    const archedBody = sampleArenaFighterContacts(fighter(1, { ...arched.victim, y: arched.victim.y - arched.lift, facing: -arched.side, pose: arched.victimPose, phase: arched.phase, angle: arched.victimAngle, suspension: arched.victimSuspension, slamProgress: arched.victimSlam }), round.start + (round.impact - round.start) * .78);
+    assert.ok(arched.side * (archedBody.head.x - arched.aggressor.x) < -40, 'the held upper body crosses behind the thrower before the feet land');
     assert.ok(Math.abs(arched.victimAngle) > 1);
     assert.equal(stunned.stage, 'stunned');
     assert.equal(stunned.lift, 0);
+    const high = at(round, .70, center), dropping = at(round, .86, center), slammed = at(round, .89, center);
+    assert.ok(high.lift > 39, 'the opponent stays high while being turned behind the thrower');
+    assert.ok(dropping.lift > 15 && dropping.lift < high.lift, 'the visible shoulder landing has an actual downward approach');
+    assert.equal(slammed.stage, 'slam');
+    assert.equal(slammed.lift, 0);
+    assert.ok(slammed.slamImpact > .9, 'the ground collision has its own readable impact beat');
+    assert.ok(stunned.victimSlam.slump === 1, 'the limbs relax only after the slam');
     const origin = stunned.victim, landing = { x: center.x + stunned.side * 230, y: center.y + 50 }, preparation = { lift: 0, angle: stunned.victimAngle };
     for (const age of [0, 100, 299]) {
       const frame = arenaTechniqueExit(round, age, origin, landing, stunned.side, 1, preparation);
@@ -241,7 +296,7 @@ test('two jumping side kicks finish with sole contact rather than turning into a
 test('new finishing contacts and their floor exits remain continuous when the scene clock crosses a stage boundary', () => {
   for (const tactic of arenaFinalTechniques) for (const center of centers) {
     const round = bout(tactic), span = round.impact - round.start;
-    for (const fraction of [.08, .20, .30, .34, .38, .43, .48, .56, .58, .60, .64, .72, .74, .78, .82, .90, 1]) {
+    for (const fraction of [.08, .20, .30, .34, .38, .40, .43, .44, .48, .51, .54, .56, .5744, .58, .60, .62, .64, .70, .72, .74, .78, .80, .82, .84, .88, .90, .94, 1]) {
       const time = round.start + span * fraction, before = arenaTechniqueTargets(round, time - .001, center), after = arenaTechniqueTargets(round, time + .001, center);
       for (const key of ['aggressor', 'victim']) assert.ok(distance(before[key], after[key]) < .005, `${tactic}/${fraction} cannot teleport a root`);
       for (const key of ['lift', 'aggressorLift', 'victimAngle', 'aggressorAngle', 'yaw', 'contact']) assert.ok(Math.abs(before[key] - after[key]) < .005, `${tactic}/${fraction}/${key} remains continuous`);

@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 const compiled = await build({ entryPoints: ['src/sports.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createSportsOrder } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 const arenaCompiled = await build({ entryPoints: ['src/arenaLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { arenaRounds, arenaRanks, arenaEliminatedIds, arenaThrow, arenaExchange, arenaBeat, arenaAction, arenaFocusRound, arenaMiniExchanges, arenaLocalContact, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaGuardTarget, arenaReleaseTarget, arenaMove, ARENA_MAX_GROUND_SPEED } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
+const { arenaRounds, arenaPlaybackEnd, arenaRanks, arenaEliminatedIds, arenaThrow, arenaExchange, arenaBeat, arenaAction, arenaFocusRound, arenaMiniExchanges, arenaLocalContact, arenaStartingPoint, arenaPodium, arenaRoamingTarget, arenaGuardTarget, arenaReleaseTarget, arenaMove, ARENA_MAX_GROUND_SPEED } = await import(`data:text/javascript;base64,${Buffer.from(arenaCompiled.outputFiles[0].text).toString('base64')}`);
 const fighterCompiled = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { arenaDrawOrder } = await import(`data:text/javascript;base64,${Buffer.from(fighterCompiled.outputFiles[0].text).toString('base64')}`);
 const storyCompiled = await build({ entryPoints: ['src/arenaStoryLogic.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
@@ -75,11 +75,11 @@ test('the production shuffle rejects the extra random range instead of favoring 
 });
 
 test('arena tactics use living, distinct participants and preserve every drawn rank for 2–10 players', () => {
-  for (const duration of [40_000, 44_000, 62_000]) for (let size = 2; size <= 10; size++) {
+  for (const duration of [40_000, 44_000, 62_000]) for (const rushRoll of [0, 7]) for (let size = 2; size <= 10; size++) {
     for (let rotation = 0; rotation < size; rotation++) {
       const ids = participants.slice(0, size).map(player => player.id);
       const order = [...ids.slice(rotation), ...ids.slice(0, rotation)];
-      const rounds = arenaRounds(order, duration);
+      const rounds = arenaRounds(order, duration, rushRoll);
       const alive = new Set(order);
       const eliminations = rounds.flatMap(arenaEliminatedIds);
       assert.equal(eliminations.length, size - 1);
@@ -96,8 +96,8 @@ test('arena tactics use living, distinct participants and preserve every drawn r
           assert.notEqual(round.helper, round.victim);
           assert.notEqual(round.helper, round.aggressor);
         }
-        const before = arenaRanks(order, round.resolve - 0.01, duration);
-        const after = arenaRanks(order, round.resolve, duration);
+        const before = arenaRanks(order, round.resolve - 0.01, duration, rushRoll);
+        const after = arenaRanks(order, round.resolve, duration, rushRoll);
         for (const id of arenaEliminatedIds(round)) {
           assert.ok(alive.has(id) && id !== round.aggressor);
           assert.equal(before[id], undefined);
@@ -107,7 +107,7 @@ test('arena tactics use living, distinct participants and preserve every drawn r
         assert.equal(after[order[0]], round.final ? 1 : undefined);
         previousEnd = round.end;
       }
-      assert.deepEqual(arenaRanks(order, duration, duration), Object.fromEntries(order.map((id, rank) => [id, rank + 1])));
+      assert.deepEqual(arenaRanks(order, duration, duration, rushRoll), Object.fromEntries(order.map((id, rank) => [id, rank + 1])));
       assert.deepEqual([...alive], [order[0]]);
     }
   }
@@ -178,14 +178,16 @@ test('lifting and throwing preserve hand occlusion until a fighter actually cros
   assert.deepEqual(movingOrder(2100), ['bystander', 'victim'], 'recovery must retain the landing depth');
 });
 
-test('non-eliminating arena exchanges keep small games active and never reuse eliminated actors', () => {
+test('arena exchange compatibility returns a real finite deciding bout with living opponents', () => {
   for (let size = 2; size <= 10; size++) {
     const order = participants.slice(0, size).map(player => player.id);
     for (let elapsed = 0; elapsed < 44_000; elapsed += 200) {
       const exchange = arenaExchange(order, elapsed);
       const ranks = arenaRanks(order, elapsed);
       if (ranks[order[0]]) { assert.equal(exchange, undefined); continue; }
-      assert.ok(exchange?.exchange);
+      assert.deepEqual(exchange, arenaFocusRound(order, elapsed));
+      assert.ok(exchange && !exchange.exchange && Number.isFinite(exchange.resolve));
+      assert.ok(exchange.start <= elapsed && elapsed < exchange.resolve);
       const actors = [exchange.aggressor, exchange.victim, exchange.helper].filter(Boolean);
       assert.equal(new Set(actors).size, actors.length);
       for (const id of actors) assert.ok(order.includes(id) && !ranks[id]);
@@ -293,7 +295,7 @@ test('focus reserves physical approach and uses living actors without changing t
   }
 });
 
-test('alliance attacks are a sparse surprise and never repeat in background exchanges', () => {
+test('alliance attacks are a sparse surprise and are never invented by background preparations', () => {
   let allianceGames = 0, largeGames = 0;
   for (let size = 2; size <= 10; size++) for (let variation = 0; variation < 60; variation++) {
     const order = Array.from({ length: size }, (_, index) => `field-${variation}-${index}`);
@@ -301,71 +303,136 @@ test('alliance attacks are a sparse surprise and never repeat in background exch
     assert.ok(alliances.length <= 1, `repeated alliance in a ${size}-person match`);
     if (size < 7) assert.equal(alliances.length, 0, 'small matches use individual tactics');
     else { largeGames++; if (alliances.length) allianceGames++; }
-    for (let elapsed = 0; elapsed < 39_000; elapsed += 1200) {
-      const exchange = arenaExchange(order, elapsed);
-      if (exchange) {
-        assert.ok(!['team', 'betrayal'].includes(exchange.tactic));
-        assert.equal(exchange.helper, undefined, 'a background bout is always a duel');
-      }
+    const available = order.map((id, index) => ({ id, ...arenaStartingPoint(index, size) }));
+    for (const round of rounds) for (const mini of arenaMiniExchanges(available, round.start - 500 * round.timeScale, 44_000, rounds)) {
+      assert.ok(!['team', 'betrayal'].includes(mini.tactic));
+      assert.equal(mini.helper, undefined, 'preparations reserve a single pair, not an extra alliance');
+      assert.equal(mini.prepares, rounds.find(main => main.id === mini.prepares)?.id);
     }
   }
   assert.ok(allianceGames > 0 && allianceGames < largeGames / 2, 'alliances stay available without becoming the default story');
 });
 
-test('background mini exchanges engage every available pair independently and never eliminate spectators', () => {
-  for (let size = 2; size <= 10; size++) {
-    const available = participants.slice(0, size).map((person, index) => ({ id: person.id, ...arenaStartingPoint(index, size) }));
-    const before = structuredClone(available), rounds = arenaMiniExchanges(available, 12_000);
-    assert.equal(rounds.length, Math.floor(size / 2));
-    assert.equal(new Set(rounds.flatMap(round => [round.aggressor, round.victim])).size, rounds.length * 2);
-    assert.equal(new Set(rounds.map(round => round.start)).size, rounds.length, 'each pair starts on its own beat');
-    assert.deepEqual(arenaMiniExchanges(available, 12_000), rounds);
-    for (const round of rounds) {
-      assert.ok(round.exchange && !round.final && round.resolve === Infinity);
-      assert.notEqual(round.aggressor, round.victim);
-      const bodies = new Map([round.aggressor, round.victim].map(id => [id, { ...available.find(person => person.id === id), facing: 1 }]));
-      const originalA = bodies.get(round.aggressor), originalV = bodies.get(round.victim);
-      const center = { x: (originalA.x + originalV.x) / 2, y: (originalA.y + originalV.y) / 2 };
-      const seen = new Set(), poses = new Set();
-      let actualContact = false;
-      for (let time = round.start; time < round.end; time += 16) {
-        const action = arenaAction(round, time); seen.add(action.stage);
-        for (const part of action.actors) {
-          poses.add(part.pose);
-          const body = bodies.get(part.id), previous = { ...body };
-          arenaMove(body, { x: center.x + part.offset.x, y: center.y + part.offset.y }, .016, 165);
-          assert.ok(Math.hypot(body.x - previous.x, body.y - previous.y) <= ARENA_MAX_GROUND_SPEED * .016 + 1e-6);
+test('arena preparation reserves the same next deciding opponents and has a finite handoff', () => {
+  let preparations = 0;
+  for (let size = 2; size <= 10; size++) for (let variation = 0; variation < 12; variation++) {
+    const order = Array.from({ length: size }, (_, index) => `prep-${variation}-${index}`), planned = arenaRounds(order);
+    for (const main of planned.slice(1)) {
+      const elapsed = main.start - 600 * main.timeScale;
+      const active = arenaFocusRound(order, elapsed), ranks = arenaRanks(order, elapsed);
+      const reserved = new Set([active.aggressor, active.victim, active.helper].filter(Boolean));
+      const available = order.filter(id => !ranks[id] && !reserved.has(id)).map((id, index) => ({ id, ...arenaStartingPoint(index, size) }));
+      const before = structuredClone(available), minis = arenaMiniExchanges(available, elapsed, 44_000, planned);
+      assert.deepEqual(arenaMiniExchanges(available, elapsed, 44_000, planned), minis, 'pause leaves the same partners and schedule');
+      assert.deepEqual(arenaMiniExchanges(available, elapsed), [], 'unplanned random pairings are disabled');
+      assert.equal(new Set(minis.flatMap(mini => [mini.aggressor, mini.victim])).size, minis.length * 2);
+      for (const mini of minis) {
+        preparations++;
+        const deciding = planned.find(round => round.id === mini.prepares);
+        const intendedPair = deciding.rushOutcome ? deciding.rushOutcome === 'double-out' ? [deciding.victim, deciding.helper] : [deciding.aggressor, deciding.helper] : [deciding.aggressor, deciding.victim];
+        assert.deepEqual([mini.aggressor, mini.victim], intendedPair);
+        assert.ok(mini.exchange && !mini.final && Number.isFinite(mini.resolve));
+        assert.equal(mini.end, deciding.start); assert.equal(mini.resolve, deciding.start); assert.equal(mini.impact, deciding.start);
+        assert.ok(mini.start <= elapsed && elapsed < mini.end);
+        assert.deepEqual(arenaEliminatedIds(mini), []);
+        for (const id of intendedPair) {
+          assert.ok(!reserved.has(id) && !ranks[id]);
+          const first = planned.find(round => round.start > elapsed && [round.aggressor, round.victim, round.helper].includes(id));
+          assert.equal(first.id, deciding.id, 'a fighter never meets someone else before the promised deciding bout');
         }
-        const attacker = bodies.get(round.aggressor), defender = bodies.get(round.victim);
-        if (action.actors.some(part => part.gripId) && Math.hypot(attacker.x - defender.x, attacker.y - defender.y) < 86) actualContact = true;
+        const later = arenaMiniExchanges(available, deciding.start - 1, 44_000, planned).find(round => round.id === mini.id);
+        assert.deepEqual(later, mini, 'the prepared pair remains joined until the main handoff');
+        assert.ok(!arenaMiniExchanges(available, deciding.start, 44_000, planned).some(round => round.id === mini.id));
       }
-      assert.ok(seen.has('approach') && seen.has('link') && seen.has('lift') && seen.has('release'), 'mini fights contain contact and a response, rather than only an idle loop');
-      if (round.tactic === 'bait') assert.ok(poses.has('dodge') && poses.has('run'), 'a feint has an actual charge and a sidestep');
-      else assert.ok(actualContact && poses.has('brace') && poses.has('lift'), 'a background pair reaches contact, blocks and counters');
-      assert.equal(arenaAction(round, round.impact + 1000).outcome, 'resisted');
-      assert.equal(arenaAction(round, round.impact + 1000).lift, 0);
+      assert.deepEqual(available, before);
     }
-    assert.deepEqual(available, before);
-    const reserved = new Set(available.slice(0, 3).map(person => person.id));
-    const outside = arenaMiniExchanges(available.filter(person => !reserved.has(person.id)), 20_000);
-    for (const round of outside) assert.ok(!reserved.has(round.aggressor) && !reserved.has(round.victim), 'the main event cannot also move someone in a background pair');
   }
+  assert.ok(preparations > 20, 'the regression exercises real future opponents, not an empty preparation list');
+});
+
+test('arena bouts begin immediately, connect without filler, and finish at their actual ceremony deadline', () => {
+  const prelimTechniques = new Set();
+  let compressed = 0;
+  for (let size = 2; size <= 10; size++) for (let variation = 0; variation < 32; variation++) for (const duration of [40_000, 62_000]) {
+    const order = Array.from({ length: size }, (_, index) => `schedule-${variation}-${index}`), rounds = arenaRounds(order, duration);
+    const unit = rounds[0].timeScale, final = rounds.at(-1);
+    assert.equal(rounds[0].start, 0, 'the first actual pair starts immediately');
+    assert.ok(Number.isFinite(unit) && unit > 0 && unit <= duration / 44_000);
+    if (unit < duration / 44_000) compressed++;
+    for (let index = 0; index < rounds.length; index++) {
+      const round = rounds[index];
+      assert.equal(round.timeScale, unit, 'all techniques and recovery use the same run tempo');
+      if (index) assert.equal(round.start, rounds[index - 1].resolve, 'the next deciding bout begins at the previous result');
+      if (!round.final) {
+        assert.equal(round.end, round.resolve, 'preliminaries have no extra guard or filler tail');
+        if (['armspin', 'trip', 'sidekick', 'suplex'].includes(round.tactic)) {
+          prelimTechniques.add(round.tactic);
+          const nominal = (round.end - round.start) / unit;
+          assert.ok(Math.abs(nominal - (round.tactic === 'suplex' ? 8200 : 5800)) < 1e-6);
+          if (round.tactic === 'suplex') assert.ok(Math.abs((round.resolve - round.impact) / unit - 4100) < 1e-6, 'a landed suplex still has time to drag and toss');
+        }
+      }
+      for (const elapsed of [round.start, (round.start + round.resolve) / 2, round.resolve - .01]) assert.equal(arenaFocusRound(order, elapsed, duration).id, round.id);
+    }
+    assert.equal(arenaPlaybackEnd(order, duration), final.end);
+    assert.ok(final.end <= duration && final.end > final.resolve);
+    assert.ok(Math.abs((final.end - final.start) / unit - 10_800) < 1e-6, 'the final includes its result and celebration');
+    if (size === 2) assert.ok(final.end < duration * .26, 'a single bout no longer waits for the full 40–62 second baseline');
+    assert.equal(arenaFocusRound(order, final.resolve, duration), undefined);
+    assert.deepEqual(arenaRanks(order, final.resolve, duration), Object.fromEntries(order.map((id, index) => [id, index + 1])));
+  }
+  assert.deepEqual([...prelimTechniques].sort(), ['armspin', 'sidekick', 'suplex', 'trip']);
+  assert.ok(compressed > 20, 'crowded fields exercise compressed tempo instead of overlapping techniques');
+});
+
+test('arena pair-rush branches use exactly three of ten rolls without changing the supplied ranking', () => {
+  const order = Array.from({ length: 200 }, (_, variant) => Array.from({ length: 3 }, (_, index) => `rush-${variant}-${index}`)).find(ids => arenaRounds(ids, 44_000, 0).some(round => round.rushOutcome));
+  assert.ok(order, 'the sample includes an actual three-person rush encounter');
+  let doubleOuts = 0, counterThrows = 0;
+  for (let roll = 0; roll < 10; roll++) for (const duration of [40_000, 44_000, 62_000]) {
+    const rounds = arenaRounds(order, duration, roll), rush = rounds.find(round => round.rushOutcome), final = rounds.at(-1);
+    if (roll < 3) {
+      if (duration === 44_000) doubleOuts++;
+      assert.equal(rush.rushOutcome, 'double-out'); assert.equal(rush.final, true);
+      assert.equal(rounds.length, 1, 'two losers leave together and the survivor needs no invented extra opponent');
+      assert.deepEqual(new Set(arenaEliminatedIds(rush)), new Set(order.slice(1)));
+    } else {
+      if (duration === 44_000) counterThrows++;
+      assert.equal(rush.rushOutcome, 'counter-throw'); assert.equal(rush.final, false);
+      assert.equal(rush.secondaryVictim, undefined); assert.equal(rounds.length, 2);
+      assert.equal(rounds[1].start, rush.resolve);
+    }
+    assert.deepEqual(arenaRanks(order, final.resolve, duration, roll), Object.fromEntries(order.map((id, index) => [id, index + 1])));
+    assert.equal(arenaPlaybackEnd(order, duration, roll), final.end);
+    assert.equal(arenaFocusRound(order, rush.start, duration, roll).rushOutcome, rush.rushOutcome);
+    assert.deepEqual(arenaPodium(order, duration, roll).map(place => place.id), order);
+  }
+  assert.equal(doubleOuts, 3); assert.equal(counterThrows, 7);
 });
 
 test('simultaneous duels reserve separate contacts instead of forming an accidental alliance pileup', () => {
-  for (let size = 2; size <= 10; size++) {
-    const available = participants.slice(0, size).map((person, index) => ({ id: person.id, ...arenaStartingPoint(index, size) }));
-    const occupied = [];
-    for (const round of arenaMiniExchanges(available, 12_000)) {
+  let simultaneous = 0;
+  for (let size = 4; size <= 10; size++) for (let variation = 0; variation < 12; variation++) {
+    const order = Array.from({ length: size }, (_, index) => `space-${variation}-${index}`), planned = arenaRounds(order);
+    const available = order.map((id, index) => ({ id, ...arenaStartingPoint(index, size) }));
+    for (const main of planned.slice(1)) {
+      const elapsed = main.start - 500 * main.timeScale, active = arenaFocusRound(order, elapsed), ranks = arenaRanks(order, elapsed);
+      const reserved = new Set([active.aggressor, active.victim, active.helper].filter(Boolean));
+      const a = available.find(person => person.id === active.aggressor), v = available.find(person => person.id === active.victim);
+      const occupied = [arenaLocalContact({ x: (a.x + v.x) / 2, y: (a.y + v.y) / 2 }, [])];
+      for (const round of arenaMiniExchanges(available.filter(person => !reserved.has(person.id) && !ranks[person.id]), elapsed, 44_000, planned)) {
+      simultaneous++;
       const a = available.find(person => person.id === round.aggressor), v = available.find(person => person.id === round.victim);
       const origin = { x: (a.x + v.x) / 2, y: (a.y + v.y) / 2 };
       const center = arenaLocalContact(origin, occupied);
       for (const other of occupied) assert.ok(Math.hypot((center.x - other.x) / 108, (center.y - other.y) / 63) >= .99, 'nearby independent pairs must retain physical room');
       assert.ok((center.x - 500) ** 2 / 303 ** 2 + (center.y - 416) ** 2 / 112 ** 2 < 1, 'the contact stays on the sand');
-      assert.ok(Math.hypot(center.x - origin.x, center.y - origin.y) <= 50, 'starting a bout cannot send a nearby pair to a distant fixed arena patch');
+      assert.ok(Math.hypot(center.x - origin.x, center.y - origin.y) <= 110, 'preparation selects a nearby clear contact rather than a fixed distant patch');
       occupied.push(center);
+      }
     }
   }
+  assert.ok(simultaneous > 10, 'the regression must include a main bout and its independently prepared next pair');
 });
 
 test('arena awards the actual top three in fixed rank positions and waits for runner-up recovery', () => {
@@ -379,9 +446,9 @@ test('arena awards the actual top three in fixed rank positions and waits for ru
     assert.ok(places[1].x < places[0].x && places[1].y > places[0].y);
     if (size >= 3) assert.ok(places[2].x > places[0].x && places[2].y > places[1].y);
     if (size >= 4) assert.ok(!places.some(place => place.id === order.at(-1)), 'last place must remain at the bench');
-    const recovery = arenaThrow(places[1].readyAt - final.impact, { x: 500, y: 425 }, { x: 885, y: 436 }, 1, duration / 44_000);
+    const recovery = arenaThrow(places[1].readyAt - final.impact, { x: 500, y: 425 }, { x: 885, y: 436 }, 1, final.timeScale);
     assert.equal(recovery.stage, 'walk', 'runner-up must land and recover before walking to the podium');
-    for (const place of places) assert.ok(place.readyAt >= final.resolve && place.readyAt < duration);
+    for (const place of places) assert.ok(place.readyAt >= final.resolve && place.readyAt < arenaPlaybackEnd(order, duration));
     assert.deepEqual(order, original);
   }
 });

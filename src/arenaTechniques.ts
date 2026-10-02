@@ -2,6 +2,8 @@ import type { ArenaPoint, ArenaRound, ArenaThrowFrame } from './arenaLogic';
 
 export const arenaFinalTechniques = ['armspin', 'trip', 'suplex', 'sidekick'] as const;
 export type ArenaFinalTechnique = typeof arenaFinalTechniques[number];
+/** The renderer anchors both wrists, then lays the body outward from them. */
+export type ArenaArmSpinFrame = { orbit: number; flatness: number; weight: number };
 export const isArenaFinalTechnique = (round: ArenaRound): boolean => arenaFinalTechniques.includes(round.tactic as ArenaFinalTechnique);
 const clamp = (p: number) => Math.max(0, Math.min(1, p));
 const ease = (p: number) => { const n = clamp(p); return n * n * (3 - 2 * n); };
@@ -16,45 +18,63 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     stage: phase < .08 ? 'approach' : phase < .20 ? 'probe' : phase < .30 ? 'reset' : 'grip', side, phase,
     aggressor: { x: center.x - side * (24 - probe * 7), y: center.y },
     victim: { x: center.x + side * (24 + probe * 5), y: center.y + probe * 3 },
-    lift: 0, victimAngle: 0, aggressorAngle: 0, aggressorLift: 0, yaw: 0, victimPose: undefined as 'held' | 'stunned' | 'roll' | 'airborne' | undefined,
+    lift: 0, victimAngle: 0, aggressorAngle: 0, aggressorLift: 0, yaw: 0, victimSuspension: 0, victimPose: undefined as 'held' | 'stunned' | 'roll' | 'airborne' | undefined,
     grip: phase >= .30 ? 'waist' as 'wrist' | 'waist' | 'ankle' | undefined : phase < .20 && phase >= .08 ? 'waist' : undefined,
     contact: 0,
+    spin: undefined as ArenaArmSpinFrame | undefined,
+    victimSlam: undefined as { tuck: number; slump: number } | undefined,
+    slamImpact: 0,
   };
   if (phase < .30) return frame;
   if (round.tactic === 'armspin') {
-    const turn = ease((phase - .44) / .56), angle = turn * Math.PI * 1.35;
-    const radius = Math.min(72, Math.max(54, (round.impact - round.start) / 1000 * .56 * 165 / (Math.PI * 1.35 * 1.5)));
+    const progress = clamp((phase - .44) / .56), ramp = .24;
+    // Integrate a short angular acceleration followed by a steady spin. A
+    // smoothstep would brake to a stop just before the hands release.
+    const turn = (progress < ramp ? progress ** 2 / (2 * ramp) : progress - ramp / 2) / (1 - ramp / 2);
+    const angle = turn === 0 ? 0 : side * turn * Math.PI * 4;
+    const orbit = (side < 0 ? Math.PI : 0) + angle;
+    const weight = ease((phase - .44) / .18);
     const take = ease((phase - .30) / .14);
     frame.aggressor.x = center.x - side * mix(24, 14, take);
-    frame.victim = { x: frame.aggressor.x + side * mix(48, radius, take) * Math.cos(angle), y: center.y + Math.sin(angle) * radius * .28 };
-    frame.yaw = angle; frame.lift = ease((phase - .50) / .22) * 42;
-    // The wrist leads while the torso and extended legs trail outside the turning pivot.
-    frame.victimAngle = -side * Math.cos(angle) * ease((phase - .50) / .28) * 1.2;
-    frame.victimPose = phase >= .50 ? 'held' : undefined;
+    // These are scene layout targets, not a second lift or a foot-root rotation.
+    // The actual suspended skeleton is derived from the two painted hand anchors.
+    const radius = mix(48, 112, weight);
+    frame.victim = { x: frame.aggressor.x + Math.cos(orbit) * radius, y: center.y + Math.sin(orbit) * radius * .20 - weight * 24 };
+    frame.yaw = angle;
+    frame.spin = { orbit, flatness: .94, weight };
+    frame.victimPose = phase >= .44 ? 'held' : undefined;
     frame.grip = phase >= .30 && elapsed < round.impact ? 'wrist' : undefined;
     frame.stage = phase < .30 ? frame.stage : phase < .44 ? 'wrist' : elapsed < round.impact ? 'pivot' : 'release';
   } else if (round.tactic === 'trip') {
-    const hook = ease((phase - .43) / .15), kick = ease((phase - .60) / .12), fall = ease((phase - .78) / .22);
-    frame.aggressor.x = center.x - side * (24 - hook * 6);
-    frame.victim.x = center.x + side * (24 + fall * 8);
-    frame.contact = phase < .60 ? hook * (1 - ease((phase - .58) / .02)) : kick * (1 - ease((phase - .74) / .04));
-    frame.victimAngle = side * Math.PI * .48 * fall;
-    frame.lift = Math.sin(fall * Math.PI) * 2;
-    frame.victimPose = phase >= .78 ? 'roll' : undefined;
-    frame.grip = phase >= .30 && phase < .60 ? 'waist' : undefined;
-    frame.stage = phase < .30 ? frame.stage : phase < .43 ? 'grip' : phase < .60 ? 'hook' : phase < .78 ? 'kick' : elapsed < round.impact ? 'fall' : 'roll';
+    const hook = ease((phase - .40) / .08), fall = ease((phase - .54) / .10);
+    const step = ease((phase - .64) / .08), kick = ease((phase - .72) / .08), recoil = ease((phase - .90) / .10);
+    frame.aggressor.x = center.x - side * (24 - hook * 6 - step * 4);
+    frame.victim.x = center.x + side * (24 + recoil * 12);
+    // Let the ankle hook finish, read the grounded fall, then hold the sole on
+    // the fallen waist before withdrawing it and starting the backward roll.
+    frame.contact = phase < .54 ? hook * (1 - ease((phase - .51) / .03)) : kick * (1 - ease((phase - .84) / .06));
+    frame.victimAngle = side * Math.PI * (.47 * fall + .08 * recoil);
+    frame.victimSuspension = phase >= .54 && phase < .58 ? 1 - ease((phase - .54) / .04) : 0;
+    frame.victimPose = phase >= .90 ? 'roll' : phase >= .54 ? 'stunned' : undefined;
+    frame.grip = phase >= .30 && phase < .54 ? 'waist' : undefined;
+    frame.stage = phase < .40 ? 'grip' : phase < .54 ? 'hook' : phase < .64 ? 'fall' : phase < .72 ? 'stunned' : phase < .90 ? 'kick' : 'roll';
   } else if (round.tactic === 'suplex') {
-    const lift = ease((phase - .34) / .22), arch = ease((phase - .56) / .34);
+    const lift = ease((phase - .34) / .22), arch = ease((phase - .56) / .32), drop = clamp((phase - .82) / .06);
     const take = ease((phase - .30) / .04);
     frame.aggressor.x = center.x - side * mix(24, 22, take);
-    frame.victim.x = frame.aggressor.x + side * mix(mix(48, 43, take), -32, arch);
+    frame.victim.x = frame.aggressor.x + side * mix(mix(48, 43, take), -4, arch);
     frame.victim.y = center.y + arch * 3;
-    frame.lift = lift * 40 * (1 - arch);
+    // Hold the opponent above the sand through the back arch, then accelerate
+    // down into the shoulder landing. The flat stunned beat follows the impact.
+    frame.lift = lift * 40 * (1 - drop ** 2);
     frame.victimAngle = -side * Math.PI * .47 * arch;
     frame.aggressorAngle = -side * Math.sin(arch * Math.PI) * .20;
-    frame.victimPose = phase >= .90 ? 'stunned' : phase >= .56 ? 'roll' : undefined;
-    frame.grip = phase >= .30 && phase < .90 ? 'waist' : undefined;
-    frame.stage = phase < .30 ? frame.stage : phase < .34 ? 'grip' : phase < .56 ? 'lift' : phase < .90 ? 'arch' : elapsed < round.impact ? 'stunned' : 'drag';
+    frame.victimPose = phase >= .88 ? 'stunned' : phase >= .34 ? 'airborne' : undefined;
+    if (phase >= .34) frame.victimSlam = { tuck: lift, slump: ease((phase - .88) / .06) };
+    frame.victimSuspension = phase >= .34 && phase < .88 ? 1 - ease((phase - .82) / .06) : 0;
+    frame.slamImpact = phase >= .88 && phase < .96 ? 1 - ease((phase - .88) / .08) : 0;
+    frame.grip = phase >= .30 && phase < .82 ? 'waist' : undefined;
+    frame.stage = phase < .34 ? 'grip' : phase < .56 ? 'lift' : phase < .88 ? 'arch' : phase < .94 ? 'slam' : elapsed < round.impact ? 'stunned' : 'drag';
   } else if (round.tactic === 'sidekick') {
     const jump = ease((phase - .38) / .22), strike = ease((phase - .68) / .14), recoil = ease((phase - .82) / .18);
     frame.aggressor.x = center.x - side * (24 - jump * 11 + recoil * 7);

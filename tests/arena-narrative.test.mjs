@@ -64,31 +64,39 @@ test('the two-person shove first contacts the locked pair, pushes both continuou
   }
 });
 
-test('rare two exits consume only the next drawn losers and a failed alliance leaves time for a later exchange', () => {
-  const seen = new Set(); let doubles = 0;
-  for (let variant = 0; variant < 600; variant++) {
+test('an occasional rush keeps its exact three-to-seven branch ratio and consumes only the next drawn losers', () => {
+  const seen = new Set(); let rushGames = 0, doubles = 0, counters = 0;
+  for (let variant = 0; variant < 160; variant++) for (let roll = 0; roll < 10; roll++) {
     const order = Array.from({ length: 8 }, (_, i) => `narrative-${variant}-${i}`), living = new Set(order);
-    const rounds = arenaRounds(order); let previousEnd = 0;
+    const rounds = arenaRounds(order, 44000, roll); let previousEnd = 0;
+    if (!roll && rounds.some(round => round.rushOutcome)) rushGames++;
     for (const round of rounds) {
-      assert.ok(round.start >= previousEnd - .001); previousEnd = round.end;
+      assert.equal(round.start, previousEnd); previousEnd = round.end;
       assert.ok(living.has(round.aggressor));
       if (round.tactic === 'betrayal') { seen.add(round.counterSide); seen.add(round.counterFailed ? 'failed' : 'succeeded'); }
       const exits = arenaEliminatedIds(round);
+      if (round.rushOutcome) {
+        assert.equal(round.rushOutcome, roll < 3 ? 'double-out' : 'counter-throw');
+        if (roll >= 3) { counters++; assert.equal(round.secondaryVictim, undefined); }
+      }
       if (round.secondaryVictim) {
         doubles++;
+        assert.equal(round.rushOutcome, 'double-out');
         assert.equal(round.helper, round.secondaryVictim);
         assert.deepEqual(exits, [...living].slice(-2).reverse());
-        assert.ok(!exits.includes(round.aggressor) && !round.final);
-        const before = arenaRanks(order, round.resolve - .001), after = arenaRanks(order, round.resolve);
+        assert.ok(!exits.includes(round.aggressor));
+        assert.equal(round.final, living.size === 3, 'a last three-person double exit confirms the only survivor');
+        const before = arenaRanks(order, round.resolve - .001, 44000, roll), after = arenaRanks(order, round.resolve, 44000, roll);
         for (const id of exits) { assert.equal(before[id], undefined); assert.equal(after[id], order.indexOf(id) + 1); }
       }
       exits.forEach(id => { assert.ok(living.has(id)); living.delete(id); });
     }
     assert.deepEqual([...living], [order[0]]);
-    assert.deepEqual(arenaRanks(order, 44000), Object.fromEntries(order.map((id, i) => [id, i + 1])));
+    assert.deepEqual(arenaRanks(order, 44000, 44000, roll), Object.fromEntries(order.map((id, i) => [id, i + 1])));
     assert.ok(rounds.filter(round => !!round.secondaryVictim).length <= 1);
   }
-  assert.ok(doubles > 8 && doubles < 65, `two-person exits stay occasional, got ${doubles}/600`);
+  assert.ok(rushGames > 10 && rushGames < 80, 'the three-person story remains occasional across matches');
+  assert.equal(doubles, rushGames * 3); assert.equal(counters, rushGames * 7);
   assert.deepEqual(seen, new Set(['front', 'back', 'failed', 'succeeded']));
 });
 
@@ -121,11 +129,12 @@ test('short head words follow the actual wrist pivot, fall, floor roll and ankle
   assert.deepEqual(arenaActionWords(armspin, at(.36)), [{ id: final.aggressor, word: '잡기!' }]);
   assert.deepEqual(arenaActionWords(armspin, at(.70)), [{ id: final.aggressor, word: '회전!' }]);
   const trip = { ...final, tactic: 'trip' };
-  assert.deepEqual(arenaActionWords(trip, at(.57)), [{ id: final.aggressor, word: '발걸기!' }]);
-  assert.deepEqual(arenaActionWords(trip, at(.70)), [{ id: final.aggressor, word: '발차기!' }]);
-  assert.match(arenaStoryState(trip, at(.70)).action, /몸통을 발로/);
-  assert.equal(arenaAction(trip, at(.70)).actors.find(actor => actor.id === final.aggressor).pose, 'trip');
-  assert.deepEqual(arenaActionWords(trip, at(.88)), [{ id: final.victim, word: '넘어진다!' }]);
+  assert.deepEqual(arenaActionWords(trip, at(.48)), [{ id: final.aggressor, word: '발걸기!' }]);
+  assert.deepEqual(arenaActionWords(trip, at(.57)), [{ id: final.victim, word: '넘어진다!' }]);
+  assert.match(arenaStoryState(trip, at(.68)).action, /넘어졌습니다/);
+  assert.deepEqual(arenaActionWords(trip, at(.82)), [{ id: final.aggressor, word: '발차기!' }]);
+  assert.match(arenaStoryState(trip, at(.82)).action, /몸통을 발로/);
+  assert.equal(arenaAction(trip, at(.82)).actors.find(actor => actor.id === final.aggressor).pose, 'trip');
   assert.deepEqual(arenaActionWords(trip, final.impact + 700), [{ id: final.victim, word: '구르기!' }]);
   assert.deepEqual(arenaActionWords(trip, final.impact + 900), []);
   const suplex = { ...final, tactic: 'suplex', impact: 35300 };

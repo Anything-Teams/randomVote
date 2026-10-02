@@ -102,7 +102,7 @@ test('the treasure terrace is connected to tower columns and a lower foundation 
 });
 
 test('the rare top ambush interrupts natural climbing, throws back to the source lane and preserves the draw', () => {
-  assert.equal(LADDER_ROOF_STEAL_CHANCE, .05);
+  assert.equal(LADDER_ROOF_STEAL_CHANCE, .06);
   for (const target of [0, 1]) {
     const candidates = participants.slice(0, 2), order = candidates.map(person => person.id).reverse(), timeline = buildLadderTimeline(candidates, order, 44_000, 19, target), finish = timeline.roofFinish;
     assert.ok(finish, 'both directions have a naturally eligible ambush');
@@ -123,7 +123,7 @@ test('the rare top ambush interrupts natural climbing, throws back to the source
   }
   let rare = 0; const candidates = participants.slice(0, 2), order = candidates.map(person => person.id).reverse();
   for (let seed = 0; seed < 500; seed++) rare += !!buildLadderTimeline(candidates, order, 44_000, seed, 0).roofFinish;
-  assert.ok(rare > 0 && rare <= 35, 'only the 5% attempt and natural proximity permit a top ambush');
+  assert.ok(rare > 0 && rare <= 40, 'only the 6% attempt and natural proximity permit a top ambush');
 });
 
 test('top ambush hands actually hold both legs with unchanged limbs and continuous contact boundaries', () => {

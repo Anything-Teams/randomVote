@@ -22,23 +22,26 @@ const inside = (point, polygon) => {
   return hit;
 };
 
-test('renewed bouts stay beside their current contact and change opponents without a distant sprint', () => {
+test('deciding bouts preserve their opponents until the result and make bounded room for a nearby preparation', () => {
   for (const origin of [{ x: 360, y: 400 }, { x: 610, y: 448 }, { x: 500, y: 416 }]) {
     assert.deepEqual(arenaLocalContact(origin, []), origin);
     const next = arenaLocalContact(origin, [origin]);
-    assert.ok(distance(origin, next) <= 42.001, 'making room is a short step, not a move to a fixed remote patch');
+    assert.ok(distance(origin, next) <= 110, 'making room selects a nearby clear contact, not a fixed remote patch');
+    assert.ok(Math.hypot((next.x - origin.x) / 108, (next.y - origin.y) / 63) >= .99, 'two independent pairs cannot share the same contact');
     assert.ok(radius(next) < 1);
     const body = { ...origin, facing: 1 };
     let previous = { ...body };
-    for (let at = 0; at < 1200; at += 16) {
+    for (let at = 0; at < 2000; at += 16) {
       arenaMove(body, next, .016, arenaApproachSpeed(distance(body, next)));
       assert.ok(distance(body, previous) <= 122 * .016 + .001);
       previous = { ...body };
     }
     assert.ok(distance(body, next) < 2);
   }
-  const first = arenaExchange(['a', 'b', 'c', 'd'], 500), next = arenaExchange(['a', 'b', 'c', 'd'], 5300);
-  assert.deepEqual([first.aggressor, first.victim], [next.aggressor, next.victim], 'the main non-eliminating bout continues with its actual previous opponent');
+  const order = ['a', 'b', 'c', 'd'], first = arenaExchange(order, 0), nearResult = arenaExchange(order, first.resolve - .001), next = arenaExchange(order, first.resolve);
+  assert.deepEqual([first.aggressor, first.victim], [nearResult.aggressor, nearResult.victim], 'the first met opponent stays through this deciding result');
+  assert.equal(next.start, first.resolve); assert.notEqual(next.id, first.id);
+  assert.ok(![next.aggressor, next.victim, next.helper].includes(first.victim), 'the defeated fighter cannot start another filler exchange');
 });
 
 test('a charge is caught at body contact before the receiver pivots, lifts and throws', () => {
