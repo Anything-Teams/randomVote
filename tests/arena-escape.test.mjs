@@ -13,14 +13,22 @@ const radius = p => Math.hypot((p.x - 500) / 303, (p.y - 416) / 112);
 const base = { id: 'escape', index: 0, tactic: 'brace', aggressor: 'a', victim: 'v', start: 3800, impact: 6900, resolve: 8000, end: 8000, final: false, timeScale: 1 };
 const boundaries = [1200, 1440, 1620, 2520, 2840, 3800];
 
-test('cosmetic escapes are optional, quarter-probability, finite and never change the supplied draw', () => {
+test('escapes only occur with more than two survivors and never change the supplied draw', () => {
   const pair = ['a', 'v'];
   assert.deepEqual(arenaRounds(pair), arenaRounds(pair, 44_000, 7, undefined));
   assert.ok(arenaRounds(pair).every(round => !round.escape));
+  for (let seed = 0; seed < 100; seed++) assert.ok(arenaRounds(pair, 44_000, 7, seed).every(round => !round.escape), 'a one-on-one match never escapes');
+  let field;
+  for (let variant = 0; variant < 100 && !field; variant++) {
+    const candidate = [`escape-${variant}-a`, `escape-${variant}-b`, `escape-${variant}-v`];
+    const opening = arenaRounds(candidate)[0];
+    if (!opening.helper && !opening.rushOutcome) field = candidate;
+  }
+  assert.ok(field);
   let escaped = 0, separated = 0;
   const runnerRoles = new Set();
   for (let seed = 0; seed < 4000; seed++) {
-    const round = arenaRounds(pair, 44_000, 7, seed)[0];
+    const round = arenaRounds(field, 44_000, 7, seed)[0];
     if (round.escape) { escaped++; runnerRoles.add(round.escape.runnerId); if (round.escape.outcome === 'separate') separated++; }
   }
   assert.ok(escaped / 4000 > .23 && escaped / 4000 < .27);
@@ -33,11 +41,12 @@ test('cosmetic escapes are optional, quarter-probability, finite and never chang
     assert.ok(rounds.filter(round => round.escape).length <= 2);
     if (rounds.filter(round => round.escape).length === 2) cappedGames++;
     rounds.forEach((round, index) => {
-      const entry = round.escape?.start ?? round.start;
+      const entry = round.recovery?.start ?? round.escape?.start ?? round.start;
       assert.equal(entry, rounds[index - 1]?.resolve ?? 0, 'each next scene immediately follows the previous deciding result');
       assert.ok([entry, round.start, round.impact, round.resolve, round.end].every(Number.isFinite));
       assert.ok(entry <= round.start && round.start < round.impact && round.impact < round.resolve && round.resolve <= round.end);
       if (!round.escape) return;
+      assert.ok(!round.final, 'the last two survivors never escape');
       assert.ok(!round.helper && !round.rushOutcome, 'three-person maneuvers do not invent another escaping pair');
       assert.ok(!rounds[index - 1]?.escape, 'escapes cannot run consecutively');
       assert.equal(round.escape.releasedUntil, round.start);
@@ -90,7 +99,7 @@ test('successful escapes release the original pair and use another surviving opp
       assert.deepEqual(arenaRanks(order, 44_000, 44_000, 7, seed), Object.fromEntries(order.map((id, i) => [id, i + 1])));
     }
   }
-  assert.ok(switched > 0); assert.ok(twoPlayer > 0);
+  assert.ok(switched > 0); assert.equal(twoPlayer, 0, 'no two-player scene contains an escape');
 });
 
 test('escape paths keep their contacts, bounded running speed and continuous rejoin at the live encounter', () => {

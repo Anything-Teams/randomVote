@@ -4,6 +4,8 @@ import { build } from 'esbuild';
 
 const bundle = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createArenaFighterAnimation, drawArenaFighter, sampleArenaFighterContacts } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+const rushBundle = await build({ entryPoints: ['src/arenaPairRush.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { arenaPairRushTargets } = await import(`data:text/javascript;base64,${Buffer.from(rushBundle.outputFiles[0].text).toString('base64')}`);
 const ctx = Object.fromEntries(['save', 'restore', 'translate', 'rotate', 'scale', 'transform', 'fillRect', 'beginPath', 'ellipse', 'fill', 'moveTo', 'lineTo', 'closePath'].map(key => [key, () => {}]));
 const fighter = overrides => ({ candidate: { id: 'fighter', name: '선수', color: '#ffad72' }, index: 1, x: 500, y: 416, depthY: 416, scale: 2.04, facing: -1, pose: 'carried', angle: Math.PI / 2, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, phase: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...overrides });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -128,5 +130,82 @@ test('a lifted elbow hits the supplied head contact with a connected folded fore
     assert.ok(distance(contacts.shoulders[1], contacts.elbows[1]) <= 11 * body.scale + .001);
     assert.ok(Math.abs(distance(contacts.elbows[1], contacts.hands[1]) - 10.5 * body.scale) < .001, 'the connected forearm cannot shorten during impact');
     assert.ok(distance(contacts.hands[1], body.elbowTarget) > 18, 'the palm remains folded away from the elbow contact');
+  }
+});
+
+test('the scoop loads both knees and sweeps both hands above the head before a forward release', () => {
+  for (const facing of [-1, 1]) {
+    const actor = stroke => fighter({ pose: 'scoop', angle: 0, facing, scoopStroke: stroke, carryStretch: undefined });
+    const loaded = actor(0), high = actor(.72), released = actor(1);
+    drawArenaFighter(ctx, loaded, 1000); drawArenaFighter(ctx, high, 1400); drawArenaFighter(ctx, released, 1600);
+    const from = loaded.animation.contactPoints, up = high.animation.contactPoints;
+    assert.ok(loaded.animation.motion.crouch > 8 && high.animation.motion.crouch < 1.1, 'the scoop uses a knee load and complete leg drive');
+    assert.ok(from.hands.every(point => point.y > from.waist.y - 10), 'both arms begin low enough to get under the two bodies');
+    assert.ok(up.hands.every(point => point.y < up.head.y + 7), 'both arms visibly sweep up beside the head');
+    assert.ok(up.hands.every((point, index) => point.y < from.hands[index].y - 55), 'the arm sweep has a readable lifting range');
+    assert.ok(released.animation.motion.lean > 18 && released.animation.motion.hipX > high.animation.motion.hipX, 'the pelvis and shoulders carry the release forward');
+    const heels = from.feet;
+    for (const body of [high, released]) body.animation.contactPoints.feet.forEach((point, leg) => assert.ok(distance(point, heels[leg]) < .001, 'the lifting effort cannot float either support sole'));
+  }
+});
+
+test('the shared throw keeps all four limb holds through body transfer and release follow-through', () => {
+  for (const side of [-1, 1]) for (const carrierDrive of [.8, .9, 1]) {
+    const victim = fighter({ index: 2, angle: side * Math.PI / 2, facing: -side, carryStretch: 1, y: 279, depthY: 421, suspension: 1 });
+    const contacts = sampleArenaFighterContacts(victim, 2000);
+    for (const [index, facing, ends, gripMode] of [[1, -side, contacts.hands, 'wrist'], [3, side, contacts.feet, 'ankle']]) {
+      const body = fighter({ index, x: (ends[0].x + ends[1].x) / 2 - facing * 3.5 * 2.04, y: index === 1 ? 412 : 414, facing, pose: 'overhead', overheadRaise: 1, carrierDrive, angle: 0, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
+      drawArenaFighter(ctx, body, 2000);
+      const points = body.animation.contactPoints;
+      assert.ok(distance(points.hands[0], ends[1]) < .001 && distance(points.hands[1], ends[0]) < .001, 'neither actual hand can detach from the held wrist or ankle during the weight transfer');
+      assert.ok(body.animation.feet.every(foot => foot.lift === 0));
+      if (carrierDrive === 1) {
+        const released = { ...body, gripTarget: undefined, secondaryGripTarget: undefined, gripStrength: 0, animation: createArenaFighterAnimation() };
+        drawArenaFighter(ctx, released, 2016);
+        assert.ok(released.animation.motion.lean > 6 && released.animation.motion.hipX >= 2, 'each holder follows the released body through the chest and pelvis');
+        assert.ok(released.animation.feet.every(foot => foot.lift === 0), 'release continues through the support legs instead of levitating');
+      }
+    }
+  }
+});
+
+test('the front kick chambers its knee, hits with a straightening shin and retracts onto the same stance', () => {
+  for (const facing of [-1, 1]) {
+    const animation = createArenaFighterAnimation(), target = { x: 500 + facing * 38, y: 402 };
+    const body = fighter({ pose: 'trip', angle: 0, facing, carryStretch: undefined, frontKick: 0, kickLeg: 1, footTarget: target, footStrength: 0, animation, motionImmediate: false });
+    drawArenaFighter(ctx, body, 1000);
+    const support = { ...animation.contactPoints.feet[0] }, rest = { ...animation.contactPoints.feet[1] };
+    let raised, strike, retracted;
+    for (let frame = 1; frame <= 100; frame++) {
+      body.frontKick = frame / 100;
+      drawArenaFighter(ctx, body, 1000 + frame * 8);
+      assert.ok(distance(animation.contactPoints.feet[0], support) < .001, 'the balancing leg keeps its planted sole through the entire kick');
+      if (frame === 40) raised = structuredClone(animation);
+      if (frame === 62) strike = structuredClone(animation);
+      if (frame === 78) retracted = structuredClone(animation);
+    }
+    assert.ok(raised.skeleton.knees[1].y < raised.skeleton.hips[1].y - 7, 'the thigh actually lifts its bent knee before the kick');
+    assert.ok(raised.skeleton.feet[1].y > raised.skeleton.knees[1].y + 8, 'the shin stays folded below the raised knee in the chamber');
+    assert.ok(distance(strike.contactPoints.feet[1], target) < .001, 'the foot reaches the actual fallen opponent at the strike phase');
+    assert.ok(distance(strike.skeleton.hips[1], strike.skeleton.feet[1]) > distance(raised.skeleton.hips[1], raised.skeleton.feet[1]) + 10, 'the shin snaps outward instead of a rigid straight leg sliding through the kick');
+    assert.ok(retracted.skeleton.knees[1].y < retracted.skeleton.hips[1].y - 7, 'the knee folds again immediately after contact');
+    assert.ok(distance(animation.contactPoints.feet[1], rest) < .001, 'the kicking sole returns to its own original stance');
+  }
+});
+
+test('the joint throw keeps the actual wrist and ankle contact throughout its complete lifting stroke', () => {
+  for (const side of [-1, 1]) {
+    const round = { id: 'carry-drive', index: 0, aggressor: 'arms', victim: 'victim', helper: 'legs', tactic: 'double-shove', rushOutcome: 'counter-throw', start: 0, impact: 8000, resolve: 9100, end: 10_000, final: false, contactSide: side };
+    for (let at = 4500; at < round.impact; at += 32) {
+      const motion = arenaPairRushTargets(round, at, { x: 500, y: 416 });
+      if (motion.grip !== 'arms-legs') continue;
+      const victim = fighter({ pose: 'carried', x: motion.victim.x, y: motion.victim.y - motion.lift, facing: -side, angle: motion.victimAngle, carryStretch: motion.victimCarryStretch, suspension: motion.victimSuspension });
+      const ends = sampleArenaFighterContacts(victim, at);
+      for (const [point, facing, pair, gripMode] of [[motion.aggressor, -side, ends.hands, 'wrist'], [motion.helper, side, ends.feet, 'ankle']]) {
+        const holder = fighter({ pose: 'overhead', x: point.x, y: point.y, facing, angle: 0, carryStretch: undefined, overheadRaise: motion.overhead, carrierDrive: motion.carrierDrive, gripMode, gripTarget: pair[0], secondaryGripTarget: pair[1], gripStrength: 1, gripLocked: true });
+        const held = sampleArenaFighterContacts(holder, at);
+        assert.ok(distance(held.hands[0], pair[1]) < .001 && distance(held.hands[1], pair[0]) < .001, `the weight transfer keeps all four real holds at ${at}ms`);
+      }
+    }
   }
 });

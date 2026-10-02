@@ -6,7 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { arenaTechniqueTargets } = await source('src/arenaTechniques.ts');
+const { arenaTechniqueTargets, arenaTechniqueExit } = await source('src/arenaTechniques.ts');
 const { createArenaFighterAnimation, drawArenaFighter, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const round = { id: 'suplex-body', index: 0, aggressor: '1', victim: '2', tactic: 'suplex', start: 33_200, impact: 35_300, resolve: 39_300, end: 44_000, final: true };
 const span = round.impact - round.start;
@@ -18,6 +18,22 @@ function victimAt(phase, side, animation) {
   return { time, frame, actor: fighter({ x: frame.victim.x, y: frame.victim.y - frame.lift, depthY: frame.victim.y, facing: -side, pose: frame.victimPose ?? 'brace', phase, angle: frame.victimAngle, suspension: frame.victimSuspension, slamProgress: frame.victimSlam, ...(animation ? { animation, motionImmediate: false } : {}) }) };
 }
 function parts(contacts) { return [contacts.head, contacts.waist, ...contacts.shoulders, ...contacts.hands, ...contacts.feet]; }
+
+test('the slammed body is dragged toward its foot ends instead of pulling the driver across its head', () => {
+  for (const side of [-1, 1]) for (const center of [{ x: 360, y: 400 }, { x: 640, y: 440 }]) {
+    const frame = arenaTechniqueTargets({ ...round, contactSide: side }, round.impact, center);
+    const actor = fighter({ x: frame.victim.x, y: frame.victim.y, depthY: frame.victim.y, facing: -side, pose: 'stunned', phase: 1, angle: frame.victimAngle, suspension: 0, slamProgress: frame.victimSlam });
+    const contacts = sampleArenaFighterContacts(actor, round.impact), foot = contacts.feet[1];
+    assert.equal(frame.exitDirection, -side);
+    assert.ok(frame.exitDirection * (foot.x - contacts.head.x) > 100, 'the chosen rim is beyond the feet, not beyond the head');
+    const driverX = foot.x + frame.exitDirection * 32;
+    assert.ok(frame.exitDirection * (driverX - foot.x) > 0, 'the dragging fighter stands outside the foot ends');
+    assert.ok(frame.exitDirection * (driverX - contacts.head.x) > 132, 'the driver does not share the unconscious torso silhouette');
+    const landing = { x: frame.exitDirection < 0 ? 115 : 885, y: 436 }, preparation = { lift: 0, angle: frame.victimAngle };
+    const before = arenaTechniqueExit(round, 300, frame.victim, landing, frame.exitDirection, 1, preparation), after = arenaTechniqueExit(round, 600, frame.victim, landing, frame.exitDirection, 1, preparation);
+    assert.ok(frame.exitDirection * (after.groundX - before.groundX) > 0, 'the ankle grip pulls in the same direction as the feet');
+  }
+});
 
 test('the suplex body reaches the sand before it relaxes into a still floor silhouette', () => {
   for (const side of [-1, 1]) {

@@ -1,7 +1,7 @@
 import type { ArenaPoint, ArenaRound } from './arenaLogic';
 
 export const ARENA_ESCAPE_DURATION = 3800;
-export const ARENA_ESCAPE_RELEASE_DURATION = 2200;
+export const ARENA_ESCAPE_RELEASE_DURATION = 650;
 export type ArenaEscapeWindow = { start: number; end: number; runnerId: string; chaserId?: string; side: 1 | -1; ungripped?: boolean; outcome?: 'rejoin' | 'separate'; releasedUntil?: number };
 export type ArenaEscapeStage = 'approach' | 'grip' | 'break' | 'flee' | 'chase' | 'rejoin' | 'separate' | 'done';
 export type ArenaEscapeFrame = {

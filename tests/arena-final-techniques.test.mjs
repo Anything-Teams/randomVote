@@ -6,7 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { arenaFinalTechniques, arenaTechniqueTargets, arenaTechniqueReactionAt, arenaTechniqueExit, arenaSuplexRim } = await source('src/arenaTechniques.ts');
+const { arenaFinalTechniques, arenaTechniqueTargets, arenaTechniqueReactionAt, arenaTechniqueExit, arenaSuplexRim, arenaSidekickWindow } = await source('src/arenaTechniques.ts');
 const { arenaAction, arenaRanks, arenaRounds } = await source('src/arenaLogic.ts');
 const { createArenaFighterAnimation, drawArenaFighter, arenaSpinGripPair, arenaSpinSnapshot, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const ctx = Object.fromEntries(['save', 'restore', 'translate', 'rotate', 'scale', 'fillRect', 'beginPath', 'ellipse', 'fill', 'moveTo', 'lineTo', 'closePath'].map(key => [key, () => {}]));
@@ -164,6 +164,12 @@ test('an ankle hook is followed by sole contact and a backward somersault in the
     assert.equal(grounded.victimPose, 'stunned');
     assert.equal(grounded.contact, 0, 'the fall can be read before the kicking leg begins to reach');
     assert.ok(Math.abs(grounded.victimAngle) > Math.PI * .46);
+    const chamber = at(round, .75, center), extension = at(round, .785, center), recovery = at(round, .815, center);
+    assert.ok(chamber.frontKick > 0 && chamber.frontKick < .4, 'the knee folds before the shin extends toward the target');
+    assert.equal(chamber.contact, 0, 'a chambered knee cannot register a sole hit');
+    assert.ok(extension.frontKick > .4 && extension.frontKick < .62 && extension.contact > 0, 'the forward stroke reaches the body after lifting the knee');
+    assert.ok(recovery.frontKick > .62 && recovery.frontKick < .78 && recovery.contact < .5, 'the shin is withdrawn immediately after impact');
+    assert.equal(at(round, .85, center).frontKick, 1, 'the one forward kick lowers its foot before another action');
     assert.equal(kick.stage, 'kick');
     assert.equal(kick.grip, undefined, 'the waist is released before the leg pushes the opponent away');
     assert.ok(kick.contact > .99);
@@ -280,7 +286,9 @@ test('an overhead waist lift reads its raised hold before accelerating into a sl
 test('one airborne side kick has a single jump and launches at sole contact', () => {
   const round = bout('sidekick');
   for (const center of centers) {
-    const planted = at(round, .34, center), first = at(round, .52, center), second = at(round, .75, center), impact = at(round, .83, center), release = at(round, 1, center);
+    const window = arenaSidekickWindow(round), jumpAt = fraction => arenaTechniqueTargets(round, window.start + window.duration * fraction, center);
+    assert.equal(window.duration, 650, 'a long introduction cannot stretch the jump into slow motion');
+    const planted = arenaTechniqueTargets(round, window.start - 16, center), first = jumpAt(.16), second = jumpAt(.48), impact = jumpAt(.54), release = jumpAt(1);
     assert.equal(planted.stage, 'plant');
     assert.equal(planted.aggressorLift, 0);
     assert.equal(first.stage, 'jump');
@@ -291,24 +299,41 @@ test('one airborne side kick has a single jump and launches at sole contact', ()
     assert.ok(second.contact > .45, 'the second sole reaches the victim before recoil begins');
     assert.equal(second.lift, 0, 'the target stays grounded until the kick hits');
     assert.equal(impact.stage, 'impact');
-    const touch = at(round, .82, center), reacting = arenaTechniqueTargets(round, touch.kickReactionAt + 16, center);
+    const touch = jumpAt(.5), reacting = arenaTechniqueTargets(round, touch.kickReactionAt + 16, center);
     assert.equal(touch.kickReactionAt, arenaTechniqueReactionAt(round));
     assert.ok(touch.contact > .999 && touch.lift === 0, 'the final sole contact and the flight launch share one exact clock');
     assert.ok(reacting.lift > 0 && reacting.reactionProgress > 0 && reacting.side * (reacting.victim.x - touch.victim.x) > 0, 'the victim leaves immediately in the next rendered frame');
     assert.ok(impact.contact > 0 && impact.lift > 0);
-    assert.equal(at(round, .85, center).contact, 0, 'the striking foot cannot stay locked onto the departing opponent');
+    assert.equal(jumpAt(.65).contact, 0, 'the striking foot cannot stay locked onto the departing opponent');
     assert.equal(release.stage, 'release');
     assert.ok(release.aggressorLift < .001, 'the kicker comes down while the opponent exits');
     assert.ok(release.lift > 13 && release.lift <= 14, 'impact gives a short recoil before the actual flight');
-    assert.ok(at(round, .60, center).aggressorLift > 20, 'there is no intermediate landing');
-    assert.ok(at(round, .80, center).aggressorLift > 21);
-    const heights = Array.from({ length: 101 }, (_, i) => at(round, i / 100, center).aggressorLift);
+    assert.ok(jumpAt(.35).aggressorLift > 20, 'there is no intermediate landing');
+    assert.ok(jumpAt(.65).aggressorLift > 21);
+    const heights = Array.from({ length: 101 }, (_, i) => jumpAt(i / 100).aggressorLift);
     const peaks = heights.filter((height, i) => i > 0 && i < 100 && height > heights[i - 1] && height > heights[i + 1]);
     assert.equal(peaks.length, 1, 'the body has exactly one airborne apex');
     assert.ok([planted, first, second, impact, release].every(frame => frame.grip === undefined), 'a side kick never adopts a lifting grip');
-    const strike = arenaAction(round, round.start + (round.impact - round.start) * .75);
+    const strike = arenaAction(round, window.start + window.duration * .48);
     assert.equal(strike.actors.find(actor => actor.id === round.aggressor).pose, 'sidekick');
     assert.ok(strike.actors.every(actor => !actor.gripId), 'the connected action also keeps the kicking hands free');
+  }
+});
+
+test('sidekick contact clocks and jump duration remain physical across short and long bouts', () => {
+  for (const span of [700, 2100, 2800, 5000, 7200]) for (const timeScale of [.4, .8, 1, 1.4]) {
+    const round = { ...bout('sidekick'), impact: base.start + span, timeScale }, window = arenaSidekickWindow(round);
+    assert.ok(window.duration <= 650 && window.duration <= span * .68);
+    assert.equal(arenaTechniqueReactionAt(round), window.contactAt);
+    assert.ok(window.start > round.start + span * .3);
+    for (const boundary of [window.start, window.start + window.duration * .22, window.contactAt, window.start + window.duration * .62, window.end]) {
+      const before = arenaTechniqueTargets(round, boundary - .001, { x: 500, y: 416 }), after = arenaTechniqueTargets(round, boundary + .001, { x: 500, y: 416 });
+      for (const key of ['aggressor', 'victim']) assert.ok(distance(before[key], after[key]) < .005);
+      for (const key of ['aggressorLift', 'aggressorAngle', 'lift', 'contact']) assert.ok(Math.abs(before[key] - after[key]) < .005);
+    }
+    const touch = arenaTechniqueTargets(round, window.contactAt, { x: 500, y: 416 });
+    assert.ok(touch.contact > .999 && touch.reactionProgress === 0);
+    assert.ok(arenaTechniqueTargets(round, window.contactAt + 16, { x: 500, y: 416 }).reactionProgress > 0);
   }
 });
 

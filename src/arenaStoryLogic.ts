@@ -1,6 +1,7 @@
 import { arenaAction, arenaBeat, arenaCatchTargets, arenaChargeState, arenaDoubleShoveTargets, arenaEdgeTargets, arenaRamTargets, arenaShoveTargets, arenaSpinTargets, arenaTechniqueTargets, type ArenaRound } from './arenaLogic';
 import { arenaPairRushTargets } from './arenaPairRush';
 import { arenaEscapeTargets } from './arenaEscape';
+import { arenaRecoveryTargets } from './arenaRecovery';
 
 export type ArenaStoryState = {
   kind: string;
@@ -19,6 +20,8 @@ export type ArenaStoryState = {
 
 /** The same beat drives the bodies and the explanation of their relationship. */
 export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryState {
+  const recovery = arenaRecoveryTargets(round, elapsed, { x: 500, y: 416 });
+  if (recovery?.active) return { kind: 'recovery', label: '던져졌지만 살아남았다!', action: recovery.stage === 'approach' || recovery.stage === 'lift' ? '허리를 잡아 들어 올립니다. 붙잡힌 선수는 몸을 접고 착지를 준비합니다.' : recovery.stage === 'somersault' ? '손이 풀린 순간 공중에서 한 바퀴 돕니다! 경계 안쪽 모래를 향해 발을 내립니다.' : '두 발로 모래판 안에 착지했습니다! 장외를 피하고 바로 다시 자세를 잡습니다.', left: [round.aggressor], right: [round.victim], relation: '↶', relationLabel: '공중 회전 · 장외 회피', leftLabel: '던진 선수', rightLabel: '착지해 살아남은 선수', steps: ['몸통 잡기', '들기', '공중 한 바퀴', '두 발 착지', '계속 난투'], step: ['approach', 'lift', 'somersault', 'land', 'release'].indexOf(recovery.stage) };
   if (round.escape && elapsed >= round.escape.start && elapsed < (round.escape.releasedUntil ?? round.escape.end)) {
     const escape = arenaEscapeTargets(round, elapsed, { x: 500, y: 416 })!;
     const stages = ['approach', 'grip', 'break', 'flee', 'chase', 'rejoin'];
@@ -49,10 +52,10 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
       state.step = rush.stage === 'wrestle' ? 0 : rush.stage === 'charge' || rush.stage === 'contact' ? 1 : rush.stage === 'rebound' || rush.stage === 'groggy' ? 2 : rush.stage === 'grip' ? 3 : rush.stage === 'lift' || rush.stage === 'overhead' ? 4 : 5;
       state.action = ['두 선수가 맞잡고 싸웁니다. 뒤의 선수가 틈을 노립니다.', '뒤에서 속도를 붙여 두 사람에게 어깨로 부딪칩니다!', '둘이 버텼습니다! 돌진한 선수가 튕겨 나가 쓰러집니다.', '팔을 만세 자세로 폅니다. 한 명은 두 손끝을, 다른 한 명은 두 발끝을 잡았습니다.', '손끝과 발끝을 잡은 채 둘이 머리 위로 높이 들어 올립니다!', '함께 힘을 실어 던집니다. 붙잡힌 선수만 장외로 날아갑니다.'][state.step];
     } else {
-      state.label = '돌진 성공 · 두 명 장외'; state.relationLabel = '맞잡은 둘을 함께 밀어내기';
-      state.steps = ['둘이 힘겨루기', '세 번째 선수 돌진', '어깨 정면 충돌', '맞잡은 둘이 장외'];
-      state.step = rush.stage === 'wrestle' ? 0 : rush.stage === 'charge' ? 1 : rush.stage === 'contact' ? 2 : 3;
-      state.action = ['두 선수가 가장자리에서 맞잡고 버팁니다.', '옆의 선수가 빈틈을 향해 달려듭니다.', '어깨가 부딪쳤습니다! 맞잡은 두 사람의 발이 함께 밀립니다.', '두 사람만 경계를 넘고 돌진한 선수는 모래판 안에 남습니다.'][state.step];
+      state.label = '돌진 성공 · 두 명 장외'; state.relationLabel = '아래에서 퍼올려 함께 던지기';
+      state.steps = ['둘이 힘겨루기', '세 번째 선수 돌진', '어깨 정면 충돌', '양팔로 퍼올리기', '둘을 장외로 던지기'];
+      state.step = rush.stage === 'wrestle' ? 0 : rush.stage === 'charge' ? 1 : rush.stage === 'contact' ? 2 : rush.stage === 'scoop' ? 3 : 4;
+      state.action = ['두 선수가 가장자리에서 맞잡고 버팁니다.', '옆의 선수가 빈틈을 향해 속도를 붙여 달려듭니다.', '어깨가 부딪쳤습니다! 두 사람의 중심이 함께 무너집니다.', '양팔을 아래에서 위로 올립니다! 두 사람의 발이 모래판을 떠납니다.', '팔을 뻗어 둘을 날립니다! 돌진한 선수는 모래판 안에 남습니다.'][state.step];
     }
     return state;
   }

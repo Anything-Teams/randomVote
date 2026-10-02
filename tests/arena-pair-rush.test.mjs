@@ -11,6 +11,12 @@ const { createArenaFighterAnimation, sampleArenaFighterContacts } = await source
 const base = { id: 'rush', index: 0, tactic: 'double-shove', start: 0, impact: 8000, resolve: 9100, end: 10000, final: false };
 const round = (roll, side = 1, impact = 8000) => ({ ...base, ...arenaPairRushCast(['winner', 'second', 'third', 'last'], roll), contactSide: side, impact });
 const frameAt = (actual, phase, center = { x: 500, y: 416 }) => arenaPairRushTargets(actual, actual.start + (actual.impact - actual.start) * phase, center);
+const frameAtBeat = (actual, beat, center = { x: 500, y: 416 }, origin) => {
+  const opening = arenaPairRushTargets(actual, actual.start, center, origin), span = actual.impact - actual.start;
+  const contactPhase = (opening.contactAt - actual.start) / span;
+  const phase = beat < .44 ? beat / .44 * contactPhase : contactPhase + (1 - contactPhase) * (beat - .44) / .56;
+  return arenaPairRushTargets(actual, actual.start + span * phase, center, origin);
+};
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
 test('an independent ten-way rush story roll has exactly three double exits and seven counters', () => {
@@ -41,12 +47,12 @@ test('either story branch uses distinct living actors and consumes only the alre
 
 test('a failed rush rebounds, pauses groggy, and is grabbed at both ends before the shared throw', () => {
   for (const side of [-1, 1]) {
-    const actual = round(7, side), contact = frameAt(actual, .43), rebound = frameAt(actual, .52), groggy = frameAt(actual, .58), grabbed = frameAt(actual, .73), raised = frameAt(actual, .93), tossed = frameAt(actual, .98), release = frameAt(actual, 1);
+    const actual = round(7, side), contact = frameAtBeat(actual, .44), rebound = frameAtBeat(actual, .52), groggy = frameAtBeat(actual, .58), grabbed = frameAtBeat(actual, .73), raised = frameAtBeat(actual, .93), tossed = frameAtBeat(actual, .98), release = frameAtBeat(actual, 1);
     assert.ok(side * (rebound.victim.x - contact.victim.x) < -15, 'the rushing third fighter visibly bounces back');
     assert.equal(groggy.stage, 'groggy');
     assert.equal(groggy.victimPose, 'stunned');
     assert.ok(Math.abs(groggy.victimAngle) > 1.2, 'the groggy charger falls onto the sand instead of standing hunched over');
-    const lying = frameAt(actual, .61);
+    const lying = frameAtBeat(actual, .61);
     assert.ok(Math.abs(lying.victimAngle) > Math.PI * .46 && lying.lift === 0, 'the pair approaches a visibly prone body before their first grip');
     assert.equal(groggy.lift, 0, 'the victim cannot float before the pair holds them');
     assert.equal(grabbed.grip, 'arms-legs');
@@ -63,21 +69,26 @@ test('a failed rush rebounds, pauses groggy, and is grabbed at both ends before 
     assert.equal(tossed.grip, 'arms-legs', 'both holds stay connected through the pushing stroke');
     assert.equal(release.grip, undefined);
     assert.equal(release.chargerId, actual.victim);
-    assert.deepEqual(frameAt(actual, .58), groggy, 'pause and direct seek produce the same groggy beat');
+    assert.deepEqual(frameAtBeat(actual, .58), groggy, 'pause and direct seek produce the same groggy beat');
   }
 });
 
-test('a successful rush moves only the locked pair to the edge while the charger remains inside', () => {
+test('a successful collision scoops both wrestlers off the floor at the encounter instead of pushing to the rim', () => {
   for (const side of [-1, 1]) {
     const actual = round(0, side), center = { x: side > 0 ? 650 : 350, y: 420 };
-    const opening = frameAt(actual, .1, center), pushed = frameAt(actual, .98, center);
+    const opening = frameAtBeat(actual, .1, center), raised = frameAt(actual, .98, center);
     assert.equal(opening.grip, 'pair');
-    assert.deepEqual(pushed.pairIds, [actual.victim, actual.helper]);
-    assert.equal(pushed.chargerId, actual.aggressor);
-    for (const actor of ['victim', 'helper']) assert.ok(side * (pushed[actor].x - opening[actor].x) > 60);
+    assert.deepEqual(raised.pairIds, [actual.victim, actual.helper]);
+    assert.equal(raised.chargerId, actual.aggressor);
+    for (const actor of ['victim', 'helper']) assert.ok(side * (raised[actor].x - opening[actor].x) < 25, 'the bodies rise near the collision instead of sliding across the arena');
     const ellipse = point => ((point.x - 500) / 303) ** 2 + ((point.y - 416) / 112) ** 2;
-    assert.ok(ellipse(pushed.aggressor) < 1, 'the pushing third fighter does not join the double elimination');
-    assert.ok(ellipse(pushed.victim) > .95 && ellipse(pushed.helper) > .95);
+    assert.ok(ellipse(raised.aggressor) < 1, 'the throwing third fighter does not join the double elimination');
+    assert.equal(raised.chargerPose, 'scoop');
+    assert.ok(raised.scoopStroke > .99 && raised.victimLift > 60 && raised.helperLift > 50);
+    assert.equal(raised.victimPose, 'airborne');
+    assert.equal(raised.helperPose, 'airborne');
+    assert.notEqual(raised.victimLift, raised.helperLift, 'the two bodies have separate raised trajectories');
+    assert.notEqual(raised.victimAngle, raised.helperAngle);
   }
 });
 
@@ -101,11 +112,11 @@ test('both rush outcomes keep bounded continuous movement without returning to a
 test('both holders keep both painted hand and toe endpoints attached from the floor to the overhead throw', () => {
   const fighter = (id, index, values) => ({ candidate: { id, name: id, color: '#dd784c' }, index, x: 500, y: 416, scale: 2.04, facing: 1, pose: 'brace', angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...values });
   for (const side of [-1, 1]) for (const phase of [.62, .66, .70, .74, .78, .80, .82, .84, .86, .93, .96, .99]) {
-    const actual = round(7, side), frame = frameAt(actual, phase), clock = phase * actual.impact;
+    const actual = round(7, side), frame = frameAtBeat(actual, phase), clock = actual.start + frame.phase * (actual.impact - actual.start);
     const victim = fighter(actual.victim, 2, { ...frame.victim, y: frame.victim.y - frame.lift, depthY: frame.victim.y, facing: -side, phase, pose: frame.victimPose, angle: frame.victimAngle, suspension: frame.victimSuspension, carryStretch: frame.victimCarryStretch });
     const body = sampleArenaFighterContacts(victim, clock);
     for (const [id, points, position, facing, index] of [[actual.aggressor, body.hands, frame.aggressor, -side, 0], [actual.helper, body.feet, frame.helper, side, 1]]) {
-      const holder = fighter(id, index, { ...position, facing, phase, pose: frame.carrierPose, overheadRaise: frame.overhead, gripTarget: points[0], secondaryGripTarget: points[1], gripStrength: 1, gripLocked: true });
+      const holder = fighter(id, index, { ...position, facing, phase, pose: frame.carrierPose, overheadRaise: frame.overhead, carrierDrive: frame.carrierDrive, gripTarget: points[0], secondaryGripTarget: points[1], gripStrength: 1, gripLocked: true });
       const contact = sampleArenaFighterContacts(holder, clock);
       for (let hand = 0; hand < 2; hand++) assert.ok(distance(contact.hands[1 - hand], points[hand]) < .01, `${side}/${phase}/${id}/${hand}: each painted hand must hold its actual fingertip or toe`);
       if (frame.stage === 'overhead') assert.ok(body.waist.y < contact.head.y, 'the held body reaches above the carrier’s head before the throw');
@@ -120,7 +131,7 @@ test('the third fighter runs from farther behind and the collision pulse follows
     const charger = roll < 3 ? 'aggressor' : 'victim';
     assert.ok(distance(opening[charger], contact[charger]) > 145, 'the rushing third fighter has a visible runway rather than a tiny step');
     assert.equal(opening.impactStrength, 0);
-    const hit = arenaPairRushTargets(actual, opening.contactAt + 180, center);
+    const hit = arenaPairRushTargets(actual, opening.contactAt + 45, center);
     assert.ok(hit.impactStrength > .8, 'the collision has one strong readable impulse after actual arrival');
     if (roll < 3) {
       assert.ok(Math.abs(hit.victimRecoil) > .15 && Math.abs(hit.helperRecoil) > .10);
@@ -140,7 +151,7 @@ test('the third fighter runs from farther behind and the collision pulse follows
 test('a runner faces its real approach from either side, diagonally or vertically', () => {
   const center = { x: 500, y: 416 };
   for (const roll of [0, 7]) for (const side of [-1, 1]) {
-    const actual = round(roll, side, 10000), contact = { x: center.x - side * (roll < 3 ? 75 : 53), y: center.y + 5 };
+    const actual = round(roll, side, 10000), contact = { x: center.x - side * (roll < 3 ? 36 : 53), y: center.y + 5 };
     const charger = roll < 3 ? 'aggressor' : 'victim';
     for (const offset of [{ x: -230, y: 0 }, { x: 230, y: 0 }, { x: -180, y: 65 }, { x: 180, y: -65 }, { x: 0, y: -90 }, { x: 0, y: 90 }]) {
       const origin = { x: contact.x + offset.x, y: contact.y + offset.y };
@@ -176,4 +187,61 @@ test('a blocked diagonal or vertical rush recoils back along its path and stays 
     assert.ok(distance(grabbed.victim, held.victim) < 1e-8, 'only the overhead lift changes height while the base stays in place');
     assert.equal(held.lift, 142, 'the shared overhead height is preserved for every arrival direction');
   }
+});
+
+test('a charge keeps its running speed into the hit and never reverses a nearby starting position', () => {
+  const center = { x: 500, y: 416 };
+  for (const roll of [0, 7]) for (const side of [-1, 1]) {
+    const actual = round(roll, side), charger = roll < 3 ? 'aggressor' : 'victim';
+    const contact = { x: center.x - side * (roll < 3 ? 36 : 53), y: center.y + 5 };
+    for (const offset of [{ x: -180, y: 50 }, { x: 180, y: -50 }, { x: 0, y: -80 }, { x: -3, y: 2 }, { x: 0, y: 0 }]) {
+      const origin = { x: contact.x + offset.x, y: contact.y + offset.y }, opening = arenaPairRushTargets(actual, 0, center, origin);
+      const before = arenaPairRushTargets(actual, opening.contactAt - 50, center, origin), next = arenaPairRushTargets(actual, opening.contactAt - 25, center, origin), hit = arenaPairRushTargets(actual, opening.contactAt, center, origin);
+      const earlierSpeed = distance(before[charger], next[charger]) / .025, arrivingSpeed = distance(next[charger], hit[charger]) / .025;
+      assert.ok(Math.abs(arrivingSpeed - earlierSpeed) < .01, 'the final steps do not ease down to a stop before collision');
+      assert.ok(arrivingSpeed < 165);
+      if (distance(origin, contact) > 60) assert.ok(arrivingSpeed > 150, 'a clear runway produces a committed fast charge');
+      assert.deepEqual(opening[charger], origin, 'a short runway never sends the runner back to invent more distance');
+      assert.ok(opening.contactAt < actual.impact * .40, 'the charge reaches contact without the old fixed forty-two percent delay');
+      assert.equal(hit.impactStrength, 1, 'the collision pulse starts on the exact arrival frame');
+    }
+  }
+});
+
+test('a failed charge is groggy on the arrival frame and begins falling in the very next frame', () => {
+  for (const side of [-1, 1]) {
+    const actual = round(7, side), center = { x: 500, y: 416 }, opening = frameAt(actual, 0, center);
+    const before = arenaPairRushTargets(actual, opening.contactAt - .001, center), hit = arenaPairRushTargets(actual, opening.contactAt, center), after = arenaPairRushTargets(actual, opening.contactAt + 16, center);
+    assert.equal(before.stage, 'charge');
+    assert.equal(before.victimPose, undefined);
+    assert.equal(hit.stage, 'groggy');
+    assert.equal(hit.victimPose, 'stunned');
+    assert.equal(hit.groggy, 1, 'there is no waiting-for-next-story-phase groggy delay');
+    assert.equal(hit.impactStrength, 1);
+    assert.ok(Math.abs(after.victimAngle) > Math.abs(hit.victimAngle), 'the fall starts during the next rendered frame');
+    assert.ok(after.rebound > 0, 'physical backward recoil starts with the same collision');
+    assert.ok(distance(hit.victim, after.victim) < 2, 'the reaction begins continuously rather than snapping onto the floor');
+    const held = frameAtBeat(actual, .93, center), last = frameAtBeat(actual, .998, center), release = frameAtBeat(actual, 1, center);
+    assert.equal(held.lift, 142);
+    assert.equal(held.carrierDrive, 1);
+    assert.ok(side * (release.victim.x - last.victim.x) > .8, 'the shared toss keeps forward drive through release instead of braking first');
+  }
+});
+
+test('the scoop visibly leaves both feet here before the final two-body release', () => {
+  const actual = round(0), center = { x: 650, y: 420 }, opening = frameAt(actual, 0, center);
+  const at = progress => arenaPairRushTargets(actual, opening.contactAt + (actual.impact - opening.contactAt) * progress, center);
+  const hit = at(0), gathering = at(.20), rising = at(.50), raised = at(.78), last = at(.999), release = at(1);
+  assert.equal(hit.victimLift, 0);
+  assert.equal(hit.helperLift, 0);
+  assert.equal(gathering.stage, 'scoop');
+  assert.ok(gathering.scoopStroke > 0 && gathering.victimLift === 0, 'the underarm gathering stroke precedes lifting the pair');
+  assert.ok(rising.victimLift > 25 && rising.helperLift > 20, 'both bodies lift in the collision area');
+  assert.equal(raised.victimLift, 62);
+  assert.equal(raised.helperLift, 54);
+  assert.ok(Math.abs(raised.victim.x - hit.victim.x) < .01 && Math.abs(raised.helper.x - hit.helper.x) < .01, 'the held rise does not drag the two bodies across the ground');
+  assert.equal(raised.grip, undefined, 'the wrestlers let go of their old mutual grip when scooped');
+  assert.equal(release.stage, 'release');
+  for (const id of ['victim', 'helper']) assert.ok(release[id].x > last[id].x, 'both upward throws retain forward motion at release');
+  assert.ok(distance(release.aggressor, center) < 20, 'the charger completes the scoop near the pair rather than following them to the rim');
 });

@@ -5,9 +5,17 @@ export type ArenaFinalTechnique = typeof arenaFinalTechniques[number];
 /** The renderer anchors both wrists, then lays the body outward from them. */
 export type ArenaArmSpinFrame = { orbit: number; flatness: number; weight: number };
 export const isArenaFinalTechnique = (round: ArenaRound): boolean => arenaFinalTechniques.includes(round.tactic as ArenaFinalTechnique);
+/** A single quick jump keeps the airborne kick independent of the bout's introduction. */
+export function arenaSidekickWindow(round: ArenaRound) {
+  const span = Math.max(1, round.impact - round.start), unit = Math.min(1, round.timeScale ?? 1);
+  const duration = Math.min(650 * Math.max(.001, unit), span * .68);
+  const start = round.impact - duration;
+  return { start, end: round.impact, contactAt: start + duration * .50, duration };
+}
 /** Physical recoil starts at the sole's first full contact, before the ranking reveal. */
 export function arenaTechniqueReactionAt(round: ArenaRound): number {
-  const fraction = round.tactic === 'trip' ? .80 : round.tactic === 'sidekick' ? .82 : 1;
+  if (round.tactic === 'sidekick') return arenaSidekickWindow(round).contactAt;
+  const fraction = round.tactic === 'trip' ? .80 : 1;
   return round.start + (round.impact - round.start) * fraction;
 }
 const clamp = (p: number) => Math.max(0, Math.min(1, p));
@@ -39,6 +47,8 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     elbowImpact: 0,
     kickReactionAt: arenaTechniqueReactionAt(round),
     reactionProgress: 0,
+    frontKick: undefined as number | undefined,
+    exitDirection: side,
   };
   if (phase < .30) return frame;
   if (round.tactic === 'armspin') {
@@ -62,18 +72,22 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     frame.stage = phase < .30 ? frame.stage : phase < .44 ? 'wrist' : elapsed < round.impact ? 'pivot' : 'release';
   } else if (round.tactic === 'trip') {
     const hook = ease((phase - .40) / .08), fall = ease((phase - .54) / .10);
-    const step = ease((phase - .64) / .08), kick = ease((phase - .72) / .08), recoil = ease((phase - .80) / .20);
+    const step = ease((phase - .64) / .08), frontKick = clamp((phase - .72) / (.08 / .62)), recoil = ease((phase - .80) / .20);
+    // Fold the knee before extending the shin. Full extension and the first
+    // roll share the exact .62 point of this one forward-kick stroke.
+    const kick = ease((frontKick - .40) / .22) * (1 - ease((frontKick - .62) / .16));
+    frame.frontKick = phase >= .72 ? frontKick : undefined;
     frame.aggressor.x = center.x - side * (24 - hook * 6 - step * 4);
     frame.victim.x = center.x + side * (24 + recoil * 12);
     // The first full sole contact launches the roll. Withdraw promptly so the
     // kicker does not chase the departing body with an attached foot.
-    frame.contact = phase < .54 ? hook * (1 - ease((phase - .51) / .03)) : kick * (1 - ease((phase - .80) / .025));
+    frame.contact = phase < .54 ? hook * (1 - ease((phase - .51) / .03)) : kick;
     frame.reactionProgress = recoil;
     frame.victimAngle = side * Math.PI * (.47 * fall + .08 * recoil);
     frame.victimSuspension = phase >= .54 && phase < .58 ? 1 - ease((phase - .54) / .04) : 0;
     frame.victimPose = phase >= .80 ? 'roll' : phase >= .54 ? 'stunned' : undefined;
     frame.grip = phase >= .30 && phase < .54 ? 'waist' : undefined;
-    frame.stage = phase < .40 ? 'grip' : phase < .54 ? 'hook' : phase < .64 ? 'fall' : phase < .72 ? 'stunned' : phase < .825 ? 'kick' : 'roll';
+    frame.stage = phase < .40 ? 'grip' : phase < .54 ? 'hook' : phase < .64 ? 'fall' : phase < .72 ? 'stunned' : frontKick < 1 ? 'kick' : 'roll';
   } else if (round.tactic === 'suplex') {
     const lift = ease((phase - .34) / .30), drop = clamp((phase - .76) / .12);
     const slam = drop ** 2, turn = ease((phase - .76) / .12);
@@ -85,6 +99,9 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     // accelerate straight down into the shoulder landing without a back arch.
     frame.lift = lift * 100 * (1 - slam);
     frame.victimAngle = side * Math.PI * .53 * turn;
+    // After this rotation the feet point to the other side of the body. The
+    // driver approaches those feet and pulls outward instead of across the head.
+    frame.exitDirection = -side as 1 | -1;
     frame.aggressorPose = phase >= .34 && phase < .88 ? 'overhead' : undefined;
     frame.aggressorOverheadRaise = lift * (1 - slam);
     frame.victimPose = phase >= .88 ? 'stunned' : phase >= .34 ? 'airborne' : undefined;
@@ -94,18 +111,19 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     frame.grip = phase >= .30 && phase < .76 ? 'waist' : undefined;
     frame.stage = phase < .34 ? 'grip' : phase < .64 ? 'lift' : phase < .76 ? 'overhead' : phase < .94 ? 'slam' : elapsed < round.impact ? 'stunned' : 'drag';
   } else if (round.tactic === 'sidekick') {
-    const jump = clamp((phase - .42) / .58), strike = ease((phase - .64) / .18), recoil = ease((phase - .82) / .18);
-    frame.aggressor.x = center.x - side * (24 - jump * 11 + recoil * 7);
+    const window = arenaSidekickWindow(round), jump = clamp((elapsed - window.start) / window.duration);
+    const strike = ease((jump - .22) / .28), recoil = ease((jump - .50) / .50);
+    frame.aggressor.x = center.x - side * (24 - ease(jump) * 11 + recoil * 7);
     frame.victim.x = center.x + side * (24 + recoil * 16);
     const arc = Math.sin(jump * Math.PI);
     frame.aggressorLift = arc * 26;
     frame.aggressorAngle = -side * arc * .24;
     frame.yaw = arc * .70;
-    frame.contact = strike * (1 - ease((phase - .82) / .025));
+    frame.contact = strike * (1 - ease((jump - .50) / .12));
     frame.reactionProgress = recoil;
     frame.lift = recoil * 14; frame.victimAngle = side * recoil * .32;
     frame.grip = undefined;
-    frame.stage = phase < .42 ? 'plant' : phase < .64 ? 'jump' : phase < .82 ? 'kick' : elapsed < round.impact ? 'impact' : 'release';
+    frame.stage = elapsed < window.start ? 'plant' : jump < .22 ? 'jump' : jump < .50 ? 'kick' : elapsed < round.impact ? 'impact' : 'release';
   } else if (round.tactic === 'elbow') {
     const close = ease((phase - .30) / .04);
     const raised = ease((phase - .30) / .15), descend = ease((phase - .55) / .12);

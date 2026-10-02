@@ -63,7 +63,7 @@ test('the vertical-axis turn makes one complete local orbit with reachable conta
         assert.ok(distance(before, bodies[key]) <= 165 * .016 + .001);
       }
       assert.ok(distance(bodies.defender, bodies.attacker) < 56, 'the held attacker cannot outrun the defender’s hands');
-      if (frame.turn > 0 && frame.turn < 1) signs.add(`${Math.sign(frame.attacker.x - frame.defender.x)},${Math.sign(frame.attacker.y - frame.defender.y)}`);
+      if (frame.turn > 0 && frame.turn < 1 && Math.abs(frame.attacker.x - frame.defender.x) > .001 && Math.abs(frame.attacker.y - frame.defender.y) > .001) signs.add(`${Math.sign(frame.attacker.x - frame.defender.x)},${Math.sign(frame.attacker.y - frame.defender.y)}`);
       prior = frame;
     }
     assert.equal(signs.size, 4, 'the body passes through all four quadrants around the defender');
@@ -73,6 +73,25 @@ test('the vertical-axis turn makes one complete local orbit with reachable conta
     assert.equal(flight.groundX, end.attacker.x);
     assert.equal(flight.groundY, end.attacker.y);
     assert.equal(flight.height, 42, 'release inherits the held height');
+  }
+});
+
+test('a completed spin keeps angular momentum and releases directly into flight without a contact hold', () => {
+  for (const span of [2068, 3450, 5000]) {
+    const bout = { ...round, impact: round.start + span }, center = { x: 500, y: 425 };
+    const at = time => arenaSpinTargets(bout, time, center);
+    const almost = at(bout.impact - 32), last = at(bout.impact - 16), end = at(bout.impact);
+    const previousVelocity = (last.angle - almost.angle) / 16, releaseVelocity = (end.angle - last.angle) / 16;
+    assert.ok(releaseVelocity > 0);
+    assert.ok(Math.abs(releaseVelocity - previousVelocity) < 1e-10, 'the final orbit is not eased down to a stop');
+    assert.ok(distance(end.attacker, last.attacker) > .6, 'the body is still travelling at the instant the hands release');
+    const preparation = { lift: 12, angle: -.22, immediate: true };
+    const landing = { x: 885, y: 436 }, released = arenaThrow(0, end.attacker, landing, 1, 1, preparation), next = arenaThrow(16, end.attacker, landing, 1, 1, preparation);
+    assert.equal(released.stage, 'flight'); assert.equal(released.groundX, end.attacker.x); assert.equal(released.groundY, end.attacker.y); assert.equal(released.height, preparation.lift);
+    assert.equal(next.stage, 'flight'); assert.ok(distance(released, next) > 1, 'the next frame immediately carries the released body outward');
+    const beforeLanding = arenaThrow(879.999, end.attacker, landing, 1, 1, preparation), landed = arenaThrow(880.001, end.attacker, landing, 1, 1, preparation);
+    assert.ok(distance(beforeLanding, landed) < .01); assert.ok(Math.abs(beforeLanding.angle - landed.angle) < .001);
+    assert.equal(arenaThrow(0, end.attacker, landing).stage, 'hold', 'ordinary stationary throws retain their readable contact beat');
   }
 });
 
