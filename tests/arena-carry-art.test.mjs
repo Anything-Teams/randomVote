@@ -10,6 +10,7 @@ const ctx = Object.fromEntries(['save', 'restore', 'translate', 'rotate', 'scale
 const fighter = overrides => ({ candidate: { id: 'fighter', name: '선수', color: '#ffad72' }, index: 1, x: 500, y: 416, depthY: 416, scale: 2.04, facing: -1, pose: 'carried', angle: Math.PI / 2, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, phase: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...overrides });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const parts = contacts => [contacts.head, contacts.waist, ...contacts.hands, ...contacts.feet];
+const overheadPlacement = (ends, facing) => ({ x: (ends[0].x + ends[1].x) / 2 - facing * Math.sin(17 * Math.PI / 180) * 23 * 2.04, y: (ends[0].y + ends[1].y) / 2 + (19.8 + Math.cos(17 * Math.PI / 180) * 23 + 2 + 26) * 2.04 });
 
 test('the carried body unfolds both arms beyond its head and straightens both complete legs', () => {
   for (const side of [-1, 1]) {
@@ -34,7 +35,7 @@ test('both helpers can hold the two actual wrists and the two actual ankles abov
     const victim = fighter({ index: 2, angle: side * Math.PI / 2, facing: -side, carryStretch: 1, y: 279, depthY: 421, suspension: 1 });
     const contacts = sampleArenaFighterContacts(victim, 2000);
     for (const [index, facing, ends, gripMode] of [[1, -side, contacts.hands, 'wrist'], [3, side, contacts.feet, 'ankle']]) {
-      const holder = fighter({ index, x: (ends[0].x + ends[1].x) / 2 - facing * 3.5 * 2.04, y: index === 1 ? 412 : 414, facing, pose: 'overhead', overheadRaise: 1, angle: 0, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
+      const holder = fighter({ index, ...overheadPlacement(ends, facing), facing, pose: 'overhead', overheadRaise: 1, angle: 0, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
       drawArenaFighter(ctx, holder, 2000);
       const held = holder.animation.contactPoints;
       assert.ok(distance(held.hands[0], ends[1]) < .001, 'the far hand actually holds the second limb');
@@ -42,6 +43,27 @@ test('both helpers can hold the two actual wrists and the two actual ankles abov
       assert.ok(held.hands.every(point => point.y < held.head.y), 'both actual holds are above the top of the carrier head');
       assert.ok(contacts.waist.y < held.head.y, 'the horizontal body is carried above each helper head');
       assert.ok(holder.animation.feet.every(foot => foot.lift === 0), 'the carrier cannot float to reach the held body');
+    }
+  }
+});
+
+test('the two overhead helpers lift with extended supported arms instead of folding one elbow across the head', () => {
+  for (const side of [-1, 1]) for (let index = 0; index < 10; index++) {
+    const victim = fighter({ index, angle: side * Math.PI / 2, facing: -side, carryStretch: 1, y: 279, depthY: 421, suspension: 1 });
+    const points = sampleArenaFighterContacts(victim, 2000);
+    for (const [facing, ends, gripMode] of [[-side, points.hands, 'wrist'], [side, points.feet, 'ankle']]) {
+      const body = fighter({ index: (index + 3) % 10, ...overheadPlacement(ends, facing), facing, pose: 'overhead', overheadRaise: 1, carrierDrive: 1, angle: 0, carryStretch: undefined, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
+      drawArenaFighter(ctx, body, 2000);
+      const contacts = body.animation.contactPoints;
+      for (let arm = 0; arm < 2; arm++) {
+        const elbow = contacts.elbows[arm], shoulder = contacts.shoulders[arm], hand = contacts.hands[arm];
+        const a = { x: shoulder.x - elbow.x, y: shoulder.y - elbow.y }, b = { x: hand.x - elbow.x, y: hand.y - elbow.y };
+        const angle = Math.acos(Math.max(-1, Math.min(1, (a.x * b.x + a.y * b.y) / (Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y))))) * 180 / Math.PI;
+        assert.ok(angle > 145, `the supported elbow stays nearly extended instead of overfolding: ${gripMode}, ${index}, ${angle}`);
+        assert.ok(distance(hand, ends[1 - arm]) < .001, 'straightening an arm cannot detach its actual limb hold');
+        assert.ok(Math.abs(distance(shoulder, elbow) - 14 * body.scale) < .001 && Math.abs(distance(elbow, hand) - 14 * body.scale) < .001, 'the extended arm remains two complete connected sections');
+      }
+      assert.ok(body.animation.feet.every(foot => foot.lift === 0), 'body load remains on the support soles while both arms lift');
     }
   }
 });
@@ -154,7 +176,7 @@ test('the shared throw keeps all four limb holds through body transfer and relea
     const victim = fighter({ index: 2, angle: side * Math.PI / 2, facing: -side, carryStretch: 1, y: 279, depthY: 421, suspension: 1 });
     const contacts = sampleArenaFighterContacts(victim, 2000);
     for (const [index, facing, ends, gripMode] of [[1, -side, contacts.hands, 'wrist'], [3, side, contacts.feet, 'ankle']]) {
-      const body = fighter({ index, x: (ends[0].x + ends[1].x) / 2 - facing * 3.5 * 2.04, y: index === 1 ? 412 : 414, facing, pose: 'overhead', overheadRaise: 1, carrierDrive, angle: 0, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
+      const body = fighter({ index, ...overheadPlacement(ends, facing), facing, pose: 'overhead', overheadRaise: 1, carrierDrive, angle: 0, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
       drawArenaFighter(ctx, body, 2000);
       const points = body.animation.contactPoints;
       assert.ok(distance(points.hands[0], ends[1]) < .001 && distance(points.hands[1], ends[0]) < .001, 'neither actual hand can detach from the held wrist or ankle during the weight transfer');
@@ -162,7 +184,7 @@ test('the shared throw keeps all four limb holds through body transfer and relea
       if (carrierDrive === 1) {
         const released = { ...body, gripTarget: undefined, secondaryGripTarget: undefined, gripStrength: 0, animation: createArenaFighterAnimation() };
         drawArenaFighter(ctx, released, 2016);
-        assert.ok(released.animation.motion.lean > 6 && released.animation.motion.hipX >= 2, 'each holder follows the released body through the chest and pelvis');
+        assert.ok(released.animation.motion.lean > body.animation.motion.lean + 6 && released.animation.motion.hipX >= 2, 'each holder follows the released body through the chest and pelvis');
         assert.ok(released.animation.feet.every(foot => foot.lift === 0), 'release continues through the support legs instead of levitating');
       }
     }

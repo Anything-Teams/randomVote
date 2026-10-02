@@ -9,8 +9,8 @@ export const isArenaFinalTechnique = (round: ArenaRound): boolean => arenaFinalT
 export function arenaSidekickWindow(round: ArenaRound) {
   const span = Math.max(1, round.impact - round.start), unit = Math.min(1, round.timeScale ?? 1);
   const duration = Math.min(650 * Math.max(.001, unit), span * .68);
-  const start = round.impact - duration;
-  return { start, end: round.impact, contactAt: start + duration * .50, duration };
+  const start = round.sidekickLaunchAt ?? round.start + Math.min(650 * Math.max(.001, unit), span * .30);
+  return { start, end: start + duration, contactAt: start + duration * .50, duration };
 }
 /** Physical recoil starts at the sole's first full contact, before the ranking reveal. */
 export function arenaTechniqueReactionAt(round: ArenaRound): number {
@@ -26,7 +26,7 @@ const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
 export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
   const phase = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
   const side = round.contactSide ?? (center.x < 500 ? -1 : 1);
-  const probe = Math.sin(clamp((phase - .08) / .20) * Math.PI);
+  const probe = round.tactic === 'sidekick' ? 0 : Math.sin(clamp((phase - .08) / .20) * Math.PI);
   const frame = {
     stage: phase < .08 ? 'approach' : phase < .20 ? 'probe' : phase < .30 ? 'reset' : 'grip', side, phase,
     aggressor: { x: center.x - side * (24 - probe * 7), y: center.y },
@@ -36,6 +36,7 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     contact: 0,
     spin: undefined as ArenaArmSpinFrame | undefined,
     victimSlam: undefined as { tuck: number; slump: number } | undefined,
+    victimFloorRig: undefined as { pose: 'stunned'; phase: number; angle: number; suspension: number } | undefined,
     slamImpact: 0,
     aggressorPose: undefined as 'overhead' | 'elbow' | 'drag' | 'throw' | undefined,
     aggressorOverheadRaise: 0,
@@ -50,7 +51,7 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     frontKick: undefined as number | undefined,
     exitDirection: side,
   };
-  if (phase < .30) return frame;
+  if (phase < .30 && round.tactic !== 'sidekick') return frame;
   if (round.tactic === 'armspin') {
     const progress = clamp((phase - .44) / .56), ramp = .24;
     // Integrate a short angular acceleration followed by a steady spin. A
@@ -123,20 +124,23 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     frame.reactionProgress = recoil;
     frame.lift = recoil * 14; frame.victimAngle = side * recoil * .32;
     frame.grip = undefined;
-    frame.stage = elapsed < window.start ? 'plant' : jump < .22 ? 'jump' : jump < .50 ? 'kick' : elapsed < round.impact ? 'impact' : 'release';
+    frame.stage = elapsed < window.start ? 'approach' : jump < .22 ? 'jump' : jump < .50 ? 'kick' : elapsed < window.end ? 'impact' : 'release';
   } else if (round.tactic === 'elbow') {
     const close = ease((phase - .30) / .04);
     const raised = ease((phase - .30) / .15), descend = ease((phase - .55) / .12);
-    const fall = ease((phase - .55) / .12), circle = ease((phase - .69) / .15), take = ease((phase - .84) / .12);
+    const fall = ease((phase - .55) / .12), circle = ease((phase - .69) / .15), take = ease((phase - .90) / .08);
     frame.aggressorLift = raised * 44 * (1 - descend);
     frame.aggressorSuspension = raised * (1 - descend);
-    frame.aggressor.x = center.x - side * mix(24, 12, close) + side * 82 * circle;
+    frame.aggressor.x = center.x - side * mix(24, 12, close) + side * 102 * circle;
     frame.aggressor.y = center.y + Math.sin(circle * Math.PI) * 18 + circle * 6;
     frame.aggressorFacing = phase >= .76 ? -side : side;
     frame.victim = { x: center.x + side * mix(24, 22, close), y: center.y };
     frame.victimAngle = -side * Math.PI * .47 * fall;
     frame.victimPose = phase >= .55 ? 'stunned' : undefined;
-    frame.victimSuspension = phase >= .84 ? take : phase >= .55 ? 1 - fall : 0;
+    // Raising a grounded ankle grip translates the existing fallen silhouette;
+    // it must not swap to a suspended pivot and slide the whole body to a hand.
+    frame.victimSuspension = phase >= .55 ? 1 - fall : 0;
+    if (phase >= .67) frame.victimFloorRig = { pose: 'stunned', phase: 1, angle: -side * Math.PI * .47, suspension: 0 };
     frame.victimGrip = phase >= .30 && phase < .55 ? 'waist' : undefined;
     frame.victimLift = raised * 44;
     frame.grip = phase >= .84 && elapsed < round.impact ? 'ankle' : undefined;
@@ -166,11 +170,17 @@ export function arenaTechniqueExit(round: ArenaRound, age: number, origin: Arena
       return { x: groundX, y: groundY - height, groundX, groundY, height, angle: preparation.angle + direction * Math.PI * 2 * ease(phase), yaw: 0, phase, stage: 'roll' };
     }
   } else if (round.tactic === 'suplex') {
-    const finish = Math.max(700, Math.min(2600, (round.resolve - round.impact) / Math.max(.001, unit) - 1400));
-    const rim = arenaSuplexRim(origin, direction);
-    if (ms < 300) return { ...origin, groundX: origin.x, groundY: origin.y, height: 0, angle: preparation.angle, phase: ms / 300, stage: 'stunned' };
+    const finish = Math.max(1100, Math.min(2600, (round.resolve - round.impact) / Math.max(.001, unit) - 1400));
+    const desired = arenaSuplexRim(origin, direction), ramp = .12;
+    // The held body and its driver share this integrated floor path. A far
+    // opposite rim must not demand a faster pull than the standing gait.
+    const distance = Math.hypot(desired.x - origin.x, desired.y - origin.y);
+    const reachable = 165 * (finish - 900) * Math.max(.001, unit) / 1000 * (1 - ramp);
+    const reach = distance ? Math.min(1, reachable / distance) : 1;
+    const rim = { x: origin.x + (desired.x - origin.x) * reach, y: origin.y + (desired.y - origin.y) * reach };
+    if (ms < 900) return { ...origin, groundX: origin.x, groundY: origin.y, height: 0, angle: preparation.angle, phase: ms / 900, stage: 'stunned' };
     if (ms < finish) {
-      const phase = clamp((ms - 300) / (finish - 300)), ramp = .12;
+      const phase = clamp((ms - 900) / (finish - 900));
       const cruise = (phase < ramp ? phase ** 2 / (2 * ramp) : phase > 1 - ramp ? 1 - ramp - (1 - phase) ** 2 / (2 * ramp) : phase - ramp / 2) / (1 - ramp);
       const groundX = mix(origin.x, rim.x, cruise), groundY = mix(origin.y, rim.y, cruise);
       return { x: groundX, y: groundY, groundX, groundY, height: 0, angle: preparation.angle, phase, stage: 'drag' };

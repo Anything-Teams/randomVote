@@ -12,14 +12,14 @@ export type ArenaPairRushFrame = {
   aggressor: ArenaPoint; helper: ArenaPoint; victim: ArenaPoint;
   chargerId: string; pairIds: [string, string];
   chargerFacing: 1 | -1; chargeDirection: ArenaPoint;
-  chargerPose?: 'scoop'; scoopFacing?: 1 | -1; scoopStroke: number;
+  chargerPose?: 'scoop' | 'push'; scoopFacing?: 1 | -1; scoopStroke: number; pushStroke: number;
   chargeStrength: number; pressure: number; rebound: number; groggy: number;
   contactAt: number; impactStrength: number; victimRecoil: number; helperRecoil: number;
   lift: number; victimAngle: number; victimSuspension: number;
   victimCarryStretch: number; overhead: number;
   victimLift: number; helperLift: number; helperAngle: number; helperSuspension: number;
   victimPose: 'brace' | 'bow' | 'stunned' | 'carried' | 'airborne' | undefined;
-  helperPose?: 'airborne'; carrierDrive: number;
+  helperPose?: 'airborne' | 'brace'; carrierDrive: number;
   grip: 'pair' | 'arms-legs' | undefined;
   carrierPose?: 'drag' | 'grapple' | 'overhead';
   armsHolderId?: string; legsHolderId?: string;
@@ -86,37 +86,36 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
     chargerId: outcome === 'double-out' ? round.aggressor : round.victim,
     pairIds: outcome === 'double-out' ? [round.victim, round.helper] : [round.aggressor, round.helper],
     chargerFacing, chargeDirection,
-    scoopStroke: 0,
+    scoopStroke: 0, pushStroke: 0,
     chargeStrength, pressure: 0, rebound: 0, groggy: 0, lift: 0,
     contactAt, impactStrength, victimRecoil: 0, helperRecoil: 0,
     victimCarryStretch: 0, overhead: 0, victimLift: 0, helperLift: 0, helperAngle: 0, helperSuspension: 0, carrierDrive: 0,
     victimAngle: 0, victimSuspension: 0, victimPose: undefined, grip: released ? undefined : 'pair',
   };
   if (outcome === 'double-out') {
-    const scoop = clamp(impactAge / Math.max(1, round.impact - contactAt));
-    const stroke = ease((scoop - .16) / .68), raised = ease((scoop - .28) / .44), launch = drive((scoop - .82) / .18);
-    const advance = ease(scoop / .48) * Math.min(24, Math.max(0, round.impact - contactAt) * .48 * 165 / 1500);
+    const progress = clamp(impactAge / Math.max(1, round.impact - contactAt));
+    const shove = drive((progress - .08) / .92), shock = ease(impactAge / (110 * unit));
     const victimY = center.y + 14, helperY = center.y - 14;
-    // The collision becomes an underarm scoop at the current encounter. The
-    // two wrestlers leave their footing here rather than sliding to the rim.
-    frame.victim = { x: center.x + side * (22 + launch * 18), y: victimY };
-    frame.helper = { x: center.x + side * (-22 + launch * 22), y: helperY };
-    frame.aggressor = { x: mix(origin.x, contact.x, approach) + side * advance, y: mix(origin.y, contact.y, approach) };
-    frame.chargerPose = impactAge >= 0 ? 'scoop' : undefined;
+    const rimAt = (y: number) => 500 + side * (303 * Math.sqrt(Math.max(0, 1 - ((y - 416) / 112) ** 2)) - 10);
+    const victimStart = center.x + side * 22, helperStart = center.x - side * 22;
+    // Shoulder contact breaks the pair's footing. The charger then drives
+    // through both bodies with planted steps, never lifting either wrestler.
+    frame.victim = { x: victimStart + side * shock * 8 + (rimAt(victimY) - victimStart - side * 8) * shove, y: victimY };
+    frame.helper = { x: helperStart + side * shock * 6 + (rimAt(helperY) - helperStart - side * 6) * shove, y: helperY };
+    const rearX = side > 0 ? Math.min(frame.victim.x, frame.helper.x) : Math.max(frame.victim.x, frame.helper.x);
+    frame.aggressor = { x: impactAge < 0 ? mix(origin.x, contact.x, approach) : rearX - side * 14, y: mix(origin.y, contact.y, approach) };
+    frame.chargerPose = impactAge >= 0 ? 'push' : undefined;
     frame.scoopFacing = side > 0 ? 1 : -1;
-    frame.scoopStroke = stroke;
-    frame.victimLift = raised * 62;
-    frame.helperLift = raised * 54;
-    frame.victimSuspension = raised;
-    frame.helperSuspension = raised;
-    frame.victimAngle = -side * (.20 * impactDeflect + .52 * raised + .16 * launch);
-    frame.helperAngle = -side * (.14 * impactDeflect + .43 * raised + .18 * launch);
-    frame.victimPose = raised > 0 ? 'airborne' : undefined;
-    frame.helperPose = raised > 0 ? 'airborne' : undefined;
-    frame.victimRecoil = -side * impactDeflect * .20;
-    frame.helperRecoil = -side * impactDeflect * .14;
+    frame.pushStroke = shove;
+    frame.pressure = shove;
+    frame.victimAngle = -side * (.42 * impactDeflect + .20 * ease(progress / .22));
+    frame.helperAngle = -side * (.32 * impactDeflect + .16 * ease(progress / .26));
+    frame.victimPose = impactAge >= 0 ? 'brace' : undefined;
+    frame.helperPose = impactAge >= 0 ? 'brace' : undefined;
+    frame.victimRecoil = -side * impactDeflect * .42;
+    frame.helperRecoil = -side * impactDeflect * .32;
     frame.grip = impactAge < 0 ? 'pair' : undefined;
-    frame.stage = released ? 'release' : phase < preparation ? 'wrestle' : phase < contactPhase ? 'charge' : scoop < .16 ? 'contact' : scoop < .82 ? 'scoop' : 'toss';
+    frame.stage = released ? 'release' : phase < preparation ? 'wrestle' : phase < contactPhase ? 'charge' : progress < .08 ? 'contact' : 'push';
     return frame;
   }
   const rebound = ease((beat - .44) / .06), fallen = ease((beat - .44) / .13), arrive = ease((beat - .44) / .24);
@@ -137,6 +136,14 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   const carrierShiftY = fallenPoint.y - contact.y;
   frame.aggressor = { x: mix(center.x + side * 22, carriedX + side * (mix(24, 121, stretch) + lifted * 29.54), arrive), y: center.y + mix(14, mix(10, -4, lifted) + carrierShiftY, arrive) };
   frame.helper = { x: mix(center.x - side * 22, carriedX - side * (mix(85, 89, stretch) - lifted * 67.54), arrive), y: center.y + mix(-14, mix(6, -2, lifted) + carrierShiftY, arrive) };
+  // Follow the painted wrists/ankles from the prone grip into the raised
+  // body. At the peak both shoulders sit beneath their endpoint midpoint,
+  // letting both human-length arms extend rather than folding one elbow.
+  const lowCarry = stretch * (1 - lifted);
+  frame.aggressor.x -= side * 20 * lowCarry;
+  frame.aggressor.y += 4 * lowCarry + 6 * lifted;
+  frame.helper.x += side * 18 * lowCarry;
+  frame.helper.y += 8 * lowCarry + 4 * lifted;
   frame.rebound = rebound;
   frame.groggy = impactAge >= 0 ? 1 - stretch : 0;
   frame.lift = lifted * 142;

@@ -19,34 +19,38 @@ test('a failed throw completes one airborne somersault and lands feet first insi
   for (const side of [-1, 1]) for (const center of [{ x: 500, y: 416 }, { x: 320, y: 390 }, { x: 680, y: 445 }]) {
     const round = { ...base, contactSide: side }, at = age => arenaRecoveryTargets(round, age, center);
     assert.equal(at(-1).active, false); assert.equal(at(0).active, true); assert.equal(at(3100).active, false);
-    const lifting = at(1650), release = at(1850), midair = at(2200), landed = at(2550), recovered = at(2800);
+    const lifting = at(1650), release = at(1850), midair = at(2300), landed = at(2750), recovered = at(3000);
     assert.equal(lifting.stage, 'lift'); assert.equal(lifting.grip, true); assert.ok(lifting.height > 0 && lifting.height < 42);
     assert.equal(release.stage, 'somersault'); assert.equal(release.grip, false); assert.equal(release.height, 42); assert.ok(Math.abs(release.angle) === 0);
-    assert.equal(midair.airborne, true); assert.ok(midair.height > 70 && Math.abs(midair.angle) > 3, 'the body turns while clearly airborne');
+    assert.equal(midair.airborne, true); assert.ok(midair.height > 170 && midair.height < 190 && Math.abs(midair.angle) > 3, 'the full somersault has a tall readable apex');
     assert.equal(landed.stage, 'land'); assert.equal(landed.airborne, false); assert.equal(landed.height, 0);
     assert.ok(Math.abs(landed.angle - side * Math.PI * 2) < 1e-10, 'exactly one full rotation reaches the landing');
     assert.equal(recovered.stage, 'release'); assert.equal(recovered.height, 0); assert.equal(recovered.grip, false);
     assert.deepEqual(landed.receiver, recovered.receiver, 'the feet land at the same point instead of snapping to a home');
+    assert.ok(distance(release.receiver, landed.receiver) >= 140 && distance(release.receiver, landed.receiver) <= 170, 'the failed throw carries far across the sand');
     assert.ok(sandRadius(landed.receiver) < .92, 'the cosmetic escape throw never sends a survivor over the rim');
     const body = { candidate: { id: 'receiver', name: '선수', color: '#ffad72' }, index: 1, x: landed.receiver.x, y: landed.receiver.y, depthY: landed.receiver.y, scale: 2.04, facing: -side, pose: 'land', angle: landed.angle, suspension: 0, phase: landed.landingPhase, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, motionImmediate: true };
-    const contacts = sampleArenaFighterContacts(body, 2550);
+    const contacts = sampleArenaFighterContacts(body, 2750);
     assert.ok(contacts.feet.every(foot => sandRadius(foot) < 1), 'both painted foot endpoints remain inside the arena after the somersault');
     assert.ok(contacts.feet.every(foot => Math.abs(foot.y - (body.y - 2 * body.scale)) < .5), 'the completed rotation plants both soles within a quarter local pixel of their projected ground');
     let previous = release;
-    for (let elapsed = 1866; elapsed < 2550; elapsed += 16) {
+    const trajectory = { x: landed.receiver.x - release.receiver.x, y: landed.receiver.y - release.receiver.y };
+    for (let elapsed = 1866; elapsed < 2750; elapsed += 16) {
       const current = at(elapsed);
-      assert.ok(side * (current.angle - previous.angle) > 0, 'the rotation cannot reverse or pause midair');
-      assert.ok(side * (current.receiver.x - previous.receiver.x) >= -1e-8);
+      assert.ok(side * (current.angle - previous.angle) >= -1e-8, 'the somersault cannot reverse before the feet are straightened');
+      assert.ok((current.receiver.x - previous.receiver.x) * trajectory.x + (current.receiver.y - previous.receiver.y) * trajectory.y >= -1e-8);
       assert.ok(sandRadius(current.receiver) < 1);
       previous = current;
     }
+    const early = at(1850 + 900 * .25), late = at(1850 + 900 * .75);
+    assert.ok(Math.abs(late.angle - early.angle) > Math.PI * 1.6, 'most of the complete rotation happens high around the apex');
   }
 });
 
 test('recovery geometry is continuous at lift, flight, landing and release boundaries at every clock scale', () => {
   for (const unit of [.4, .8, 1, 1.4]) for (const side of [-1, 1]) for (const center of [{ x: 500, y: 416 }, { x: 320, y: 390 }, { x: 680, y: 445 }]) {
     const round = { ...base, contactSide: side, timeScale: unit, start: ARENA_RECOVERY_DURATION * unit, recovery: { start: 0, end: ARENA_RECOVERY_DURATION * unit } };
-    for (const boundary of [0, 1300, 1850, 2550, 2750, 3100]) {
+    for (const boundary of [0, 1300, 1850, 1850 + 900 * .08, 1850 + 900 * .84, 2750, 2950, 3100]) {
       const before = arenaRecoveryTargets(round, boundary * unit - .001, center), after = arenaRecoveryTargets(round, boundary * unit + .001, center);
       for (const key of ['thrower', 'receiver', 'returnCenter']) assert.ok(distance(before[key], after[key]) < .005, `${boundary}/${unit}/${key}: a label change cannot teleport a root`);
       for (const key of ['height', 'angle']) assert.ok(Math.abs(before[key] - after[key]) < .005, `${boundary}/${unit}/${key}: release inherits the held body`);

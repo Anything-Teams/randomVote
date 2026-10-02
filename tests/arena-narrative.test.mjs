@@ -7,6 +7,8 @@ async function source(path) {
 }
 const { arenaAction, arenaActionWords, arenaChargeTargets, arenaDoubleShoveTargets, arenaEliminatedIds, arenaInsidePoint, arenaMove, arenaNarration, arenaRanks, arenaRounds, arenaTechniqueExit } = await source('src/arenaLogic.ts');
 const { arenaStoryState } = await source('src/arenaStoryLogic.ts');
+const { arenaAnklePickup } = await source('src/arenaPickup.ts');
+const { createArenaFighterAnimation, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const base = { id: 'alliance', index: 2, tactic: 'betrayal', aggressor: 'receiver', victim: 'loser', helper: 'other', start: 1000, impact: 6000, resolve: 7100, end: 7550, final: false };
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const radius = point => Math.hypot((point.x - 500) / 303, (point.y - 416) / 112);
@@ -71,7 +73,7 @@ test('an occasional rush keeps its exact three-to-seven branch ratio and consume
     const rounds = arenaRounds(order, 44000, roll); let previousEnd = 0;
     if (!roll && rounds.some(round => round.rushOutcome)) rushGames++;
     for (const round of rounds) {
-      assert.equal(round.start, previousEnd); previousEnd = round.end;
+      assert.equal(round.rim?.start ?? round.start, previousEnd); previousEnd = round.end;
       assert.ok(living.has(round.aggressor));
       if (round.tactic === 'betrayal') { seen.add(round.counterSide); seen.add(round.counterFailed ? 'failed' : 'succeeded'); }
       const exits = arenaEliminatedIds(round);
@@ -146,20 +148,28 @@ test('short head words follow the actual wrist pivot, fall, floor roll and ankle
 
 test('a suplex pull uses reachable live ground speed and the driver stops inside when only the victim is tossed', () => {
   const round = { ...base, tactic: 'suplex', start: 33200, impact: 35300, resolve: 39300, end: 44000, final: true };
-  for (const center of [360, 500, 640]) {
-    const side = center < 500 ? -1 : 1, origin = { x: center - side * 54, y: 428 }, landing = { x: side > 0 ? 885 : 115, y: 436 };
-    const driver = { x: center - side * 22, y: 425, facing: -side }; let endGap = Infinity;
-    for (let age = 0; age <= 2600; age += 16) {
-      const flight = arenaTechniqueExit(round, age, origin, landing, side, 1, { lift: 0, angle: -side * .47 * Math.PI });
-      const target = arenaInsidePoint({ x: flight.groundX + side * 79.6, y: flight.groundY - 6 });
-      const before = { ...driver }; arenaMove(driver, target, .016, 165);
-      assert.ok(distance(driver, before) <= 2.641);
-      assert.ok(radius(driver) < .95, 'the pulling fighter remains inside during every live motor step');
-      endGap = distance(driver, target);
+  for (const center of [360, 500, 640]) for (const side of [-1, 1]) for (const unit of [.7, 1, 1.5]) {
+    const actual = { ...round, resolve: round.impact + 4100 * unit }, origin = { x: center - side * 4, y: 428 }, landing = { x: side > 0 ? 885 : 115, y: 436 }, angle = -side * .53 * Math.PI;
+    const driver = { x: center + side * 22, y: 425, facing: -side };
+    let previousFloor, endGap = Infinity, arrival = false;
+    for (let age = 0; age < 2600 * unit; age += 16) {
+      const flight = arenaTechniqueExit(actual, age, origin, landing, side, unit, { lift: 0, angle });
+      const victim = { candidate: { id: 'fallen', name: '선수', color: '#ffa977' }, index: 0, x: flight.groundX, y: flight.groundY, depthY: flight.groundY, scale: 2.04, facing: side, pose: 'stunned', angle, slamProgress: { tuck: 1, slump: 1 }, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, phase: 1, motionImmediate: true, animation: createArenaFighterAnimation() };
+      const toes = sampleArenaFighterContacts(victim, 7990).feet, pickup = arenaAnklePickup(victim, toes, side);
+      const target = arenaInsidePoint(pickup.holder), before = { ...driver };
+      if (flight.stage === 'stunned') arenaMove(driver, target, .016, 165);
+      else Object.assign(driver, target);
+      if (flight.stage === 'stunned' && distance(driver, target) < 1) arrival = true;
+      assert.ok(distance(driver, before) <= 2.641, `the actual toe grip cannot pull the standing driver faster than 165px/s (${center}/${side}/${unit})`);
+      if (previousFloor) assert.ok(distance(victim, previousFloor) <= 2.641, 'the held body follows the same reachable floor speed without a second lagging motor');
+      assert.ok(radius(driver) < .97, 'the pulling fighter remains inside during the shared ground path');
+      assert.equal(flight.height, 0, 'the opponent remains grounded throughout the pickup and pull');
+      endGap = distance(driver, target); previousFloor = { x: victim.x, y: victim.y };
     }
-    assert.ok(endGap < 1.5, 'the drag reaches its release contact before the rim toss begins');
-    const release = arenaTechniqueExit(round, 2600, origin, landing, side, 1, { lift: 0, angle: -side * .47 * Math.PI });
-    const leaving = arenaTechniqueExit(round, 3040, origin, landing, side, 1, { lift: 0, angle: -side * .47 * Math.PI });
+    assert.ok(arrival, 'the driver reaches the real foot ends during the 900ms pickup beat');
+    assert.ok(endGap < 1e-8, 'the shared drag path holds the actual toe contact without a second motor lag');
+    const release = arenaTechniqueExit(actual, 2600 * unit, origin, landing, side, unit, { lift: 0, angle });
+    const leaving = arenaTechniqueExit(actual, 3040 * unit, origin, landing, side, unit, { lift: 0, angle });
     assert.equal(release.stage, 'rim-toss'); assert.equal(release.height, 0);
     assert.ok(leaving.height > 30 && side * (leaving.x - release.x) > 50, 'only the released victim continues outward');
   }

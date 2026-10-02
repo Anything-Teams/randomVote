@@ -71,6 +71,26 @@ test('the thrower holds both real toe endpoints before releasing the stunned opp
   }
 });
 
+test('an elbow victim stays where it fell until its feet are held and the attacker approaches that ground rig', () => {
+  for (const side of [-1, 1]) {
+    const actual = { ...round, contactSide: side }, fallen = actors(actual, .70), nearFeet = actors(actual, .84), gripped = actors(actual, .899);
+    assert.deepEqual(nearFeet.frame.victim, fallen.frame.victim);
+    assert.deepEqual(gripped.frame.victim, fallen.frame.victim);
+    assert.equal(nearFeet.frame.lift, 0); assert.equal(gripped.frame.lift, 0, 'the body cannot float toward the hands before the feet are held');
+    assert.equal(nearFeet.frame.victimSuspension, 0); assert.equal(gripped.frame.victimSuspension, 0);
+    assert.deepEqual(fallen.frame.victimFloorRig, nearFeet.frame.victimFloorRig);
+    assert.deepEqual(fallen.frame.victimFloorRig, gripped.frame.victimFloorRig, 'an unconscious foot endpoint cannot drift while the attacker comes around');
+    assert.ok(side * (nearFeet.aggressor.x - fallen.aggressor.x) > 80, 'only the attacking fighter circles around to the foot ends');
+    const floorBody = { ...fallen.victim, ...fallen.frame.victimFloorRig }, frozen = sampleArenaFighterContacts(floorBody, fallen.clock);
+    const later = sampleArenaFighterContacts({ ...nearFeet.victim, ...nearFeet.frame.victimFloorRig }, nearFeet.clock);
+    assert.deepEqual(frozen.origin, later.origin);
+    frozen.feet.forEach((point, index) => assert.ok(distance(point, later.feet[index]) < .4, 'only subpixel breathing can move a grounded foot endpoint'));
+    assert.ok(distance(frozen.head, later.head) < .6, 'breathing cannot turn into a movement toward the approaching attacker');
+    assert.ok(side * (nearFeet.aggressor.x - (frozen.feet[0].x + frozen.feet[1].x) / 2) > 16, 'the attacker stands outside the foot ends instead of sharing the fallen torso');
+    assert.ok(actors(actual, .96).frame.lift > 20, 'the later grounded grip can still lift into its separate throwing stroke');
+  }
+});
+
 test('the elbow counter is a rare cosmetic branch and preserves every supplied result', () => {
   let order;
   for (let variant = 0; variant < 100 && !order; variant++) {

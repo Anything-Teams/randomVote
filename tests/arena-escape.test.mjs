@@ -41,7 +41,7 @@ test('escapes only occur with more than two survivors and never change the suppl
     assert.ok(rounds.filter(round => round.escape).length <= 2);
     if (rounds.filter(round => round.escape).length === 2) cappedGames++;
     rounds.forEach((round, index) => {
-      const entry = round.recovery?.start ?? round.escape?.start ?? round.start;
+      const entry = round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start;
       assert.equal(entry, rounds[index - 1]?.resolve ?? 0, 'each next scene immediately follows the previous deciding result');
       assert.ok([entry, round.start, round.impact, round.resolve, round.end].every(Number.isFinite));
       assert.ok(entry <= round.start && round.start < round.impact && round.impact < round.resolve && round.resolve <= round.end);
@@ -112,7 +112,7 @@ test('escape paths keep their contacts, bounded running speed and continuous rej
     assert.equal(held.grip, true); assert.deepEqual(held.runner, heldLater.runner); assert.deepEqual(held.chaser, heldLater.chaser);
     const free = at(1600); assert.equal(free.grip, false); assert.ok(free.release > .9);
     const start = at(0), end = at(ARENA_ESCAPE_DURATION);
-    assert.ok(distance(end.returnCenter, center) > 3 && distance(end.returnCenter, center) < 75, 'the pair recontacts near the escape, never at a fixed home');
+    assert.ok(distance(end.returnCenter, at(2520).runner) <= 25.1, 'the pair recontacts where the runner fled, never at an earlier home');
     assert.ok(Math.abs((end.runner.x + end.chaser.x) / 2 - end.returnCenter.x) < 1e-8);
     for (const boundary of boundaries) {
       const before = at(boundary - 1e-4), after = at(boundary + 1e-4);
@@ -132,6 +132,24 @@ test('escape paths keep their contacts, bounded running speed and continuous rej
     }
     assert.ok(distance(start.runner, held.runner) > 5);
     assert.ok(distance(at(2500).runner, held.runner) > 25, 'fleeing produces visible travel');
+  }
+});
+
+test('a caught runner holds the flee endpoint while the pursuer closes the remaining distance', () => {
+  for (const unit of [.5, 1, 1.4]) for (const contactSide of [-1, 1]) for (const side of [-1, 1]) for (const runnerId of ['a', 'v']) for (const center of [{ x: 500, y: 416 }, { x: 320, y: 390 }, { x: 680, y: 445 }]) {
+    const round = { ...base, start: 3800 * unit, timeScale: unit, contactSide, escape: { start: 0, end: 3800 * unit, runnerId, side, outcome: 'rejoin' } };
+    const at = age => arenaEscapeTargets(round, age * unit, center), far = at(2520), chasing = at(2840), caught = at(3800);
+    assert.deepEqual(chasing.runner, far.runner);
+    assert.deepEqual(caught.runner, far.runner, 'the runner cannot walk backwards to offer another grip');
+    assert.ok(distance(caught.chaser, caught.runner) <= 50.1);
+    assert.ok(distance(caught.chaser, chasing.chaser) > 3, 'the pursuer is the participant that moves for the recapture');
+    let previousGap = distance(chasing.chaser, chasing.runner);
+    for (let age = 2856; age <= 3800; age += 16) {
+      const frame = at(age), gap = distance(frame.chaser, frame.runner);
+      assert.deepEqual(frame.runner, far.runner);
+      assert.ok(gap <= previousGap + .001, 'closing the grip never requires the escaped participant to return');
+      previousGap = gap;
+    }
   }
 });
 

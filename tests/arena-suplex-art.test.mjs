@@ -30,8 +30,24 @@ test('the slammed body is dragged toward its foot ends instead of pulling the dr
     assert.ok(frame.exitDirection * (driverX - foot.x) > 0, 'the dragging fighter stands outside the foot ends');
     assert.ok(frame.exitDirection * (driverX - contacts.head.x) > 132, 'the driver does not share the unconscious torso silhouette');
     const landing = { x: frame.exitDirection < 0 ? 115 : 885, y: 436 }, preparation = { lift: 0, angle: frame.victimAngle };
-    const before = arenaTechniqueExit(round, 300, frame.victim, landing, frame.exitDirection, 1, preparation), after = arenaTechniqueExit(round, 600, frame.victim, landing, frame.exitDirection, 1, preparation);
+    const before = arenaTechniqueExit(round, 900, frame.victim, landing, frame.exitDirection, 1, preparation), after = arenaTechniqueExit(round, 1200, frame.victim, landing, frame.exitDirection, 1, preparation);
     assert.ok(frame.exitDirection * (after.groundX - before.groundX) > 0, 'the ankle grip pulls in the same direction as the feet');
+  }
+});
+
+test('both raised suplex legs hang below the pelvis with relaxed forward knees instead of collapsing into the shorts', () => {
+  for (const side of [-1, 1]) for (const phase of [.64, .70, .76, .82]) {
+    const { actor, time } = victimAt(phase, side);
+    drawArenaFighter(noop, actor, time);
+    const { hips, knees, feet } = actor.animation.skeleton;
+    for (let leg = 0; leg < 2; leg++) {
+      assert.ok(distance(hips[leg], feet[leg]) > 17, 'the full lower leg remains visible beneath the lifted pelvis');
+      assert.ok(knees[leg].y > hips[leg].y + 7, 'the held thigh hangs down rather than folding horizontally into the waistband');
+      assert.ok(feet[leg].y > knees[leg].y + 7, 'the relaxed shin continues below its connected knee');
+      assert.ok(knees[leg].x > feet[leg].x + 3, 'both knees bend naturally forward with the ankle behind them');
+      assert.ok(Math.abs(distance(hips[leg], knees[leg]) - 11) < .001 && Math.abs(distance(knees[leg], feet[leg]) - 11) < .001, 'neither complete limb section can shrink while held');
+    }
+    assert.ok(feet[1].x - feet[0].x > 9, 'the two visible ankles remain separated rather than stacking into one foot');
   }
 });
 

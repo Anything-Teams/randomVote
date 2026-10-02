@@ -260,7 +260,7 @@ test('an overhead waist lift reads its raised hold before accelerating into a sl
     assert.ok(slammed.slamImpact > .9, 'the ground collision has its own readable impact beat');
     assert.ok(stunned.victimSlam.slump === 1, 'the limbs relax only after the slam');
     const origin = stunned.victim, landing = { x: center.x + stunned.side * 230, y: center.y + 50 }, preparation = { lift: 0, angle: stunned.victimAngle };
-    for (const age of [0, 100, 299]) {
+    for (const age of [0, 100, 899]) {
       const frame = arenaTechniqueExit(round, age, origin, landing, stunned.side, 1, preparation);
       assert.equal(frame.stage, 'stunned');
       assert.ok(distance(frame, origin) < 1e-8, 'a visible stunned beat precedes the ankle drag');
@@ -289,7 +289,7 @@ test('one airborne side kick has a single jump and launches at sole contact', ()
     const window = arenaSidekickWindow(round), jumpAt = fraction => arenaTechniqueTargets(round, window.start + window.duration * fraction, center);
     assert.equal(window.duration, 650, 'a long introduction cannot stretch the jump into slow motion');
     const planted = arenaTechniqueTargets(round, window.start - 16, center), first = jumpAt(.16), second = jumpAt(.48), impact = jumpAt(.54), release = jumpAt(1);
-    assert.equal(planted.stage, 'plant');
+    assert.equal(planted.stage, 'approach');
     assert.equal(planted.aggressorLift, 0);
     assert.equal(first.stage, 'jump');
     assert.ok(first.aggressorLift > 10);
@@ -325,7 +325,7 @@ test('sidekick contact clocks and jump duration remain physical across short and
     const round = { ...bout('sidekick'), impact: base.start + span, timeScale }, window = arenaSidekickWindow(round);
     assert.ok(window.duration <= 650 && window.duration <= span * .68);
     assert.equal(arenaTechniqueReactionAt(round), window.contactAt);
-    assert.ok(window.start > round.start + span * .3);
+    assert.ok(window.start >= round.start && window.start - round.start <= 650, 'approaching cannot add a long planted waiting beat');
     for (const boundary of [window.start, window.start + window.duration * .22, window.contactAt, window.start + window.duration * .62, window.end]) {
       const before = arenaTechniqueTargets(round, boundary - .001, { x: 500, y: 416 }), after = arenaTechniqueTargets(round, boundary + .001, { x: 500, y: 416 });
       for (const key of ['aggressor', 'victim']) assert.ok(distance(before[key], after[key]) < .005);
@@ -335,6 +335,21 @@ test('sidekick contact clocks and jump duration remain physical across short and
     assert.ok(touch.contact > .999 && touch.reactionProgress === 0);
     assert.ok(arenaTechniqueTargets(round, window.contactAt + 16, { x: 500, y: 416 }).reactionProgress > 0);
   }
+});
+
+test('a sidekick goes directly from its recorded first approach into a jump without a blocked probe or reset', () => {
+  const round = { ...bout('sidekick'), sidekickLaunchAt: base.start + 420 }, center = { x: 500, y: 416 };
+  const window = arenaSidekickWindow(round);
+  assert.equal(window.start, round.sidekickLaunchAt);
+  for (const elapsed of [round.start, round.start + 100, window.start - 1]) {
+    const frame = arenaTechniqueTargets(round, elapsed, center);
+    assert.equal(frame.stage, 'approach'); assert.equal(frame.grip, undefined); assert.equal(frame.aggressorLift, 0);
+    assert.equal(frame.aggressor.x, center.x - frame.side * 24); assert.equal(frame.victim.x, center.x + frame.side * 24);
+  }
+  const jumped = arenaTechniqueTargets(round, window.start + 16, center);
+  assert.equal(jumped.stage, 'jump'); assert.ok(jumped.aggressorLift > 0);
+  assert.equal(arenaTechniqueReactionAt(round), window.contactAt);
+  assert.equal(arenaTechniqueTargets(round, window.end, center).stage, 'release', 'completing the jump never waits for the original planning impact');
 });
 
 test('new finishing contacts and their floor exits remain continuous when the scene clock crosses a stage boundary', () => {
@@ -347,7 +362,7 @@ test('new finishing contacts and their floor exits remain continuous when the sc
     }
     if (!['trip', 'suplex'].includes(tactic)) continue;
     const final = at(round, 1, center), origin = final.victim, landing = { x: center.x + final.side * 220, y: center.y + 45 }, preparation = { lift: final.lift, angle: final.victimAngle };
-    const boundaries = tactic === 'trip' ? [880, 1100, 1600] : [300, 2600, 3480, 3680, 4180];
+    const boundaries = tactic === 'trip' ? [880, 1100, 1600] : [900, 2600, 3480, 3680, 4180];
     for (const age of boundaries) {
       const before = arenaTechniqueExit(round, age - .001, origin, landing, final.side, 1, preparation), after = arenaTechniqueExit(round, age + .001, origin, landing, final.side, 1, preparation);
       assert.ok(distance(before, after) < .005, `${tactic} floor transition remains connected`);

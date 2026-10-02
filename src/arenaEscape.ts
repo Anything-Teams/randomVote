@@ -60,12 +60,12 @@ export function arenaEscapeTargets(round: ArenaRound, elapsed: number, center: A
   }).sort((a, b) => b.distance - a.distance)[0].candidate;
   const dx = ray.x - releasePoint.x, dy = ray.y - releasePoint.y;
   const far = inside({ x: ray.x, y: ray.y + bend });
-  const turn = inside({ x: far.x - dx * .08, y: far.y + bend * .4 });
-  const returnCenter = inside({ x: center.x + dx * .50, y: center.y + dy * .45 + bend * .2 });
+  const turn = separated ? inside({ x: far.x + dx * .04, y: far.y + bend * .2 }) : far;
   // A successful escape keeps both people apart. The pursuer gives up and
   // changes direction instead of moving both bodies back to another grip.
-  const endRunner = separated ? inside({ x: far.x + dx * .08, y: far.y + bend * .4 }) : inside({ x: returnCenter.x + direction * 25, y: returnCenter.y });
-  const endChaser = separated ? inside({ x: chaserGrip.x - dx * .10, y: chaserGrip.y - bend }) : inside({ x: returnCenter.x - direction * 25, y: returnCenter.y });
+  const endRunner = separated ? inside({ x: far.x + dx * .08, y: far.y + bend * .4 }) : far;
+  const endChaser = separated ? inside({ x: chaserGrip.x - dx * .10, y: chaserGrip.y - bend }) : inside({ x: endRunner.x - direction * 50, y: endRunner.y });
+  const returnCenter = { x: (endRunner.x + endChaser.x) / 2, y: (endRunner.y + endChaser.y) / 2 };
   const chaserFar = inside({ x: chaserGrip.x + dx * .32, y: chaserGrip.y + dy * .32 + bend * .2 });
   const chaserTurn = inside({ x: chaserGrip.x + dx * .57, y: chaserGrip.y + dy * .50 + bend * .25 });
   const duration = Math.max(1, escape.end - escape.start), age = clamp((elapsed - escape.start) / duration) * ARENA_ESCAPE_DURATION;
