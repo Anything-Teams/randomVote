@@ -96,7 +96,7 @@ test('the optional recovery prelude is close to four percent of eligible encount
   const samples = 4096, original = [...order], expected = Object.fromEntries(order.map((id, index) => [id, index + 1]));
   for (let seed = 0; seed < samples; seed++) {
     const rounds = arenaRounds(order, 44_000, 7, seed), final = rounds.at(-1);
-    if (final.recovery) occurrences++;
+    if (final.recovery && final.recovery.kind !== 'overhead-escape') occurrences++;
     assert.equal(final.aggressor, order[0]); assert.equal(final.victim, order[1]); assert.equal(final.escape, undefined, 'the final pair cannot run away');
     assert.deepEqual(arenaRanks(order, 44_000, 44_000, 7, seed), expected);
   }

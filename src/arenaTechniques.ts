@@ -31,21 +31,34 @@ const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
 
 /** A short blocked attempt precedes the finishing contact. All targets stay relative to the current pair. */
 export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
-  const phase = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
+  const span = Math.max(1, round.impact - round.start), rawPhase = clamp((elapsed - round.start) / span);
+  let phase = rawPhase;
+  if (round.tactic === 'suplex' && round.suplexGripAt !== undefined) {
+    const gripAt = round.suplexGripAt;
+    if (gripAt === null || elapsed < gripAt) phase = Math.min(rawPhase, .20);
+    else {
+      const contestSpan = Math.min(span * .14, Math.max(1, (round.impact - gripAt) * .24));
+      const loadedAt = gripAt + contestSpan;
+      phase = elapsed < loadedAt ? .20 + .14 * clamp((elapsed - gripAt) / contestSpan) : .34 + .66 * clamp((elapsed - loadedAt) / Math.max(1, round.impact - loadedAt));
+    }
+  }
   const side = round.contactSide ?? (center.x < 500 ? -1 : 1);
   const probe = round.tactic === 'sidekick' ? 0 : Math.sin(clamp((phase - .08) / .20) * Math.PI);
   const frame = {
     stage: phase < .08 ? 'approach' : phase < .20 ? 'probe' : phase < .30 ? 'reset' : 'grip', side, phase,
     aggressor: { x: center.x - side * (24 - probe * 7), y: center.y },
     victim: { x: center.x + side * (24 + probe * 5), y: center.y + probe * 3 },
-    lift: 0, victimAngle: 0, aggressorAngle: 0, aggressorLift: 0, yaw: 0, victimSuspension: 0, victimPose: undefined as 'held' | 'stunned' | 'roll' | 'airborne' | undefined,
+    lift: 0, victimAngle: 0, aggressorAngle: 0, aggressorLift: 0, yaw: 0, victimSuspension: 0, victimPose: undefined as 'held' | 'stunned' | 'roll' | 'airborne' | 'brace' | undefined,
     grip: phase >= .30 ? 'waist' as 'wrist' | 'waist' | 'ankle' | undefined : phase < .20 && phase >= .08 ? 'waist' : undefined,
     contact: 0,
     spin: undefined as ArenaArmSpinFrame | undefined,
     victimSlam: undefined as { tuck: number; slump: number } | undefined,
     victimFloorRig: undefined as { pose: 'stunned'; phase: number; angle: number; suspension: number } | undefined,
     slamImpact: 0,
-    aggressorPose: undefined as 'overhead' | 'elbow' | 'drag' | 'throw' | undefined,
+    aggressorPose: undefined as 'overhead' | 'elbow' | 'drag' | 'throw' | 'grapple' | undefined,
+    aggressorEffort: undefined as number | undefined,
+    victimEffort: undefined as number | undefined,
+    aggressorLiftPreparation: undefined as number | undefined,
     aggressorOverheadRaise: 0,
     aggressorFacing: undefined as number | undefined,
     victimLift: 0,
@@ -58,6 +71,22 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     frontKick: undefined as number | undefined,
     exitDirection: side,
   };
+  if (round.tactic === 'suplex' && round.suplexGripAt === null && phase >= .20) {
+    frame.grip = 'waist'; frame.stage = 'grip';
+    return frame;
+  }
+  if (round.tactic === 'suplex' && phase >= .20 && phase < .34) {
+    const contest = clamp((phase - .20) / .14), load = Math.sin(contest * Math.PI) ** 2;
+    const sway = Math.sin(contest * Math.PI * 2) * load * 3, take = ease((phase - .30) / .04);
+    frame.aggressor.x = center.x - side * mix(24 - probe * 7, 22, take) + side * sway;
+    frame.victim.x = frame.aggressor.x + side * mix(48 - probe * 2, 43, take);
+    frame.aggressor.y = center.y + sway * .22;
+    frame.victim.y = center.y + probe * 3 * (1 - take) + sway * .22;
+    frame.aggressorEffort = load; frame.victimEffort = load * .9;
+    frame.aggressorLiftPreparation = take;
+    frame.aggressorPose = 'grapple'; frame.victimPose = 'brace'; frame.grip = 'waist'; frame.stage = 'grip';
+    return frame;
+  }
   if (phase < .30 && round.tactic !== 'sidekick') return frame;
   if (round.tactic === 'armspin') {
     const progress = clamp((phase - .44) / .56), ramp = .24;

@@ -17,6 +17,8 @@ const { createRacingIncidents, buildRacingTimeline, readRacingDistance, readRaci
 const cameraCompiled = await build({ entryPoints: ['src/racingCamera.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createRacingCamera, racingFocusIds, placeRacingField } = await import(`data:text/javascript;base64,${Buffer.from(cameraCompiled.outputFiles[0].text).toString('base64')}`);
 const participants = Array.from({ length: 10 }, (_, index) => ({ id: `player-${index}`, name: `선수 ${index}`, color: '#f9d56e' }));
+// A physical prelude can start before the later deciding technique.
+const arenaEntry = round => Math.min(round.start, ...[round.recovery?.start, round.escape?.start, round.rim?.start, round.rimCharge?.start].filter(Number.isFinite));
 
 test('only arena draws a variable runtime, while election and racing keep their existing length', () => {
   const unused = () => { throw new Error('Fixed modes must not draw a duration'); };
@@ -187,7 +189,7 @@ test('arena exchange compatibility returns a real finite deciding bout with livi
       if (ranks[order[0]]) { assert.equal(exchange, undefined); continue; }
       assert.deepEqual(exchange, arenaFocusRound(order, elapsed));
       assert.ok(exchange && !exchange.exchange && Number.isFinite(exchange.resolve));
-      assert.ok(exchange.start <= elapsed && elapsed < exchange.resolve);
+      assert.ok(arenaEntry(exchange) <= elapsed && elapsed < exchange.resolve);
       const actors = [exchange.aggressor, exchange.victim, exchange.helper].filter(Boolean);
       assert.equal(new Set(actors).size, actors.length);
       for (const id of actors) assert.ok(order.includes(id) && !ranks[id]);
@@ -356,23 +358,23 @@ test('arena bouts begin immediately, connect without filler, and finish at their
   for (let size = 2; size <= 10; size++) for (let variation = 0; variation < 32; variation++) for (const duration of [40_000, 62_000]) {
     const order = Array.from({ length: size }, (_, index) => `schedule-${variation}-${index}`), rounds = arenaRounds(order, duration);
     const unit = rounds[0].timeScale, final = rounds.at(-1);
-    assert.equal(rounds[0].start, 0, 'the first actual pair starts immediately');
+    assert.equal(arenaEntry(rounds[0]), 0, 'the first actual pair or physical prelude starts immediately');
     assert.ok(Number.isFinite(unit) && unit > 0 && unit <= duration / 44_000);
     if (unit < duration / 44_000) compressed++;
     for (let index = 0; index < rounds.length; index++) {
       const round = rounds[index];
       assert.equal(round.timeScale, unit, 'all techniques and recovery use the same run tempo');
-      if (index) assert.equal(round.start, rounds[index - 1].resolve, 'the next deciding bout begins at the previous result');
+      if (index) assert.equal(arenaEntry(round), rounds[index - 1].resolve, 'the next actual pair or physical prelude begins at the previous result');
       if (!round.final) {
         assert.equal(round.end, round.resolve, 'preliminaries have no extra guard or filler tail');
         if (['armspin', 'trip', 'sidekick', 'suplex'].includes(round.tactic)) {
           prelimTechniques.add(round.tactic);
           const nominal = (round.end - round.start) / unit;
-          assert.ok(Math.abs(nominal - (round.tactic === 'suplex' ? 8200 : 5800)) < 1e-6);
+          assert.ok(Math.abs(nominal - (round.tactic === 'suplex' ? 8200 : round.tactic === 'sidekick' ? 3400 : 5800)) < 1e-6, 'a quick jump kick keeps its shorter strike and landing window');
           if (round.tactic === 'suplex') assert.ok(Math.abs((round.resolve - round.impact) / unit - 4100) < 1e-6, 'a landed suplex still has time to drag and toss');
         }
       }
-      for (const elapsed of [round.start, (round.start + round.resolve) / 2, round.resolve - .01]) assert.equal(arenaFocusRound(order, elapsed, duration).id, round.id);
+      for (const elapsed of [arenaEntry(round), round.start, (round.start + round.resolve) / 2, round.resolve - .01]) assert.equal(arenaFocusRound(order, elapsed, duration).id, round.id);
     }
     assert.equal(arenaPlaybackEnd(order, duration), final.end);
     assert.ok(final.end <= duration && final.end > final.resolve);

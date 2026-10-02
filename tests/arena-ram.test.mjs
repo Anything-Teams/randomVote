@@ -6,7 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { arenaAction, arenaMove, arenaRamTargets, arenaRanks, arenaRounds, arenaThrow } = await source('src/arenaLogic.ts');
+const { arenaAction, arenaContactRound, arenaExitDirection, arenaMove, arenaRamTargets, arenaRanks, arenaRounds, arenaThrow } = await source('src/arenaLogic.ts');
 const { arenaStoryState } = await source('src/arenaStoryLogic.ts');
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const round = { id: 'ram', index: 0, tactic: 'ram', aggressor: 'driver', victim: 'receiver', start: 1000, impact: 6000, resolve: 7100, end: 7600, final: false };
@@ -67,6 +67,44 @@ test('collision recoil hands its actual height and origin directly to the outgoi
   assert.equal(flying.stage, 'flight');
   assert.ok(flying.groundX > released.groundX && flying.height > released.height, 'the shoulder impact immediately continues outward and upward');
   assert.match(arenaStoryState(round, atPhase(.95)).action, /어깨|충돌|돌진/);
+});
+
+test('a real shoulder hit keeps flying in its incoming direction even before the receiver crosses the arena center', () => {
+  for (const [chargerX, receiverX] of [[270, 410], [730, 590], [430, 560], [570, 440]]) for (const unit of [.4, 1, 1.6]) {
+    const participants = { aggressor: { x: chargerX, y: 410 }, victim: { x: receiverX, y: 416 } };
+    const planned = { ...round, impact: round.start + 5000 * unit, resolve: round.start + 6100 * unit, timeScale: unit };
+    const center = { x: (chargerX + receiverX) / 2, y: 413 };
+    const actual = arenaContactRound(planned, center, participants), incoming = Math.sign(receiverX - chargerX);
+    assert.equal(actual.tactic, 'ram', 'the two actual fighters have a valid aligned runway');
+    const contact = arenaRamTargets(actual, actual.impact, center), preContact = arenaRamTargets(actual, actual.start + (actual.impact - actual.start) * .82, center);
+    assert.equal(contact.side, incoming);
+    assert.ok(incoming * (contact.victim.x - preContact.victim.x) > 17, 'the struck opponent recoils away from the arriving shoulder');
+    const exitDirection = arenaExitDirection(actual, contact.victim, 0);
+    assert.equal(exitDirection, incoming, 'landing follows the real incoming shoulder, not the nearest screen edge');
+    const landing = { x: exitDirection < 0 ? 115 : 885, y: 436 };
+    const preparation = { lift: 26, angle: 0, rotation: exitDirection };
+    let previous = arenaThrow(0, contact.victim, landing, exitDirection, unit, preparation), traveled = 0;
+    for (let age = 8 * unit; age <= 880 * unit; age += 8 * unit) {
+      const flight = arenaThrow(age, contact.victim, landing, exitDirection, unit, preparation);
+      const forward = incoming * (flight.groundX - previous.groundX);
+      assert.ok(forward >= -1e-8, 'every post-contact flight step continues in the direction of the impact');
+      traveled += Math.max(0, forward); previous = flight;
+    }
+    assert.ok(traveled > 100, 'the outgoing opponent visibly clears the contact in the same direction');
+    assert.ok(Math.abs(previous.groundX - landing.x) < 1e-8);
+    assert.equal(arenaExitDirection({ ...actual, contactSide: -incoming }, contact.victim, 1), incoming, 'the captured runway takes precedence over a stale scene layout side');
+  }
+});
+
+test('a reconstructed ram respects the contact side while catches retain their counterthrow direction', () => {
+  for (const side of [-1, 1]) {
+    const center = { x: side > 0 ? 350 : 650, y: 416 }, actual = { ...round, contactSide: side };
+    const contact = arenaRamTargets(actual, actual.impact, center), run = arenaRamTargets(actual, atPhase(.5), center);
+    assert.equal(contact.side, side);
+    assert.ok(side * (contact.driver.x - run.driver.x) > 40);
+    assert.equal(arenaExitDirection(actual, contact.victim, 0), side);
+    assert.equal(arenaExitDirection({ ...actual, tactic: 'catch' }, contact.victim, 0), contact.victim.x < 500 ? -1 : 1, 'a receiver turning a charge back is a separate action');
+  }
 });
 
 test('occasional successful charges knock out only the drawn loser and preserve every final place', () => {

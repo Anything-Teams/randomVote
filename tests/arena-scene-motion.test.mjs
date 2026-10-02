@@ -12,11 +12,11 @@ const draw = 'arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFig
 assert.ok(source.includes(draw), 'the harness captures the real scene draw loop');
 source = source.replaceAll('drawArenaScenery(ctx, clock,', 'motionTestScenery(ctx, clock,')
   .replace(draw, `motionTestActors = actors; ${draw}`);
-source += '\nlet motionTestActors; const motionTestScenery = () => {}; export const capturedActors = () => motionTestActors; export { render, createArenaCamera, arenaRounds, arenaStartingPoint, arenaFloorExitTiming, arenaRimTargets, arenaRimChargeTargets }; export { arenaMinimumDuration } from "./arenaLogic";';
+source += '\nlet motionTestActors; const motionTestScenery = () => {}; export const capturedActors = () => motionTestActors; export { render, createArenaCamera, arenaRounds, arenaStartingPoint, arenaFloorExitTiming, arenaRimTargets, arenaRimChargeTargets, arenaTechniqueTargets, arenaRecoveryTargets }; export { arenaMinimumDuration } from "./arenaLogic";';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaStartingPoint, arenaMinimumDuration, arenaFloorExitTiming, arenaRimTargets, arenaRimChargeTargets, capturedActors } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaStartingPoint, arenaMinimumDuration, arenaFloorExitTiming, arenaRimTargets, arenaRimChargeTargets, arenaTechniqueTargets, arenaRecoveryTargets, capturedActors } = module.exports;
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const noop = () => {};
 const context = () => new Proxy({ measureText: text => ({ width: text.length * 8 }), createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }) }, { get: (target, key) => key in target ? target[key] : noop, set: (target, key, value) => (target[key] = value, true) });
@@ -28,8 +28,8 @@ function game(order, seed = 31, duration = 44000, { rushRoll = 7, candidateOrder
   assert.ok(rounds.every(round => round.timeScale >= 1), 'live motion fixtures use the production physical duration');
   return { props, sim, rounds, step(elapsed, paused = false) { render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : 16, false); return capturedActors(); } };
 }
-function fixture(tactic, { rushRoll = 7, count = 5, predicate } = {}) {
-  for (let seed = 0; seed < 80; seed++) for (let variant = 0; variant < 12; variant++) {
+function fixture(tactic, { rushRoll = 7, count = 5, predicate, maxSeeds = 80 } = {}) {
+  for (let seed = 0; seed < maxSeeds; seed++) for (let variant = 0; variant < 12; variant++) {
     const order = Array.from({ length: count }, (_, i) => `scene-${variant}-${i}`), duration = Math.max(44000, arenaMinimumDuration(order, rushRoll, seed)), rounds = arenaRounds(order, duration, rushRoll, seed);
     const round = rounds.find(round => predicate ? predicate(round) : round.tactic === tactic && !round.recovery && !round.escape && !round.rim);
     if (round) return { order, seed, duration, rushRoll, round };
@@ -210,9 +210,37 @@ for (const reverse of [false, true]) test(`the first live opponents keep their i
 
 test('a live slammed body stays grounded through pickup and drag while both hands track its actual feet', () => {
   const { order, seed, duration, round } = fixture('suplex'), scene = game(order, seed, duration), timing = arenaFloorExitTiming(round);
-  let previous, pickupSeen = false, dragSeen = false, maxHandGap = 0;
+  let previous, pickupSeen = false, dragSeen = false, maxHandGap = 0, contestFrames = 0;
+  const contestMoments = new Set(), crouches = {};
   for (let elapsed = 0; elapsed < round.impact + timing.dragUntil; elapsed += 16) {
     const actors = scene.step(elapsed), exit = scene.sim.exits.get(round.victim);
+    const contact = scene.sim.contacts.get(round.id);
+    if (contact && !exit) {
+      const frame = arenaTechniqueTargets(contact.round, elapsed, contact.center), phase = frame.phase;
+      if (frame.aggressorEffort !== undefined && phase >= .20 && phase < .34) {
+        const victim = actors.get(round.victim), driver = actors.get(round.aggressor);
+        assert.equal(frame.lift, 0, 'the full live waist contest precedes any lift');
+        assert.equal(driver.pose, 'grapple'); assert.equal(victim.pose, 'brace');
+        assert.equal(driver.grappleEffort, frame.aggressorEffort); assert.equal(victim.grappleEffort, frame.victimEffort);
+        assert.equal(driver.grappleLiftPreparation, frame.aggressorLiftPreparation, 'the actual driver receives the continuous knee and torso preparation before lifting');
+        assert.ok(Number.isFinite(contact.round.suplexGripAt) && contact.round.suplexGripAt <= elapsed, 'the resistance only begins after a recorded actual waist contact');
+        assert.equal(driver.gripMode, 'waist'); assert.equal(driver.gripStrength, 1, `the resistance needs the live waist grip: ${JSON.stringify({ elapsed, order, seed, phase, round: contact.round, driver: { x: driver.x, y: driver.y, pose: driver.pose, gripTarget: driver.gripTarget, gripLocked: driver.gripLocked }, victim: { x: victim.x, y: victim.y, pose: victim.pose } })}`); assert.equal(driver.gripLocked, true);
+        const waist = victim.animation.contactPoints.waist, hands = driver.animation.contactPoints.hands;
+        assert.ok(Math.min(...hands.map(hand => distance(hand, waist))) < 5, `the live contestant actually keeps the waist in hand before lifting (${elapsed}ms)`);
+        for (const actor of [driver, victim]) {
+          assert.equal(actor.y, actor.depthY, 'both live contestants stay at their floor anchor');
+          assert.equal(actor.animation.moving, false, 'small weight shifts cannot trigger a walking gait during a planted contest');
+          const { hips, knees, feet } = actor.animation.skeleton;
+          for (let leg = 0; leg < 2; leg++) {
+            assert.ok(distance(hips[leg], feet[leg]) > 14, 'resistance keeps adult-height legs');
+            for (const length of [distance(hips[leg], knees[leg]), distance(knees[leg], feet[leg])]) assert.ok(length >= 7 && length <= 11.001, 'both connected leg sections retain normal projected proportions');
+          }
+        }
+        const moment = phase < .22 ? 'start' : phase >= .26 && phase < .28 ? 'middle' : phase >= .32 ? 'beforeLift' : undefined;
+        if (moment) { contestMoments.add(moment); crouches[moment] ??= [driver.animation.motion.crouch, victim.animation.motion.crouch]; }
+        contestFrames++;
+      }
+    }
     if (!exit || elapsed < round.impact) continue;
     const victim = actors.get(round.victim), driver = actors.get(round.aggressor), body = scene.sim.bodies.get(round.victim);
     const age = elapsed - round.impact;
@@ -229,6 +257,8 @@ test('a live slammed body stays grounded through pickup and drag while both hand
   }
   assert.ok(pickupSeen && dragSeen);
   assert.ok(maxHandGap < 5, `both palms follow the real toes throughout the floor pull (max gap ${maxHandGap.toFixed(2)}px)`);
+  assert.ok(contestFrames > 15 && ['start', 'middle', 'beforeLift'].every(moment => contestMoments.has(moment)), 'the actual scene shows the beginning, resistance and pre-lift portions of the contest');
+  assert.ok(crouches.middle.every((value, role) => value > crouches.start[role] + .6), 'both visible bodies bend their knees under the growing resistance');
 });
 
 test('a live elbow counter leaves its stunned opponent at the hit and the holder walks to those feet', () => {
@@ -263,4 +293,82 @@ test('a live elbow counter leaves its stunned opponent at the hit and the holder
   }
   assert.ok(fallen && movedTowardFeet && gripSeen && dragSeen, `the counter includes a grounded fall, an actual approach, a visible ankle grip, and a floor pull: ${JSON.stringify(lastState)}`);
   assert.ok(maxHandGap < 5, `the actual ankle pull maintains both palm contacts (max gap ${maxHandGap.toFixed(2)}px)`);
+});
+
+for (const count of [3, 5]) test(`a live overhead escape folds out of the full suplex hold, lands both feet inside the sand and resumes the original duel (${count} fighters)`, () => {
+  const found = count === 3 ? (() => {
+    const order = ['3', '1', '2'], seed = 117, duration = Math.max(44000, arenaMinimumDuration(order, 7, seed));
+    const round = arenaRounds(order, duration, 7, seed).find(value => value.recovery?.kind === 'overhead-escape');
+    assert.ok(round, 'the three-fighter overhead escape remains in the live catalog');
+    return { order, seed, duration, round };
+  })() : fixture('overhead escape', { count, maxSeeds: 600, predicate: round => round.recovery?.kind === 'overhead-escape' });
+  const { order, seed, duration, round } = found, recovery = round.recovery, scene = game(order, seed, duration);
+  const until = Math.min(round.impact - 16, round.start + 1800 * round.timeScale);
+  let fullHold = false, jumpSeen = false, tucked = false, landed = false, resumed = false, releasePoint, landingPoint;
+  let lastBody, lastHeight, lastTuck, jumpStarts = 0, insideJump = false, maxHeight = 0;
+  let maxFloorError = 0, floorFailure;
+  for (let elapsed = 0; elapsed <= until; elapsed += 16) {
+    const actors = scene.step(elapsed), contact = scene.sim.contacts.get(round.id);
+    if (!contact || elapsed < recovery.start) continue;
+    const actual = contact.round, frame = arenaRecoveryTargets(actual, elapsed, contact.center);
+    const victim = actors.get(round.victim), driver = actors.get(round.aggressor), body = scene.sim.bodies.get(round.victim);
+    const info = () => JSON.stringify({ count, seed, order, elapsed, round: actual, frame, victim: { x: victim?.x, y: victim?.y, depthY: victim?.depthY, pose: victim?.pose, suspension: victim?.suspension }, feet: victim?.animation?.contactPoints?.feet });
+    assert.ok(victim && driver, `both survivors remain painted: ${info()}`);
+    assert.equal(scene.sim.exits.has(round.victim), false, 'escaping the raised hold cannot eliminate the jumper');
+    assert.equal(scene.sim.exits.has(round.aggressor), false, 'the unbalanced holder remains alive');
+    if (!frame.active) {
+      if (contact.recoveryFinished && elapsed > recovery.end && actual.tactic === 'suplex' && actual.suplexGripAt !== undefined) resumed = true;
+      continue;
+    }
+    const height = (victim.depthY ?? body.y) - victim.y;
+    assert.ok([victim.x, victim.y, driver.x, driver.y, height, victim.angle ?? 0].every(Number.isFinite), `the rare branch retains finite real actors: ${info()}`);
+    if (frame.stage === 'overhead' && frame.grip) {
+      fullHold = true;
+      assert.ok(Math.abs(height - 100) < .01, `the held body first reaches the ordinary full 100px suplex lift: ${info()}`);
+      assert.equal(driver.pose, 'overhead'); assert.equal(driver.overheadRaise, 1);
+      assert.ok(driver.gripLocked && driver.gripStrength === 1, 'both hands keep the real raised waist before the escape');
+    }
+    if (frame.airborne) {
+      jumpSeen = true;
+      if (!insideJump) { jumpStarts++; releasePoint = { x: body.x, y: body.y }; }
+      insideJump = true;
+      assert.ok(fullHold, 'the jump cannot skip the full overhead hold');
+      assert.equal(victim.pose, 'airborne'); assert.equal(victim.jumpTuck, frame.jumpTuck);
+      assert.ok(Math.abs(height - frame.height) < .01, 'the actual body follows one smooth jump arc');
+      assert.ok(Math.abs(victim.angle) <= .121, 'this backward jump cannot turn into a spinning exit');
+      if (victim.jumpTuck > .8) {
+        tucked = true;
+        const { hips, feet } = victim.animation.skeleton;
+        assert.ok(feet.every((foot, leg) => distance(hips[leg], foot) < 14), 'the real knees fold visibly beneath the torso while escaping');
+      }
+      maxHeight = Math.max(maxHeight, height);
+      if (lastBody && elapsed <= recovery.throwAt + 48 * round.timeScale) {
+        assert.ok(distance(body, lastBody) < 2.65, `leaving the hands cannot reset the root to an old place: ${info()}`);
+        assert.ok(Math.abs(height - lastHeight) < 8, 'the full raised height flows directly into the jump');
+      }
+    } else insideJump = false;
+    if (frame.stage === 'overhead' || frame.airborne) {
+      const { hips, knees, feet } = victim.animation.skeleton;
+      for (let leg = 0; leg < 2; leg++) {
+        const lengths = [distance(hips[leg], knees[leg]), distance(knees[leg], feet[leg])];
+        if (frame.stage === 'overhead' || frame.flightPhase < .40) assert.ok(lengths.every(length => Math.abs(length - 11) < .005), 'the fully raised and folded thigh and shin both keep their complete length');
+        else assert.ok(lengths.every(length => length >= 7 && length <= 11.005), 'unfolding into the standing perspective keeps both visible leg sections at normal projected lengths');
+      }
+    }
+    if (frame.stage === 'land') {
+      landed = true; landingPoint ??= { x: body.x, y: body.y };
+      assert.equal(victim.pose, 'land'); assert.ok(height < .01); assert.equal(victim.suspension, 0);
+      const feet = victim.animation.contactPoints.feet;
+      assert.ok(feet.every(foot => Math.hypot((foot.x - 500) / 303, (foot.y - 416) / 112) <= 1), `both real toes land inside the sand: ${info()}`);
+      const floorError = Math.max(...feet.map(foot => Math.abs(foot.y - ((victim.depthY ?? body.y) - 2 * victim.scale))));
+      if (floorError > maxFloorError) { maxFloorError = floorError; floorFailure = info(); }
+      assert.ok(lastTuck < .03, 'the tucked body straightens before the feet reach the floor');
+    }
+    lastBody = { x: body.x, y: body.y }; lastHeight = height; lastTuck = victim.jumpTuck ?? 0;
+  }
+  assert.ok(fullHold && jumpSeen && tucked && landed && resumed, `the live rare event includes hold, tuck, landing and the original duel: ${JSON.stringify({ count, seed, order, fullHold, jumpSeen, tucked, landed, resumed })}`);
+  assert.equal(jumpStarts, 1, 'the escape consists of one jump');
+  assert.ok(distance(releasePoint, landingPoint) > 40, 'the jumping fighter visibly lands behind the original raised position');
+  assert.ok(maxHeight > 105 && maxHeight < 160, 'the full overhead lift leads to a short, readable jumping apex');
+  assert.ok(maxFloorError < .1, `both feet stay grounded throughout the landing (maximum error ${maxFloorError.toFixed(3)}px): ${floorFailure}`);
 });

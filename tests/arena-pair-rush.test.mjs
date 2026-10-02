@@ -286,7 +286,7 @@ test('a successful two-body rush is described as shoulder impact then grounded p
   const action = arenaAction(actual, elapsed), words = arenaActionWords(actual, elapsed);
   assert.equal(action.lift, 0); assert.equal(action.liftedId, undefined);
   assert.equal(action.actors.find(part => part.id === actual.aggressor).pose, 'push');
-  assert.deepEqual(words, [{ id: actual.aggressor, word: '둘을 밀기!' }]);
+  assert.deepEqual(words, [{ id: actual.aggressor, word: '밀어붙이기!' }]);
   const story = arenaStoryState(actual, elapsed), narration = arenaNarration(actual, candidates, candidates.map(candidate => candidate.id), elapsed);
   assert.equal(story.step, 3); assert.match(story.action, /밀어붙/); assert.match(narration.title, /밀어붙/);
   for (const text of [story.action, story.relationLabel, ...story.steps, narration.title, narration.detail]) assert.doesNotMatch(text, /퍼올|공중|들어 올|던지/);
@@ -357,5 +357,36 @@ test('a shared throw releases every painted held endpoint without rotating or re
       assert.ok(distance(before, after) < .01);
       for (const key of ['height', 'angle', 'carryStretch', 'suspension']) assert.ok(Math.abs(before[key] - after[key]) < .001, `${boundary}/${key}: landing and recovery remain continuous`);
     }
+  }
+});
+
+test('the overhead release rises once on a constant-gravity parabola and carries every held limb toward the outside landing', () => {
+  const fighter = values => ({ candidate: { id: 'v', name: 'v', color: '#e98d67' }, index: 2, scale: 2.04, facing: 1, pose: 'carried', angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...values });
+  for (const unit of [.4, 1, 1.4]) for (const side of [-1, 1]) for (const origin of [{ x: 300, y: 365 }, { x: 500, y: 416 }, { x: 700, y: 470 }]) {
+    const landing = { x: side > 0 ? 885 : 115, y: 436 }, held = { lift: 142, angle: side * Math.PI / 2 };
+    const at = phase => arenaPairRushFlight(phase * 880 * unit, origin, landing, side, unit, held);
+    const release = at(0), apex = at(220 / (2 * (held.lift + 220))), falling = at(.75);
+    assert.equal(release.height, held.lift); assert.ok(apex.height > held.lift + 30 && apex.height < held.lift + 40, 'the high held body gains one readable upward throw, without an oversized second leap');
+    assert.ok(falling.height < held.lift && at(.9).height < falling.height, 'gravity takes the raised body down toward the outside landing');
+    const samples = Array.from({ length: 11 }, (_, index) => at(index / 10));
+    const changes = samples.slice(1).map((sample, index) => sample.height - samples[index].height);
+    for (let index = 1; index < changes.length; index++) assert.ok(Math.abs((changes[index] - changes[index - 1]) - (changes[1] - changes[0])) < 1e-8, 'constant downward acceleration replaces the spring-like easing curve');
+    assert.ok(changes[0] > 0 && changes.at(-1) < 0);
+    const actor = frame => fighter({ x: frame.x, y: frame.y, depthY: frame.groundY, facing: frame.facing, angle: frame.angle, suspension: frame.suspension, carryStretch: frame.carryStretch, phase: frame.phase });
+    const releaseContacts = sampleArenaFighterContacts(actor(release), 0);
+    for (const phase of [.1, .3, .5, .69]) {
+      const frame = at(phase), contacts = sampleArenaFighterContacts(actor(frame), 0), delta = { x: frame.x - release.x, y: frame.y - release.y };
+      for (const key of ['hands', 'feet']) for (let endpoint = 0; endpoint < 2; endpoint++) {
+        assert.ok(distance(contacts[key][endpoint], { x: releaseContacts[key][endpoint].x + delta.x, y: releaseContacts[key][endpoint].y + delta.y }) < .001, 'the outstretched hands and feet travel with the same horizontal rig');
+      }
+    }
+    for (let age = -16; age <= 1600; age += 16) {
+      const frame = arenaPairRushFlight(age * unit, origin, landing, side, unit, held);
+      assert.ok([frame.x, frame.y, frame.groundX, frame.groundY, frame.height, frame.angle, frame.phase, frame.suspension].every(Number.isFinite));
+      const contacts = sampleArenaFighterContacts(actor(frame), 0);
+      assert.ok([...contacts.hands, ...contacts.feet].every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
+    }
+    assert.deepEqual({ x: at(1).groundX, y: at(1).groundY }, landing);
+    assert.equal(at(1).height, 0);
   }
 });

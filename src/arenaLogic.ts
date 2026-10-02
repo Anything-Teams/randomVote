@@ -10,7 +10,7 @@ export { arenaTechniqueTargets, arenaTechniqueExit, isArenaFinalTechnique } from
 
 export type ArenaTactic = 'team' | 'bait' | 'catch' | 'ram' | 'spin' | 'shove' | 'double-shove' | 'edge' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final' | 'armspin' | 'trip' | 'suplex' | 'sidekick' | 'elbow';
 export type ArenaChargeSetup = { charger: ArenaPoint; receiver: ArenaPoint; side: 1 | -1 };
-export type ArenaRound = { id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; secondaryVictim?: string; counterSide?: 'front' | 'back'; counterFailed?: boolean; contactSide?: 1 | -1; chargeSetup?: ArenaChargeSetup; rushOutcome?: ArenaPairRushOutcome; rushContactAt?: number; rushLaunchAt?: number | null; sidekickLaunchAt?: number; pushContactAt?: number | null; timeScale?: number; prepares?: string; escape?: ArenaEscapeWindow; recovery?: ArenaRecoveryWindow; rim?: ArenaRimWindow; rimCharge?: ArenaRimChargeWindow; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
+export type ArenaRound = { suplexGripAt?: number | null; id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; secondaryVictim?: string; counterSide?: 'front' | 'back'; counterFailed?: boolean; contactSide?: 1 | -1; chargeSetup?: ArenaChargeSetup; rushOutcome?: ArenaPairRushOutcome; rushContactAt?: number; rushLaunchAt?: number | null; sidekickLaunchAt?: number; pushContactAt?: number | null; timeScale?: number; prepares?: string; escape?: ArenaEscapeWindow; recovery?: ArenaRecoveryWindow; rim?: ArenaRimWindow; rimCharge?: ArenaRimChargeWindow; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
 export type ArenaPoint = { x: number; y: number };
 export type ArenaMovingBody = ArenaPoint & { facing: number; motorX?: number; motorY?: number };
 export type ArenaPodiumPlace = ArenaPoint & { id: string; rank: 1 | 2 | 3; readyAt: number };
@@ -123,7 +123,7 @@ export function arenaRamTargets(round: ArenaRound, elapsed: number, center: Aren
       driver: { x: mix(charger.x, receiver.x - side * 38, charge) + side * impact * 10, y: mix(charger.y, receiver.y, charge) },
       victim: { x: receiver.x + side * impact * 18, y: receiver.y + impact * 3 } };
   }
-  const side = center.x >= 500 ? 1 : -1, charge = ease((p - .32) / .50), impact = ease((p - .82) / .18);
+  const side = round.contactSide ?? (center.x >= 500 ? 1 : -1), charge = ease((p - .32) / .50), impact = ease((p - .82) / .18);
   const approach = Math.max(68, Math.min(122, span * .021));
   return { side, charge, impact, preparation: ease((p - .16) / .16),
     stage: p < .32 ? 'prepare' as const : p < .82 ? 'charge' as const : p < 1 ? 'contact' as const : 'release' as const,
@@ -177,7 +177,10 @@ export function arenaDoubleShoveTargets(round: ArenaRound, elapsed: number, cent
 }
 
 export function arenaExitDirection(round: ArenaRound, origin: ArenaPoint, outIndex: number): number {
-  return round.tactic === 'bait' || round.tactic === 'edge' || round.tactic === 'shove' || round.tactic === 'double-shove' || round.tactic === 'catch' || round.tactic === 'ram' || isArenaFinalTechnique(round) ? origin.x < 500 ? -1 : 1 : round.final ? 1 : outIndex % 2 ? 1 : -1;
+  // A shoulder hit keeps the runner's momentum, including when the receiver
+  // is still in the opposite half of the arena at the moment of impact.
+  if (round.tactic === 'ram') return round.chargeSetup?.side ?? round.contactSide ?? (origin.x < 500 ? -1 : 1);
+  return round.tactic === 'bait' || round.tactic === 'edge' || round.tactic === 'shove' || round.tactic === 'double-shove' || round.tactic === 'catch' || isArenaFinalTechnique(round) ? origin.x < 500 ? -1 : 1 : round.final ? 1 : outIndex % 2 ? 1 : -1;
 }
 
 /** Body contacts and commentary share an actual attack, rather than only an alliance label. */
@@ -209,10 +212,10 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
   }
   const recovery = arenaRecoveryTargets(round, elapsed, { x: 500, y: 416 });
   if (recovery?.active) {
-    action.stage = recovery.stage === 'approach' ? 'approach' : recovery.stage === 'hold' ? 'link' : recovery.stage === 'lift' ? 'lift' : recovery.airborne ? 'throw' : 'release';
+    action.stage = recovery.stage === 'approach' ? 'approach' : recovery.stage === 'hold' ? 'link' : recovery.stage === 'lift' || recovery.stage === 'overhead' ? 'lift' : recovery.airborne ? 'throw' : 'release';
     action.lift = recovery.grip ? recovery.height : 0; action.liftedId = recovery.grip ? v : undefined; action.outcome = 'pending';
-    const throwingPose: ArenaActionPose = recovery.stage === 'approach' || recovery.stage === 'release' ? 'guard' : recovery.stage === 'hold' ? 'grapple' : recovery.stage === 'lift' ? 'lift' : 'throw';
-    action.actors = [actor(a, 'aggressor', recovery.thrower.x - 500, recovery.thrower.y - 416, throwingPose, recovery.grip ? recovery.liftPhase : recovery.throwPhase, recovery.grip ? v : undefined, recovery.stage === 'hold' ? '몸통 맞잡기' : '던지기'), actor(v, 'victim', recovery.receiver.x - 500, recovery.receiver.y - 416, recovery.stage === 'approach' || recovery.stage === 'release' ? 'guard' : 'brace', recovery.liftPhase, recovery.grip ? a : undefined, recovery.grip ? '들기를 버티는 선수' : '회전해 착지')];
+    const throwingPose: ArenaActionPose = recovery.stage === 'approach' || recovery.stage === 'release' ? 'guard' : recovery.stage === 'hold' ? 'grapple' : recovery.stage === 'overhead' || recovery.kind === 'overhead-escape' && recovery.stage === 'lift' ? 'overhead' : recovery.stage === 'lift' ? 'lift' : 'throw';
+    action.actors = [actor(a, 'aggressor', recovery.thrower.x - 500, recovery.thrower.y - 416, throwingPose, recovery.grip ? recovery.liftPhase : recovery.throwPhase, recovery.grip ? v : undefined, recovery.stage === 'hold' ? '몸통 맞잡기' : '던지기'), actor(v, 'victim', recovery.receiver.x - 500, recovery.receiver.y - 416, recovery.stage === 'approach' || recovery.stage === 'release' ? 'guard' : 'brace', recovery.liftPhase, recovery.grip ? a : undefined, recovery.grip ? '들기를 버티는 선수' : recovery.kind === 'overhead-escape' ? '점프로 탈출해 착지' : '회전해 착지')];
     return action;
   }
   const escape = arenaEscapeTargets(round, elapsed, { x: 500, y: 416 });
@@ -236,7 +239,7 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
     const point = (id: string) => id === a ? rush.aggressor : id === h ? rush.helper : rush.victim;
     const pose = (id: string): ArenaActionPose => id === rush.chargerId ? rush.stage === 'charge' ? 'run' : !counter && rush.chargerPose === 'push' ? 'push' : counter && ['groggy', 'grip', 'lift', 'overhead', 'toss', 'release'].includes(rush.stage) ? 'stunned' : 'brace' : caught ? rush.lift > 0 ? 'overhead' : 'grapple' : post ? counter ? 'throw' : 'brace' : rush.grip === 'pair' ? 'grapple' : 'brace';
     const grip = (id: string) => caught ? id === v ? undefined : v : rush.grip === 'pair' && rush.pairIds.includes(id) ? rush.pairIds.find(other => other !== id) : undefined;
-    action.actors = [actor(a, 'aggressor', point(a).x - 500, point(a).y - 416, pose(a), !counter && rush.chargerPose === 'push' ? rush.pushStroke : rush.phase, grip(a), counter ? '팔을 잡는 선수' : '충돌 뒤 둘을 밀기'), actor(v, 'victim', point(v).x - 500, point(v).y - 416, pose(v), rush.phase, grip(v), counter ? '돌진 후 그로기' : '함께 밀리는 선수'), actor(h, 'helper', point(h).x - 500, point(h).y - 416, pose(h), rush.phase, grip(h), counter ? '다리를 잡는 선수' : '함께 밀리는 선수')];
+    action.actors = [actor(a, 'aggressor', point(a).x - 500, point(a).y - 416, pose(a), !counter && rush.chargerPose === 'push' ? rush.pushStroke : rush.phase, grip(a), counter ? '팔을 잡는 선수' : '충돌로 밀어붙이는 선수'), actor(v, 'victim', point(v).x - 500, point(v).y - 416, pose(v), rush.phase, grip(v), counter ? '돌진 후 그로기' : '함께 밀리는 선수'), actor(h, 'helper', point(h).x - 500, point(h).y - 416, pose(h), rush.phase, grip(h), counter ? '다리를 잡는 선수' : '함께 밀리는 선수')];
     return action;
   }
   if (isArenaFinalTechnique(round)) {
@@ -266,7 +269,7 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
     const shove = arenaDoubleShoveTargets(round, elapsed, { x: 675, y: 430 });
     action.stage = post ? 'throw' : shove.stage === 'wrestle' ? 'link' : shove.stage === 'approach' ? 'approach' : 'joint-attack';
     action.lift = 0; action.liftedId = undefined; action.targetId = h;
-    action.actors = [actor(a, 'aggressor', -90, 43, p < .45 ? 'guard' : 'push', shove.pressure, p < .45 || post ? undefined : h, '둘을 함께 밀기'), actor(v, 'victim', 22, 14, 'brace', shove.pressure, post ? undefined : h, '같이 밀리는 선수'), actor(h, 'helper', -22, -14, 'brace', shove.pressure, post ? undefined : v, '같이 밀리는 선수')];
+    action.actors = [actor(a, 'aggressor', -90, 43, p < .45 ? 'guard' : 'push', shove.pressure, p < .45 || post ? undefined : h, '두 명을 밀어붙이기'), actor(v, 'victim', 22, 14, 'brace', shove.pressure, post ? undefined : h, '같이 밀리는 선수'), actor(h, 'helper', -22, -14, 'brace', shove.pressure, post ? undefined : v, '같이 밀리는 선수')];
   } else if (round.tactic === 'shove' && h) {
     const shove = arenaShoveTargets(round, elapsed, { x: 675, y: 430 });
     action.stage = release ? 'release' : post ? 'throw' : shove.stage === 'wrestle' ? 'link' : shove.stage === 'approach' ? 'approach' : 'joint-attack';
@@ -450,7 +453,7 @@ export function arenaActionWords(round: ArenaRound, elapsed: number): { id: stri
   const rim = arenaRimTargets(round, elapsed, { x: 500, y: 416 });
   if (rim?.active) return rim.stage === 'pressure' ? [{ id: round.aggressor, word: '밀기!' }, ...(rim.resistance > .4 ? [{ id: round.victim, word: '버티기!' }] : [])] : rim.stage === 'brace' ? [{ id: round.victim, word: '버텼다!' }] : rim.stage === 'release' ? [{ id: round.victim, word: '밀기 막기!' }] : [];
   const recovery = arenaRecoveryTargets(round, elapsed, { x: 500, y: 416 });
-  if (recovery?.active) return recovery.stage === 'hold' ? [{ id: round.aggressor, word: '맞잡기!' }] : recovery.stage === 'lift' && recovery.height > 4 ? [{ id: round.aggressor, word: '들기!' }] : recovery.airborne ? [{ id: round.victim, word: '공중 한 바퀴!' }] : recovery.stage === 'land' || recovery.stage === 'release' ? [{ id: round.victim, word: '착지! 살았다!' }] : [];
+  if (recovery?.active) return recovery.stage === 'hold' ? [{ id: round.aggressor, word: '맞잡기!' }] : (recovery.stage === 'lift' || recovery.stage === 'overhead') && recovery.height > 4 ? [{ id: round.aggressor, word: '들기!' }] : recovery.airborne ? [{ id: round.victim, word: recovery.kind === 'overhead-escape' ? '점프 탈출!' : '공중 한 바퀴!' }] : recovery.stage === 'land' || recovery.stage === 'release' ? [{ id: round.victim, word: '착지! 살았다!' }] : [];
   const escape = arenaEscapeTargets(round, elapsed, { x: 500, y: 416 });
   if (escape?.released) return [{ id: escape.runnerId, word: '도망 성공!' }];
   if (escape?.active && escape.stage === 'separate') return [{ id: escape.runnerId, word: '도망 성공!' }, { id: escape.chaserId, word: '놓쳤다!' }];
@@ -459,7 +462,7 @@ export function arenaActionWords(round: ArenaRound, elapsed: number): { id: stri
   const action = arenaAction(round, elapsed), a = round.aggressor, v = round.victim;
   if (round.rushOutcome && round.helper) {
     const rush = arenaPairRushTargets(round, elapsed, { x: 500, y: 416 });
-    return rush.stage === 'charge' ? [{ id: rush.chargerId, word: '돌진!' }] : rush.stage === 'contact' ? [{ id: rush.chargerId, word: '충돌!' }] : rush.stage === 'groggy' ? [{ id: rush.chargerId, word: '그로기!' }] : rush.stage === 'grip' ? [{ id: round.aggressor, word: '손끝 잡기!' }, { id: round.helper, word: '발끝 잡기!' }] : rush.stage === 'lift' || rush.stage === 'overhead' ? [{ id: round.aggressor, word: '머리 위로!' }] : rush.stage === 'toss' || rush.stage === 'release' ? [{ id: round.aggressor, word: rush.outcome === 'double-out' ? '둘을 밀어 장외로!' : '함께 던지기!' }] : rush.stage === 'push' ? [{ id: rush.chargerId, word: '둘을 밀기!' }] : [];
+    return rush.stage === 'charge' ? [{ id: rush.chargerId, word: '돌진!' }] : rush.stage === 'contact' ? [{ id: rush.chargerId, word: '충돌!' }] : rush.stage === 'groggy' ? [{ id: rush.chargerId, word: '그로기!' }] : rush.stage === 'grip' ? [{ id: round.aggressor, word: '손끝 잡기!' }, { id: round.helper, word: '발끝 잡기!' }] : rush.stage === 'lift' || rush.stage === 'overhead' ? [{ id: round.aggressor, word: '머리 위로!' }] : rush.stage === 'toss' || rush.stage === 'release' ? [{ id: round.aggressor, word: rush.outcome === 'double-out' ? '두 명 장외!' : '함께 던지기!' }] : rush.stage === 'push' ? [{ id: rush.chargerId, word: '밀어붙이기!' }] : [];
   }
   if (round.tactic === 'armspin') {
     const tech = arenaTechniqueTargets(round, elapsed, { x: 500, y: 416 });
@@ -576,7 +579,10 @@ export function arenaRounds(order: string[], duration = 44_000, rushRoll = 7, es
       if (alternatives.length) round = { ...round, aggressor: alternatives[(escapeRoll! >>> 5) % alternatives.length] };
     }
     const recoveryThrowSpan = round.final ? 5000 : 3100 + salt % 5 * 200;
-    const recovery: ArenaRecoveryWindow | undefined = escapeSeed !== undefined && !escape && !round.helper && !round.rushOutcome && ['lift', 'brace', 'counter', 'final', 'catch', 'spin', 'armspin', 'suplex', 'elbow'].includes(round.tactic) && recoveries < 1 && arenaEscapeRoll(escapeSeed, round.index + 67) % 100 < 4 ? { start: entry, throwAt: entry + recoveryThrowSpan, end: entry + recoveryThrowSpan + ARENA_RECOVERY_EXIT_DURATION } : undefined;
+    const overheadEscape = escapeSeed !== undefined && !escape && !round.helper && !round.rushOutcome && round.tactic === 'suplex' && recoveries < 1
+      && arenaEscapeRoll(escapeSeed, round.index + 39) % 100 >= 8 && arenaEscapeRoll(escapeSeed, round.index + 307) % 100 < 2;
+    const recovery: ArenaRecoveryWindow | undefined = overheadEscape ? { start: entry, throwAt: entry + recoveryThrowSpan, end: entry + recoveryThrowSpan + ARENA_RECOVERY_EXIT_DURATION, kind: 'overhead-escape' }
+      : escapeSeed !== undefined && !escape && !round.helper && !round.rushOutcome && ['lift', 'brace', 'counter', 'final', 'catch', 'spin', 'armspin', 'suplex', 'elbow'].includes(round.tactic) && recoveries < 1 && arenaEscapeRoll(escapeSeed, round.index + 67) % 100 < 4 ? { start: entry, throwAt: entry + recoveryThrowSpan, end: entry + recoveryThrowSpan + ARENA_RECOVERY_EXIT_DURATION } : undefined;
     if (recovery) recoveries++;
     // A separate cosmetic roll changes the story, never the drawn placement.
     if (!round.helper && ['lift', 'suplex', 'final'].includes(round.tactic) && arenaEscapeRoll(escapeSeed ?? seed, round.index + 39) % 100 < 8) round = { ...round, tactic: 'elbow' };
@@ -752,6 +758,11 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
     : rim.stage === 'brace' ? { title: '버텼다! 두 발을 박고 밀기를 막았다', detail: `${v}가 보폭을 넓혀 버텼습니다. ${a}의 밀기가 멈추고 두 선수 모두 모래판에 남았습니다.` }
     : { title: '밀기가 막혔다! 손을 풀고 다시 붙는다', detail: `${a} · ${v}가 손을 풀고 한 발 물러납니다. 방금 밀린 자리에서 자세를 바꾸며 다음 승부수를 노립니다.` };
   const recovery = arenaRecoveryTargets(round, elapsed, { x: 500, y: 416 });
+  if (recovery?.active && recovery.kind === 'overhead-escape') return recovery.stage === 'overhead' ? { title: '머리 위로 들렸다 · 점프로 벗어날 수 있을까?', detail: `${a}가 ${v}를 높이 들었습니다. 내리찍기 직전 ${v}가 손에서 빠져나갈 틈을 찾습니다.` }
+    : recovery.airborne ? { title: '머리 위에서 점프 탈출!', detail: `${v}가 무릎을 모아 손에서 튀어나왔습니다! 뒤로 점프하고, ${a}는 놓친 팔을 내리며 균형을 바로잡습니다.` }
+    : recovery.stage === 'land' || recovery.stage === 'release' ? { title: '두 발 착지! 내리찍기를 피했다', detail: `${v}가 모래판 안에 두 발로 착지했습니다. 모두 살아남아 다음 승부를 이어갑니다.` }
+    : recovery.stage === 'lift' ? { title: '머리 위로 들어 올린다!', detail: `${a}가 무릎을 펴며 ${v}를 머리 위로 들어 올립니다. 두 발이 모래판을 떠납니다.` }
+    : { title: '맞잡고 내리찍을 틈을 노린다', detail: `${a} · ${v}가 몸통을 맞잡고 발을 딛어 힘을 겨룹니다.` };
   if (recovery?.active) return recovery.stage === 'approach' ? { title: '몸통을 노리고 가까이 파고든다', detail: `${a}가 ${v}와 거리를 좁힙니다. 두 선수는 서로를 향해 발을 고쳐 딛습니다.` }
     : recovery.stage === 'hold' ? { title: '맞잡았다 · 두 발로 힘을 겨룬다', detail: `${a}가 ${v}의 몸통을 잡았습니다. 아직 발을 딛고 버티며 들어 올릴 틈을 봅니다.` }
     : recovery.stage === 'lift' ? { title: '몸통을 잡아 들어 올린다!', detail: `${a}가 무릎을 펴며 ${v}를 들어 올립니다. 붙잡힌 몸의 두 발이 모래판을 떠납니다.` }
@@ -830,13 +841,13 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
   }
   if ((round.tactic === 'shove' || round.tactic === 'double-shove') && elapsed < round.resolve) {
     const shove = round.tactic === 'double-shove' ? arenaDoubleShoveTargets(round, elapsed, { x: 675, y: 430 }) : arenaShoveTargets(round, elapsed, { x: 675, y: 430 });
-    if (round.secondaryVictim) return { title: shove.stage === 'wrestle' ? '두 선수의 힘겨루기' : shove.stage === 'approach' ? '옆에서 빈틈을 노린다' : shove.stage === 'contact' ? '맞잡은 둘을 밀었다!' : elapsed >= round.impact ? '두 선수만 장외로!' : '두 선수가 함께 밀린다!', detail: elapsed >= round.impact ? `${v} · ${h}가 함께 경계 아래로 떨어집니다. ${a}는 모래판 안에 남습니다.` : `${v} · ${h}가 손을 맞잡은 사이 ${a}가 옆에서 밀었습니다. 서로 손을 놓지 못한 두 선수의 뒷발이 함께 밀립니다.` };
+    if (round.secondaryVictim) return { title: shove.stage === 'wrestle' ? '두 선수의 힘겨루기' : shove.stage === 'approach' ? '옆에서 빈틈을 노린다' : shove.stage === 'contact' ? '맞잡은 두 명을 밀어붙였다!' : elapsed >= round.impact ? '두 선수만 장외로!' : '두 선수가 함께 밀린다!', detail: elapsed >= round.impact ? `${v} · ${h}가 함께 경계 아래로 떨어집니다. ${a}는 모래판 안에 남습니다.` : `${v} · ${h}가 손을 맞잡은 사이 ${a}가 옆에서 밀었습니다. 서로 손을 놓지 못한 두 선수의 뒷발이 함께 밀립니다.` };
     const detail = elapsed >= round.impact ? `${h}가 손을 놓고 발을 고쳐 딛었습니다. ${v}는 경계 아래로 밀려 떨어집니다.` : shove.stage === 'wrestle' || shove.stage === 'approach' ? `${v} · ${h}가 손을 잡고 싸웁니다. ${a}는 둘의 옆으로 접근하며 빈틈을 살핍니다.` : shove.stage === 'contact' ? `${a}가 어깨와 두 손으로 밀었습니다! ${v} · ${h}의 중심이 함께 흔들립니다.` : `${a}가 발을 딛고 밀어붙입니다. ${h}는 손을 풀고 중심을 잡고, ${v}는 한 발씩 경계로 밀립니다.`;
     return { title: shove.stage === 'wrestle' ? '맞잡은 두 선수 · 옆에서 빈틈을 본다' : shove.stage === 'approach' ? '몸싸움 틈으로 다가온다' : shove.stage === 'contact' ? '옆에서 밀었다! 중심이 흔들린다' : elapsed >= round.impact ? '한 명은 버텼다! 다른 한 명은 장외' : '발을 고쳐 딛는다! 경계가 가깝다', detail };
   }
   if (round.exchange && elapsed >= round.impact) return { title: '버텼다! 다시 빈틈을 살핍니다', detail: `${a} · ${v}, 모두 모래판을 지켰습니다. 손을 풀고 다음 빈틈을 봅니다.` };
   if (elapsed >= round.resolve) return { title: round.final ? `${a}, 오늘의 장사!` : `장외! ${v} · ${order.indexOf(round.victim) + 1}위 확정`, detail: round.final ? `${round.tactic === 'bait' ? '마지막 돌진을 피했습니다. 상대가 관성으로 장외에 넘어졌습니다.' : round.tactic === 'edge' ? '끝까지 버티던 상대를 경계 밖으로 밀어냈습니다.' : '버티던 마지막 상대를 뒤집었습니다.'} ${order.length >= 3 ? '1·2·3위 선수들이' : '1·2위 선수들이'} 시상대에서 인사합니다.` : `${v}, 모래판 밖에 착지했습니다. 나머지 선수들의 난투는 계속됩니다.` };
-  const titles: Record<ArenaTactic, string> = { team: '협공 · 한 명은 길을 막고, 한 명은 민다', bait: '미끼 · 돌진을 기다렸다가 옆으로 피한다', catch: '돌진을 받아 잡고 되치기', ram: '어깨로 돌진해 상대를 날리기', spin: '들기를 버티고 한 바퀴 되치기', shove: '몸싸움에 끼어 어깨로 밀기', 'double-shove': '맞잡은 둘을 함께 밀기', edge: '가장자리 승부 · 발을 딛고 밀어낸다', counter: '역습 · 밀리던 쪽이 중심을 낮춘다', betrayal: '배신 · 등을 맡긴 순간 방향을 바꾼다', brace: '버티기 · 발을 박고 힘을 되돌린다', lift: '들배지기 · 체중을 싣고 들어 올린다', final: '마지막 두 명 · 최후의 버티기', armspin: '팔 잡고 회전 던지기', trip: '발목 걸기 · 굴려 장외로', suplex: '머리 위에서 내리찍기', sidekick: '점프 옆차기 · 발끝 충돌', elbow: '들린 상태에서 엘보우 반격' };
+  const titles: Record<ArenaTactic, string> = { team: '협공 · 한 명은 길을 막고, 한 명은 민다', bait: '미끼 · 돌진을 기다렸다가 옆으로 피한다', catch: '돌진을 받아 잡고 되치기', ram: '어깨로 돌진해 상대를 날리기', spin: '들기를 버티고 한 바퀴 되치기', shove: '몸싸움에 끼어 어깨로 밀기', 'double-shove': '맞잡은 두 명을 밀어붙이기', edge: '가장자리 승부 · 발을 딛고 밀어낸다', counter: '역습 · 밀리던 쪽이 중심을 낮춘다', betrayal: '배신 · 등을 맡긴 순간 방향을 바꾼다', brace: '버티기 · 발을 박고 힘을 되돌린다', lift: '들배지기 · 체중을 싣고 들어 올린다', final: '마지막 두 명 · 최후의 버티기', armspin: '팔 잡고 회전 던지기', trip: '발목 걸기 · 굴려 장외로', suplex: '머리 위에서 내리찍기', sidekick: '점프 옆차기 · 발끝 충돌', elbow: '들린 상태에서 엘보우 반격' };
   const details: Record<ArenaTactic, string> = {
     elbow: `${v}가 먼저 들어 올리지만 ${a}가 머리를 팔꿈치로 찍어 반격합니다. 누운 상대의 발끝에 접근해 끌고 간 뒤, 경계에서 상대만 던집니다.`,
     team: `${h}, ${v}의 퇴로를 막습니다. ${a}, 앞에서 함께 밀어냅니다.`,

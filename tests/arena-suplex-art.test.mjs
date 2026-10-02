@@ -15,9 +15,57 @@ const fighter = overrides => ({ candidate: { id: '2', name: '선수', color: '#f
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 function victimAt(phase, side, animation) {
   const time = round.start + span * phase, frame = arenaTechniqueTargets({ ...round, contactSide: side }, time, { x: 500, y: 416 });
-  return { time, frame, actor: fighter({ x: frame.victim.x, y: frame.victim.y - frame.lift, depthY: frame.victim.y, facing: -side, pose: frame.victimPose ?? 'brace', phase, angle: frame.victimAngle, suspension: frame.victimSuspension, slamProgress: frame.victimSlam, ...(animation ? { animation, motionImmediate: false } : {}) }) };
+  return { time, frame, actor: fighter({ x: frame.victim.x, y: frame.victim.y - frame.lift, depthY: frame.victim.y, facing: -side, pose: frame.victimPose ?? 'brace', phase, angle: frame.victimAngle, suspension: frame.victimSuspension, slamProgress: frame.victimSlam, grappleEffort: frame.victimEffort, ...(animation ? { animation, motionImmediate: false } : {}) }) };
 }
 function parts(contacts) { return [contacts.head, contacts.waist, ...contacts.shoulders, ...contacts.hands, ...contacts.feet]; }
+
+function contestAt(phase, side, index = 1) {
+  const { time, frame, actor: victim } = victimAt(phase, side);
+  victim.index = index;
+  const waist = sampleArenaFighterContacts(victim, time).waist;
+  const driver = fighter({ index: (index + 1) % 10, candidate: { id: '1', name: '메치는 선수', color: '#ffad72' }, x: frame.aggressor.x, y: frame.aggressor.y, depthY: frame.aggressor.y, facing: side, pose: frame.aggressorPose ?? 'grapple', phase, angle: frame.aggressorAngle, grappleEffort: frame.aggressorEffort, grappleLiftPreparation: frame.aggressorLiftPreparation, overheadRaise: frame.aggressorOverheadRaise, gripMode: 'waist', gripTarget: waist, secondaryGripTarget: { x: waist.x - side * 6, y: waist.y + 3 }, gripStrength: 1, gripLocked: true });
+  drawArenaFighter(noop, victim, time); drawArenaFighter(noop, driver, time);
+  return { time, frame, victim, driver };
+}
+
+test('the suplex contest presses against a grounded waist before the full lift, keeping complete adult limbs', () => {
+  for (const side of [-1, 1]) for (const index of [0, 4, 9]) {
+    const moments = [.200001, .27, .339999].map(phase => contestAt(phase, side, index));
+    assert.ok(moments[1].frame.aggressorEffort > .99 && moments[1].frame.victimEffort > .89, 'both opponents visibly resist at the middle of the contest');
+    assert.ok(moments[0].frame.aggressorEffort < .00001 && moments[2].frame.aggressorEffort < .00001, 'the effort rises and relaxes before the lift');
+    for (const { frame, victim, driver } of moments) {
+      assert.equal(frame.lift, 0, 'the resisted waist grip cannot lift the victim early');
+      assert.equal(frame.grip, 'waist'); assert.equal(driver.pose, 'grapple'); assert.equal(victim.pose, 'brace');
+      const waist = victim.animation.contactPoints.waist, hands = driver.animation.contactPoints.hands;
+      assert.ok(Math.min(...hands.map(hand => distance(hand, waist))) < 5, `the lift begins with an actual hand-to-waist grip (side ${side}, body ${index}, phase ${frame.phase})`);
+      for (const actor of [driver, victim]) {
+        const { contactPoints, skeleton } = actor.animation;
+        assert.equal(actor.y, actor.depthY);
+        assert.ok(contactPoints.feet.every(foot => Math.abs(foot.y - (actor.depthY - 2 * actor.scale)) < .001), 'both feet keep their soles on the sand throughout the resistance');
+        for (let leg = 0; leg < 2; leg++) {
+          assert.ok(distance(skeleton.hips[leg], skeleton.feet[leg]) > 14, 'the thigh and shin do not fold into a short crouched silhouette');
+          for (const length of [distance(skeleton.hips[leg], skeleton.knees[leg]), distance(skeleton.knees[leg], skeleton.feet[leg])]) assert.ok(length >= 7 && length <= 11.001, `grounded leg segments retain their normal projected length (${length.toFixed(3)})`);
+        }
+        for (let arm = 0; arm < 2; arm++) {
+          assert.ok(Math.abs(distance(contactPoints.shoulders[arm], contactPoints.elbows[arm]) - 11 * actor.scale) < .005, 'the gripping upper arm keeps its adult length');
+          assert.ok(Math.abs(distance(contactPoints.elbows[arm], contactPoints.hands[arm]) - 10.5 * actor.scale) < .005, 'the connected forearm cannot shrink while gripping');
+        }
+      }
+    }
+    assert.ok(distance(moments[0].frame.aggressor, moments[2].frame.aggressor) < 10 && distance(moments[0].frame.victim, moments[2].frame.victim) < 10, 'the contest shifts weight nearby rather than resetting either root');
+  }
+});
+
+test('both suplex bodies keep continuous roots, hands and feet at the resistance and lift boundaries', () => {
+  for (const side of [-1, 1]) for (const phase of [.20, .34]) {
+    const before = contestAt(phase - .001 / span, side), after = contestAt(phase + .001 / span, side);
+    for (const role of ['driver', 'victim']) {
+      assert.ok(distance(before[role], after[role]) < .005, `${role} cannot reset its root at phase ${phase}`);
+      const a = parts(before[role].animation.contactPoints), b = parts(after[role].animation.contactPoints);
+      a.forEach((point, index) => assert.ok(distance(point, b[index]) < .005, `${role}, side ${side}, phase ${phase}, painted point ${index} cannot jump when resistance becomes lifting (${distance(point, b[index]).toFixed(3)}px)`));
+    }
+  }
+});
 
 test('the slammed body is dragged toward its foot ends instead of pulling the driver across its head', () => {
   for (const side of [-1, 1]) for (const center of [{ x: 360, y: 400 }, { x: 640, y: 440 }]) {

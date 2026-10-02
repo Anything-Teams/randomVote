@@ -1,9 +1,11 @@
 import type { ArenaPoint, ArenaRound } from './arenaLogic';
+import type { ArenaPose } from './game/ArenaFighter';
+import { arenaTechniqueTargets } from './arenaTechniques';
 
 export const ARENA_RECOVERY_THROW_SPAN = 3900;
 export const ARENA_RECOVERY_EXIT_DURATION = 1250;
 export const ARENA_RECOVERY_DURATION = ARENA_RECOVERY_THROW_SPAN + ARENA_RECOVERY_EXIT_DURATION;
-export type ArenaRecoveryWindow = { start: number; end: number; throwAt?: number };
+export type ArenaRecoveryWindow = { start: number; end: number; throwAt?: number; kind?: 'overhead-escape' };
 const clamp = (p: number) => Math.max(0, Math.min(1, p));
 const ease = (p: number) => { const t = clamp(p); return t * t * (3 - 2 * t); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
@@ -12,9 +14,53 @@ const inside = (point: ArenaPoint): ArenaPoint => {
   return radius <= 1 ? point : { x: 500 + (point.x - 500) / radius, y: 416 + (point.y - 416) / radius };
 };
 
+/** Keep the raised suplex rig until the held fighter jumps free of the hands. */
+function overheadEscape(round: ArenaRound, elapsed: number, center: ArenaPoint) {
+  const window = round.recovery!, side = round.contactSide ?? (center.x < 500 ? -1 : 1);
+  const unit = Math.max(.001, round.timeScale ?? 1), throwAt = window.throwAt ?? window.start + ARENA_RECOVERY_THROW_SPAN * unit;
+  const span = Math.max(1, throwAt - window.start), age = (elapsed - throwAt) / unit;
+  // The normal suplex's readable .70 overhead hold is the exact release rig.
+  const heldRound = { ...round, recovery: undefined, suplexGripAt: undefined, tactic: 'suplex' as const, start: window.start, impact: window.start + span / .70 };
+  const lifting = arenaTechniqueTargets(heldRound, Math.min(elapsed, throwAt), center);
+  const held = arenaTechniqueTargets(heldRound, throwAt, center);
+  const initial = inside(held.victim), landing = inside({ x: initial.x + side * 82, y: initial.y + 8 });
+  const flight = clamp(age / 880), landed = age >= 880;
+  const balance = age >= 0 && age < 700 ? Math.sin(Math.PI * clamp(age / 700)) ** 2 : 0;
+  const landingPhase = clamp((age - 880) / 220), lowerHands = age < 0 ? lifting.aggressorOverheadRaise : 1 - ease(flight / .32);
+  const jumping = age >= 0 && !landed;
+  const throwerPose: ArenaPose = age < 0 ? lifting.aggressorPose ?? 'grapple' : lowerHands > 0 ? 'overhead' : balance > .05 ? 'brace' : 'guard';
+  const receiverPose: ArenaPose = age < 0 ? lifting.victimPose ?? 'brace' : jumping ? 'airborne' : landed && age < 1100 ? 'land' : 'guard';
+  return {
+    kind: 'overhead-escape' as const,
+    active: elapsed >= window.start && elapsed < window.end,
+    stage: age < 0 ? lifting.stage === 'overhead' ? 'overhead' : lifting.stage === 'lift' ? 'lift' : lifting.grip ? 'hold' : 'approach' : !landed ? 'jump' : age < 1100 ? 'land' : 'release',
+    side, phase: age < 0 ? lifting.phase : landingPhase, airborne: jumping,
+    thrower: inside({ x: (age < 0 ? lifting.aggressor.x : held.aggressor.x) - side * balance * 4, y: age < 0 ? lifting.aggressor.y : held.aggressor.y }),
+    receiver: age < 0 ? inside(lifting.victim) : { x: mix(initial.x, landing.x, flight), y: mix(initial.y, landing.y, flight) },
+    height: age < 0 ? lifting.lift : !landed ? 100 * (1 - ease(flight)) + 64 * 4 * flight * (1 - flight) : 0,
+    angle: jumping ? side * .12 * Math.sin(Math.PI * flight) : 0,
+    grip: age < 0 && !!lifting.grip,
+    throwAt, flightPhase: flight, throwPhase: clamp(age / 350), liftPhase: age < 0 ? lifting.aggressorOverheadRaise : 1,
+    landingPhase, returnCenter: { x: (held.aggressor.x + landing.x) / 2, y: (held.aggressor.y + landing.y) / 2 },
+    throwerPose,
+    overheadRaise: lowerHands,
+    receiverPose,
+    // Unfold the held feet during descent, before the soles reach the sand.
+    // Leaving the suplex tuck at one made the knees contact first at landing.
+    receiverSlam: age < 0 ? lifting.victimSlam : { tuck: 1 - ease((flight - .45) / .42), slump: landingPhase },
+    suspension: age < 0 ? lifting.victimSuspension : jumping ? 1 - ease((flight - .80) / .20) : 0,
+    jumpTuck: jumping ? Math.sin(Math.PI * clamp(flight / .85)) ** 2 : 0,
+    throwerBalance: balance,
+    throwerEffort: age < 0 ? lifting.aggressorEffort : undefined,
+    receiverEffort: age < 0 ? lifting.victimEffort : undefined,
+    liftPreparation: age < 0 ? lifting.aggressorLiftPreparation : undefined,
+  };
+}
+
 /** A rare failed throw is a real airborne somersault and feet-first landing on the sand. */
 export function arenaRecoveryTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
   if (!round.recovery) return undefined;
+  if (round.recovery.kind === 'overhead-escape') return overheadEscape(round, elapsed, center);
   const side = round.contactSide ?? (center.x < 500 ? -1 : 1);
   const unit = Math.max(.001, round.timeScale ?? 1);
   const age = Math.max(0, (elapsed - round.recovery.start) / unit);
@@ -34,6 +80,7 @@ export function arenaRecoveryTargets(round: ArenaRound, elapsed: number, center:
   // quarter of the descent lets the straightened feet read before contact.
   const turn = side * Math.PI * 2 * ease((flight - .08) / .76);
   return {
+    kind: undefined,
     active: elapsed >= round.recovery.start && elapsed < round.recovery.end,
     stage: progress < .30 ? 'approach' : progress < .52 ? 'hold' : throwAge < 0 ? 'lift' : !landed ? 'somersault' : throwAge < 1100 ? 'land' : 'release',
     side, phase: throwAge < 0 ? take : clamp(throwAge / 350), airborne,
@@ -43,5 +90,8 @@ export function arenaRecoveryTargets(round: ArenaRound, elapsed: number, center:
     throwAt: round.recovery.throwAt ?? round.recovery.start + throwSpan * unit,
     flightPhase: flight, throwPhase: clamp(throwAge / 350), liftPhase: take,
     landingPhase: clamp((throwAge - 880) / 220), returnCenter: { x: (center.x - side * 23 + landing.x) / 2, y: (center.y + landing.y) / 2 },
+    throwerPose: undefined, overheadRaise: undefined, receiverPose: undefined, receiverSlam: undefined,
+    suspension: undefined, jumpTuck: undefined, throwerBalance: undefined,
+    throwerEffort: undefined, receiverEffort: undefined, liftPreparation: undefined,
   };
 }
