@@ -5,6 +5,13 @@ export type ArenaFinalTechnique = typeof arenaFinalTechniques[number];
 /** The renderer anchors both wrists, then lays the body outward from them. */
 export type ArenaArmSpinFrame = { orbit: number; flatness: number; weight: number };
 export const isArenaFinalTechnique = (round: ArenaRound): boolean => arenaFinalTechniques.includes(round.tactic as ArenaFinalTechnique);
+export const isArenaFloorDrag = (round: ArenaRound): boolean => round.tactic === 'suplex' || round.tactic === 'elbow';
+/** Shared physical deadlines after a grounded knockout, in scaled elapsed milliseconds. */
+export function arenaFloorExitTiming(round: ArenaRound, unit = round.timeScale ?? 1) {
+  const scale = Math.max(.001, unit);
+  const finish = Math.max(1100, Math.min(2600, (round.resolve - round.impact) / scale - 1400));
+  return { stunnedUntil: 900 * scale, dragUntil: finish * scale, tossUntil: (finish + 880) * scale, landUntil: (finish + 1080) * scale, recoverUntil: (finish + 1580) * scale };
+}
 /** A single quick jump keeps the airborne kick independent of the bout's introduction. */
 export function arenaSidekickWindow(round: ArenaRound) {
   const span = Math.max(1, round.impact - round.start), unit = Math.min(1, round.timeScale ?? 1);
@@ -128,7 +135,7 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
   } else if (round.tactic === 'elbow') {
     const close = ease((phase - .30) / .04);
     const raised = ease((phase - .30) / .15), descend = ease((phase - .55) / .12);
-    const fall = ease((phase - .55) / .12), circle = ease((phase - .69) / .15), take = ease((phase - .90) / .08);
+    const fall = ease((phase - .55) / .12), circle = ease((phase - .67) / .17);
     frame.aggressorLift = raised * 44 * (1 - descend);
     frame.aggressorSuspension = raised * (1 - descend);
     frame.aggressor.x = center.x - side * mix(24, 12, close) + side * 102 * circle;
@@ -146,9 +153,12 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     frame.grip = phase >= .84 && elapsed < round.impact ? 'ankle' : undefined;
     frame.elbowContact = ease((phase - .45) / .10) * (1 - ease((phase - .55) / .06));
     frame.elbowImpact = phase >= .55 && phase < .64 ? 1 - ease((phase - .55) / .09) : 0;
-    frame.lift = take * 30;
-    frame.aggressorPose = phase >= .45 && phase < .61 ? 'elbow' : phase >= .84 ? elapsed >= round.impact ? 'throw' : 'drag' : undefined;
-    frame.stage = phase < .45 ? 'lift-counter' : phase < .55 ? 'elbow' : phase < .67 ? 'elbow-impact' : phase < .76 ? 'groggy' : phase < .84 ? 'ankle-approach' : elapsed < round.impact ? 'ankle-grip' : 'release';
+    // Once the lifter falls, keep the entire floor rig grounded. The winner
+    // walks to its painted feet, then pulls that same body toward the rim.
+    frame.lift = 0;
+    const timing = arenaFloorExitTiming(round), age = Math.max(0, elapsed - round.impact);
+    frame.aggressorPose = phase >= .45 && phase < .61 ? 'elbow' : phase >= .84 ? elapsed >= round.impact && age >= timing.dragUntil ? 'throw' : 'drag' : undefined;
+    frame.stage = phase < .45 ? 'lift-counter' : phase < .55 ? 'elbow' : phase < .67 ? 'elbow-impact' : phase < .76 ? 'groggy' : phase < .84 ? 'ankle-approach' : elapsed < round.impact ? 'ankle-grip' : age < timing.dragUntil ? 'drag' : 'release';
   }
   return frame;
 }
@@ -169,30 +179,31 @@ export function arenaTechniqueExit(round: ArenaRound, age: number, origin: Arena
       const height = preparation.lift * (1 - ease(phase));
       return { x: groundX, y: groundY - height, groundX, groundY, height, angle: preparation.angle + direction * Math.PI * 2 * ease(phase), yaw: 0, phase, stage: 'roll' };
     }
-  } else if (round.tactic === 'suplex') {
-    const finish = Math.max(1100, Math.min(2600, (round.resolve - round.impact) / Math.max(.001, unit) - 1400));
+  } else if (isArenaFloorDrag(round)) {
+    const scale = Math.max(.001, unit), timing = arenaFloorExitTiming(round, unit), stunned = timing.stunnedUntil / scale, finish = timing.dragUntil / scale;
+    const tossEnd = timing.tossUntil / scale, landEnd = timing.landUntil / scale, recoverEnd = timing.recoverUntil / scale;
     const desired = arenaSuplexRim(origin, direction), ramp = .12;
     // The held body and its driver share this integrated floor path. A far
     // opposite rim must not demand a faster pull than the standing gait.
     const distance = Math.hypot(desired.x - origin.x, desired.y - origin.y);
-    const reachable = 165 * (finish - 900) * Math.max(.001, unit) / 1000 * (1 - ramp);
+    const reachable = 165 * (finish - stunned) * scale / 1000 * (1 - ramp);
     const reach = distance ? Math.min(1, reachable / distance) : 1;
     const rim = { x: origin.x + (desired.x - origin.x) * reach, y: origin.y + (desired.y - origin.y) * reach };
-    if (ms < 900) return { ...origin, groundX: origin.x, groundY: origin.y, height: 0, angle: preparation.angle, phase: ms / 900, stage: 'stunned' };
+    if (ms < stunned) return { ...origin, groundX: origin.x, groundY: origin.y, height: 0, angle: preparation.angle, phase: ms / stunned, stage: 'stunned' };
     if (ms < finish) {
-      const phase = clamp((ms - 900) / (finish - 900));
+      const phase = clamp((ms - stunned) / (finish - stunned));
       const cruise = (phase < ramp ? phase ** 2 / (2 * ramp) : phase > 1 - ramp ? 1 - ramp - (1 - phase) ** 2 / (2 * ramp) : phase - ramp / 2) / (1 - ramp);
       const groundX = mix(origin.x, rim.x, cruise), groundY = mix(origin.y, rim.y, cruise);
       return { x: groundX, y: groundY, groundX, groundY, height: 0, angle: preparation.angle, phase, stage: 'drag' };
     }
-    if (ms < finish + 880) {
-      const phase = clamp((ms - finish) / 880), groundX = mix(rim.x, landing.x, ease(phase)), groundY = mix(rim.y, landing.y, ease(phase));
+    if (ms < tossEnd) {
+      const phase = clamp((ms - finish) / (tossEnd - finish)), groundX = mix(rim.x, landing.x, ease(phase)), groundY = mix(rim.y, landing.y, ease(phase));
       const height = Math.sin(phase * Math.PI) * 42;
       return { x: groundX, y: groundY - height, groundX, groundY, height, angle: preparation.angle + direction * Math.PI * .65 * ease(phase), phase, stage: 'rim-toss' };
     }
     const landedAngle = preparation.angle + direction * Math.PI * .65;
-    if (ms < finish + 1080) return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: landedAngle, phase: (ms - finish - 880) / 200, stage: 'land' };
-    if (ms < finish + 1580) return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: landedAngle * (1 - ease((ms - finish - 1080) / 500)), phase: (ms - finish - 1080) / 500, stage: 'recover' };
+    if (ms < landEnd) return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: landedAngle, phase: (ms - tossEnd) / (landEnd - tossEnd), stage: 'land' };
+    if (ms < recoverEnd) return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: landedAngle * (1 - ease((ms - landEnd) / (recoverEnd - landEnd))), phase: (ms - landEnd) / (recoverEnd - landEnd), stage: 'recover' };
     return { ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: 0, phase: 1, stage: 'walk' };
   } else return undefined;
   const turn = direction * Math.PI * 2, landedAngle = preparation.angle + turn;

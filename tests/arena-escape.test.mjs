@@ -41,7 +41,7 @@ test('escapes only occur with more than two survivors and never change the suppl
     assert.ok(rounds.filter(round => round.escape).length <= 2);
     if (rounds.filter(round => round.escape).length === 2) cappedGames++;
     rounds.forEach((round, index) => {
-      const entry = round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start;
+      const entry = round.rimCharge?.start ?? round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start;
       assert.equal(entry, rounds[index - 1]?.resolve ?? 0, 'each next scene immediately follows the previous deciding result');
       assert.ok([entry, round.start, round.impact, round.resolve, round.end].every(Number.isFinite));
       assert.ok(entry <= round.start && round.start < round.impact && round.impact < round.resolve && round.resolve <= round.end);
@@ -196,4 +196,24 @@ test('hands release before the run, Korean action words match it and preparation
   assert.equal(mini.end, later.escape.start); assert.equal(mini.impact, later.escape.start); assert.equal(mini.resolve, later.escape.start);
   assert.deepEqual(arenaEliminatedIds(mini), []);
   assert.deepEqual(arenaMiniExchanges(available, later.escape.start, 44_000, [later]), [], 'the escape owns its pair without a second preparation motor');
+});
+
+test('the escape announcement keeps the runner moving forward and the chaser pursues then stops without reversing during release', () => {
+  for (const unit of [.5, 1, 1.4]) for (const contactSide of [-1, 1]) for (const runnerId of ['a', 'v']) for (const center of [{ x: 500, y: 416 }, { x: 320, y: 390 }, { x: 680, y: 445 }]) {
+    const round = { ...base, timeScale: unit, contactSide, start: 4450 * unit, escape: { start: 0, end: 3800 * unit, releasedUntil: 4450 * unit, runnerId, chaserId: runnerId === 'a' ? 'v' : 'a', side: 1, outcome: 'separate' } };
+    const at = age => arenaEscapeTargets(round, age * unit, center), announcement = at(2840), end = at(3800);
+    assert.ok(distance(announcement.runner, end.runner) > 15 * Math.min(unit, 1), 'breaking contact is followed by a visible extra run');
+    let previous = announcement;
+    for (let age = 2856; age <= 4450; age += 16) {
+      const current = at(age);
+      for (const id of ['runner', 'chaser']) assert.ok(current[`${id}Facing`] * (current[id].x - previous[id].x) >= -1e-8, 'neither person turns back when the successful escape is announced');
+      assert.equal(current.runnerFacing, announcement.runnerFacing); assert.equal(current.chaserFacing, announcement.chaserFacing);
+      if (age >= 3800) assert.deepEqual(current.chaser, end.chaser, 'the pursuer brakes at the forward endpoint rather than walking home');
+      previous = current;
+    }
+    assert.equal(end.forwardUntil, round.start);
+    assert.deepEqual(end.chaserStop, end.chaser);
+    const released = at(4200);
+    assert.ok(Math.abs(released.returnCenter.x - (released.runner.x + released.chaser.x) / 2) < 1e-8, 'a later encounter starts near the current separated bodies');
+  }
 });

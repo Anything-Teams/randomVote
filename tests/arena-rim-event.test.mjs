@@ -104,7 +104,10 @@ test('other eligible single encounters add about twelve percent rim attempts wit
     eligible++;
     const shouldAttempt = arenaEscapeRoll(seed, 101) % 100 < 12;
     assert.equal(!!first.rim, shouldAttempt, 'only the independent twelve percent roll creates an extra encounter');
-    if (!first.rim) { assert.equal(first.tactic, 'sidekick'); continue; }
+    if (!first.rim) {
+      assert.equal(first.tactic, first.rimCharge?.outcome === 'dodge' ? 'bait' : 'sidekick', 'the separate missed charge may replace the planned kick while a resisted charge resumes it');
+      continue;
+    }
     attempts++;
     const expected = arenaRimOutcome(arenaEscapeRoll(seed, 149) % 10);
     assert.equal(first.rim.outcome, expected);

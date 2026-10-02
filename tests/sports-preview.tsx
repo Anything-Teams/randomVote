@@ -51,7 +51,7 @@ function Preview() {
       </label>}
       {mode === 'arena' && <label style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#d8e5ef', fontSize: 11 }}>길이
         <select aria-label="검증 경기 길이" value={duration} onChange={event => { setDuration(Number(event.target.value)); setElapsed(0); setPlaying(false); }}>
-          {[40_000, 44_000, 62_000].map(value => <option key={value} value={value}>{value / 1000}초</option>)}
+          {[40_000, 44_000, 62_000, 90_000, 120_000].map(value => <option key={value} value={value}>{value / 1000}초</option>)}
         </select>
       </label>}
       {mode === 'arena' && <label style={{ color: '#d8e5ef', fontSize: 11 }}><input type="checkbox" aria-label="난투 순위 뒤집기" checked={reverseArenaOrder} onChange={event => { setReverseArenaOrder(event.target.checked); setElapsed(0); setPlaying(false); }} /> 순위 뒤집기</label>}

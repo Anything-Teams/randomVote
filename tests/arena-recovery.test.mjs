@@ -6,20 +6,20 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { ARENA_RECOVERY_DURATION, arenaRecoveryTargets } = await source('src/arenaRecovery.ts');
-const { arenaAction, arenaFocusRound, arenaPlaybackEnd, arenaRanks, arenaRounds } = await source('src/arenaLogic.ts');
+const { ARENA_RECOVERY_DURATION, ARENA_RECOVERY_THROW_SPAN, ARENA_RECOVERY_EXIT_DURATION, arenaRecoveryTargets } = await source('src/arenaRecovery.ts');
+const { arenaAction, arenaBeat, arenaThrow, arenaFocusRound, arenaPlaybackEnd, arenaRanks, arenaRounds } = await source('src/arenaLogic.ts');
 const { sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const sandRadius = point => Math.hypot((point.x - 500) / 303, (point.y - 416) / 112);
 const eligible = new Set(['lift', 'brace', 'counter', 'final', 'catch', 'spin', 'armspin', 'suplex', 'elbow']);
-const base = { id: 'recovery', index: 0, tactic: 'lift', aggressor: 'thrower', victim: 'receiver', start: 3100, impact: 8100, resolve: 9200, end: 9700, final: false, timeScale: 1, recovery: { start: 0, end: ARENA_RECOVERY_DURATION } };
+const base = { id: 'recovery', index: 0, tactic: 'lift', aggressor: 'thrower', victim: 'receiver', start: ARENA_RECOVERY_DURATION, impact: ARENA_RECOVERY_DURATION + 5000, resolve: ARENA_RECOVERY_DURATION + 6100, end: ARENA_RECOVERY_DURATION + 6600, final: false, timeScale: 1, recovery: { start: 0, throwAt: ARENA_RECOVERY_THROW_SPAN, end: ARENA_RECOVERY_DURATION } };
 
 test('a failed throw completes one airborne somersault and lands feet first inside the sand', () => {
   assert.equal(arenaRecoveryTargets({ ...base, recovery: undefined }, 2000, { x: 500, y: 416 }), undefined);
   for (const side of [-1, 1]) for (const center of [{ x: 500, y: 416 }, { x: 320, y: 390 }, { x: 680, y: 445 }]) {
     const round = { ...base, contactSide: side }, at = age => arenaRecoveryTargets(round, age, center);
-    assert.equal(at(-1).active, false); assert.equal(at(0).active, true); assert.equal(at(3100).active, false);
-    const lifting = at(1650), release = at(1850), midair = at(2300), landed = at(2750), recovered = at(3000);
+    assert.equal(at(-1).active, false); assert.equal(at(0).active, true); assert.equal(at(ARENA_RECOVERY_DURATION).active, false);
+    const span = ARENA_RECOVERY_THROW_SPAN, lifting = at(span * .85), release = at(span), midair = at(span + 460), landed = at(span + 880), recovered = at(span + 1125);
     assert.equal(lifting.stage, 'lift'); assert.equal(lifting.grip, true); assert.ok(lifting.height > 0 && lifting.height < 42);
     assert.equal(release.stage, 'somersault'); assert.equal(release.grip, false); assert.equal(release.height, 42); assert.ok(Math.abs(release.angle) === 0);
     assert.equal(midair.airborne, true); assert.ok(midair.height > 170 && midair.height < 190 && Math.abs(midair.angle) > 3, 'the full somersault has a tall readable apex');
@@ -30,27 +30,27 @@ test('a failed throw completes one airborne somersault and lands feet first insi
     assert.ok(distance(release.receiver, landed.receiver) >= 140 && distance(release.receiver, landed.receiver) <= 170, 'the failed throw carries far across the sand');
     assert.ok(sandRadius(landed.receiver) < .92, 'the cosmetic escape throw never sends a survivor over the rim');
     const body = { candidate: { id: 'receiver', name: '선수', color: '#ffad72' }, index: 1, x: landed.receiver.x, y: landed.receiver.y, depthY: landed.receiver.y, scale: 2.04, facing: -side, pose: 'land', angle: landed.angle, suspension: 0, phase: landed.landingPhase, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, motionImmediate: true };
-    const contacts = sampleArenaFighterContacts(body, 2750);
+    const contacts = sampleArenaFighterContacts(body, span + 880);
     assert.ok(contacts.feet.every(foot => sandRadius(foot) < 1), 'both painted foot endpoints remain inside the arena after the somersault');
     assert.ok(contacts.feet.every(foot => Math.abs(foot.y - (body.y - 2 * body.scale)) < .5), 'the completed rotation plants both soles within a quarter local pixel of their projected ground');
     let previous = release;
     const trajectory = { x: landed.receiver.x - release.receiver.x, y: landed.receiver.y - release.receiver.y };
-    for (let elapsed = 1866; elapsed < 2750; elapsed += 16) {
+    for (let elapsed = span + 16; elapsed < span + 880; elapsed += 16) {
       const current = at(elapsed);
       assert.ok(side * (current.angle - previous.angle) >= -1e-8, 'the somersault cannot reverse before the feet are straightened');
       assert.ok((current.receiver.x - previous.receiver.x) * trajectory.x + (current.receiver.y - previous.receiver.y) * trajectory.y >= -1e-8);
       assert.ok(sandRadius(current.receiver) < 1);
       previous = current;
     }
-    const early = at(1850 + 900 * .25), late = at(1850 + 900 * .75);
+    const early = at(span + 40 + 840 * .25), late = at(span + 40 + 840 * .75);
     assert.ok(Math.abs(late.angle - early.angle) > Math.PI * 1.6, 'most of the complete rotation happens high around the apex');
   }
 });
 
 test('recovery geometry is continuous at lift, flight, landing and release boundaries at every clock scale', () => {
   for (const unit of [.4, .8, 1, 1.4]) for (const side of [-1, 1]) for (const center of [{ x: 500, y: 416 }, { x: 320, y: 390 }, { x: 680, y: 445 }]) {
-    const round = { ...base, contactSide: side, timeScale: unit, start: ARENA_RECOVERY_DURATION * unit, recovery: { start: 0, end: ARENA_RECOVERY_DURATION * unit } };
-    for (const boundary of [0, 1300, 1850, 1850 + 900 * .08, 1850 + 900 * .84, 2750, 2950, 3100]) {
+    const span = ARENA_RECOVERY_THROW_SPAN, round = { ...base, contactSide: side, timeScale: unit, start: ARENA_RECOVERY_DURATION * unit, recovery: { start: 0, throwAt: span * unit, end: ARENA_RECOVERY_DURATION * unit } };
+    for (const boundary of [0, span * .30, span * .52, span * .72, span, span + 40, span + 40 + 840 * .08, span + 40 + 840 * .84, span + 880, span + 1100, ARENA_RECOVERY_DURATION]) {
       const before = arenaRecoveryTargets(round, boundary * unit - .001, center), after = arenaRecoveryTargets(round, boundary * unit + .001, center);
       for (const key of ['thrower', 'receiver', 'returnCenter']) assert.ok(distance(before[key], after[key]) < .005, `${boundary}/${unit}/${key}: a label change cannot teleport a root`);
       for (const key of ['height', 'angle']) assert.ok(Math.abs(before[key] - after[key]) < .005, `${boundary}/${unit}/${key}: release inherits the held body`);
@@ -61,6 +61,26 @@ test('recovery geometry is continuous at lift, flight, landing and release bound
       assert.ok([sample.height, sample.angle, sample.phase, sample.receiver.x, sample.receiver.y].every(Number.isFinite));
       assert.ok(sandRadius(sample.thrower) < 1 && sandRadius(sample.receiver) < 1);
     }
+  }
+});
+
+test('the survival branch uses the same full lift and release timing as an ordinary throw', () => {
+  for (const span of [3100, 3500, 3900, 5000]) for (const unit of [.5, 1, 1.4]) {
+    const recovery = { ...base, timeScale: unit, recovery: { start: 0, throwAt: span * unit, end: (span + ARENA_RECOVERY_EXIT_DURATION) * unit } };
+    const normal = { ...base, recovery: undefined, start: 0, impact: span * unit, resolve: (span + 1100) * unit };
+    for (const progress of [.30, .52, .60, .72, .80, .92, .999]) {
+      const elapsed = span * unit * progress, frame = arenaRecoveryTargets(recovery, elapsed, { x: 500, y: 416 }), ordinary = arenaBeat(normal, elapsed);
+      assert.ok(Math.abs(frame.height - ordinary.liftProgress * 42) < 1e-8, 'the thrown survivor is not rushed through a short bonus lift');
+      assert.ok(Math.abs(frame.liftPhase - ordinary.liftProgress) < 1e-8);
+    }
+    for (const age of [0, 16, 39, 40]) {
+      const recovered = arenaRecoveryTargets(recovery, (span + age) * unit, { x: 500, y: 416 });
+      const ordinary = arenaThrow(age * unit, { x: 523, y: 416 }, { x: 678, y: 425 }, 1, unit, { lift: 42, angle: 0 });
+      assert.equal(recovered.height, ordinary.height, 'the release inherits the normal 40ms hold instead of immediately dropping the carried height');
+      assert.equal(recovered.angle, 0);
+    }
+    assert.equal(arenaRecoveryTargets(recovery, (span + 879) * unit, { x: 500, y: 416 }).airborne, true);
+    assert.equal(arenaRecoveryTargets(recovery, (span + 880) * unit, { x: 500, y: 416 }).stage, 'land');
   }
 });
 
@@ -97,7 +117,9 @@ test('a recovery keeps both drawn participants alive until the later deciding bo
       assert.ok(eligible.has(round.tactic), 'a failed throw only precedes an encounter which can take a throwing grip');
       assert.equal(round.recovery.start, rounds[index - 1]?.resolve ?? 0);
       assert.equal(round.recovery.end, round.start);
-      assert.ok(Math.abs(round.start - round.recovery.start - ARENA_RECOVERY_DURATION * round.timeScale) < 1e-8);
+      assert.ok(Math.abs(round.start - round.recovery.throwAt - ARENA_RECOVERY_EXIT_DURATION * round.timeScale) < 1e-8);
+      const liftSpan = (round.recovery.throwAt - round.recovery.start) / round.timeScale;
+      assert.ok(round.final ? Math.abs(liftSpan - 5000) < 1e-8 : liftSpan >= 3100 - 1e-8 && liftSpan <= 3900 + 1e-8, 'the survivor is lifted for a full normal bout, not a shortened bonus motion');
       assert.ok(round.start < round.impact && round.impact < round.resolve && round.resolve <= round.end);
       const before = arenaRanks(order, round.recovery.start, duration, rushRoll, seed);
       for (const elapsed of [round.recovery.start, (round.recovery.start + round.recovery.end) / 2, round.recovery.end - .001]) {

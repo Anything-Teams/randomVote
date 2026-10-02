@@ -18,6 +18,11 @@ export type ArenaEscapeFrame = {
   separated: boolean;
   released: boolean;
   releasedUntil: number;
+  runnerFacing: 1 | -1;
+  chaserFacing: 1 | -1;
+  runnerForward: ArenaPoint;
+  chaserStop: ArenaPoint;
+  forwardUntil: number;
 };
 
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
@@ -49,7 +54,7 @@ export function arenaEscapeTargets(round: ArenaRound, elapsed: number, center: A
   const runnerId = escape.runnerId, chaserId = escape.chaserId ?? (runnerId === round.victim ? round.aggressor : round.victim);
   const separated = escape.outcome === 'separate', releasedUntil = escape.releasedUntil ?? escape.end;
   const facing = round.contactSide ?? (center.x >= 500 ? 1 : -1), direction = runnerId === round.victim ? facing : -facing;
-  const unit = round.timeScale ?? 1, pace = Math.min(1, unit), distance = 120 * pace, bend = escape.side * 14 * pace;
+  const unit = round.timeScale ?? 1, pace = Math.min(1, unit), distance = (separated ? 140 : 120) * pace, bend = escape.side * 14 * pace;
   const runnerGrip = inside({ x: center.x + direction * 25, y: center.y });
   const chaserGrip = inside({ x: center.x - direction * 25, y: center.y });
   const releasePoint = inside({ x: runnerGrip.x + direction * 10 * pace, y: runnerGrip.y + bend * .35 });
@@ -58,16 +63,19 @@ export function arenaEscapeTargets(round: ArenaRound, elapsed: number, center: A
     const candidate = inside({ x: releasePoint.x + direction * Math.cos(angle) * distance, y: releasePoint.y + Math.sin(angle) * distance * .32 });
     return { candidate, distance: Math.hypot(candidate.x - releasePoint.x, candidate.y - releasePoint.y) };
   }).sort((a, b) => b.distance - a.distance)[0].candidate;
-  const dx = ray.x - releasePoint.x, dy = ray.y - releasePoint.y;
-  const far = inside({ x: ray.x, y: ray.y + bend });
-  const turn = separated ? inside({ x: far.x + dx * .04, y: far.y + bend * .2 }) : far;
-  // A successful escape keeps both people apart. The pursuer gives up and
-  // changes direction instead of moving both bodies back to another grip.
-  const endRunner = separated ? inside({ x: far.x + dx * .08, y: far.y + bend * .4 }) : far;
-  const endChaser = separated ? inside({ x: chaserGrip.x - dx * .10, y: chaserGrip.y - bend }) : inside({ x: endRunner.x - direction * 50, y: endRunner.y });
-  const returnCenter = { x: (endRunner.x + endChaser.x) / 2, y: (endRunner.y + endChaser.y) / 2 };
-  const chaserFar = inside({ x: chaserGrip.x + dx * .32, y: chaserGrip.y + dy * .32 + bend * .2 });
-  const chaserTurn = inside({ x: chaserGrip.x + dx * .57, y: chaserGrip.y + dy * .50 + bend * .25 });
+  const endpoint = inside({ x: ray.x, y: ray.y + bend });
+  const dx = endpoint.x - releasePoint.x, dy = endpoint.y - releasePoint.y;
+  const far = separated ? pointMix(releasePoint, endpoint, .50) : endpoint;
+  const turn = separated ? pointMix(releasePoint, endpoint, .65) : far;
+  // Even after contact is broken the runner keeps going. The chaser spends
+  // the last stroke moving forward and braking, rather than turning around.
+  const endRunner = endpoint;
+  const chaserFar = inside({ x: chaserGrip.x + dx * (separated ? .12 : .32), y: chaserGrip.y + dy * (separated ? .12 : .32) });
+  const chaserTurn = inside({ x: chaserGrip.x + dx * (separated ? .26 : .57), y: chaserGrip.y + dy * (separated ? .26 : .50) });
+  const endChaser = separated ? inside({ x: chaserGrip.x + dx * .35, y: chaserGrip.y + dy * .35 }) : inside({ x: endRunner.x - direction * 50, y: endRunner.y });
+  const heading = (Math.abs(dx) > 1 ? Math.sign(dx) : direction) as 1 | -1;
+  const projectedForward = inside({ x: endRunner.x + dx * .20, y: endRunner.y + dy * .20 });
+  const runnerForward = heading * (projectedForward.x - endRunner.x) >= 0 && (projectedForward.x - endRunner.x) * dx + (projectedForward.y - endRunner.y) * dy >= 0 ? projectedForward : endRunner;
   const duration = Math.max(1, escape.end - escape.start), age = clamp((elapsed - escape.start) / duration) * ARENA_ESCAPE_DURATION;
   let stage: ArenaEscapeStage, phase: number, runner: ArenaPoint, chaser: ArenaPoint, grip = false, release = 1;
   if (age < 1200) {
@@ -91,5 +99,11 @@ export function arenaEscapeTargets(round: ArenaRound, elapsed: number, center: A
     runner = pointMix(turn, endRunner, ease(phase)); chaser = pointMix(chaserTurn, endChaser, ease(phase));
     grip = !separated && stage !== 'done' && phase > .92;
   }
-  return { active: elapsed >= escape.start && elapsed < escape.end, stage, phase, runnerId, chaserId, runner, chaser, returnCenter, grip, release, separated, released: separated && elapsed >= escape.end && elapsed < releasedUntil, releasedUntil };
+  if (separated && elapsed >= escape.end) {
+    runner = pointMix(endRunner, runnerForward, ease((elapsed - escape.end) / Math.max(1, releasedUntil - escape.end)));
+    chaser = endChaser;
+  }
+  const returnCenter = { x: (separated ? runner.x : endRunner.x) + (separated ? chaser.x : endChaser.x), y: (separated ? runner.y : endRunner.y) + (separated ? chaser.y : endChaser.y) };
+  returnCenter.x /= 2; returnCenter.y /= 2;
+  return { active: elapsed >= escape.start && elapsed < escape.end, stage, phase, runnerId, chaserId, runner, chaser, returnCenter, grip, release, separated, released: separated && elapsed >= escape.end && elapsed < releasedUntil, releasedUntil, runnerFacing: heading, chaserFacing: heading, runnerForward, chaserStop: endChaser, forwardUntil: releasedUntil };
 }

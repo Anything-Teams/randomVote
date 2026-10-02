@@ -17,10 +17,10 @@ export default function ArenaStory({ round, candidates, elapsed, preview, finish
   };
   return <div className={`arena-callout${finished ? ' arena-callout-winner' : ''}${story ? ` arena-story-${story.kind}` : ''}`} aria-label="현재 난투 사건">
     {story && !finished ? <>
-      <div className="arena-story-heading"><strong>{story.label}</strong><span className="arena-current-step">{story.steps[story.step]}</span></div>
+      <div className="arena-story-heading"><strong>{story.label}</strong><span className="arena-current-step">{story.steps[story.step] ?? story.steps[0]}</span></div>
       <div className="arena-story-relationship">
         <div className="arena-story-side" aria-label={story.leftLabel}>{story.left.map(chip)}</div>
-        <div className="arena-story-link"><b aria-hidden="true">{story.relation}</b></div>
+        <div className="arena-story-link"><b aria-hidden="true">{story.relation}</b><span>{story.relationLabel}</span></div>
         <div className="arena-story-side" aria-label={story.rightLabel}>{story.right.map(chip)}</div>
         {story.intruderLabel && round && <div className="arena-story-intruder">{chip(round.aggressor)}<span>{story.intruderLabel}</span></div>}
       </div>

@@ -6,7 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { arenaPairRushOutcome, arenaPairRushCast, arenaPairRushTargets } = await source('src/arenaPairRush.ts');
+const { arenaPairRushOutcome, arenaPairRushCast, arenaPairRushTargets, arenaPairRushFlight } = await source('src/arenaPairRush.ts');
 const { createArenaFighterAnimation, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const { arenaAction, arenaActionWords, arenaNarration } = await source('src/arenaLogic.ts');
 const { arenaStoryState } = await source('src/arenaStoryLogic.ts');
@@ -196,7 +196,9 @@ test('a blocked diagonal or vertical rush recoils back along its path and stays 
     const atBeat = beat => arenaPairRushTargets(actual, actual.impact * (contactPhase + (1 - contactPhase) * (beat - .44) / .56), center, origin);
     const contact = atBeat(.44), fallen = atBeat(.60), grabbed = atBeat(.78), held = atBeat(.93);
     const recoil = (fallen.victim.x - contact.victim.x) * opening.chargeDirection.x + (fallen.victim.y - contact.victim.y) * opening.chargeDirection.y;
-    assert.ok(Math.abs(recoil + 18) < 1e-8, 'the failed charger bounces against its actual running direction');
+    assert.ok(Math.abs(recoil + 48) < 1e-8, 'the failed charger has a visible recoil against its actual running direction');
+    const sideways = -(fallen.victim.x - contact.victim.x) * opening.chargeDirection.y + (fallen.victim.y - contact.victim.y) * opening.chargeDirection.x;
+    assert.ok(Math.abs(Math.abs(sideways) - 20) < 1e-8, 'the collision also deflects the body beside its running line');
     assert.ok(distance(fallen.victim, grabbed.victim) < 1e-8, 'grabbing the fallen body does not pull it onto a horizontal staging mark');
     assert.ok(distance(grabbed.victim, held.victim) < 1e-8, 'only the overhead lift changes height while the base stays in place');
     assert.equal(held.lift, 142, 'the shared overhead height is preserved for every arrival direction');
@@ -222,19 +224,27 @@ test('a charge keeps its running speed into the hit and never reverses a nearby 
   }
 });
 
-test('a failed charge is groggy on the arrival frame and begins falling in the very next frame', () => {
+test('a failed charge visibly rebounds beside the pair before becoming groggy at its actual landing', () => {
   for (const side of [-1, 1]) {
     const actual = round(7, side), center = { x: 500, y: 416 }, opening = frameAt(actual, 0, center);
     const before = arenaPairRushTargets(actual, opening.contactAt - .001, center), hit = arenaPairRushTargets(actual, opening.contactAt, center), after = arenaPairRushTargets(actual, opening.contactAt + 16, center);
     assert.equal(before.stage, 'charge');
     assert.equal(before.victimPose, undefined);
-    assert.equal(hit.stage, 'groggy');
+    assert.equal(hit.stage, 'rebound');
     assert.equal(hit.victimPose, 'stunned');
-    assert.equal(hit.groggy, 1, 'there is no waiting-for-next-story-phase groggy delay');
+    assert.equal(hit.groggy, 0, 'the first impact deflects the body before it lies groggy');
     assert.equal(hit.impactStrength, 1);
-    assert.ok(Math.abs(after.victimAngle) > Math.abs(hit.victimAngle), 'the fall starts during the next rendered frame');
+    assert.ok(Math.abs(after.victimAngle) > Math.abs(hit.victimAngle), 'the recoil tilts the body during the next rendered frame');
+    assert.ok(after.reboundHeight > 0);
     assert.ok(after.rebound > 0, 'physical backward recoil starts with the same collision');
     assert.ok(distance(hit.victim, after.victim) < 2, 'the reaction begins continuously rather than snapping onto the floor');
+    const flying = arenaPairRushTargets(actual, opening.contactAt + 325, center), landed = arenaPairRushTargets(actual, opening.contactAt + 950, center), settled = arenaPairRushTargets(actual, opening.contactAt + 1150, center);
+    assert.equal(flying.stage, 'rebound'); assert.equal(flying.reboundHeight, 26);
+    assert.ok(distance(hit.victim, flying.victim) > 25 && Math.abs(flying.victimAngle) < .35, 'the body first travels visibly sideways while still mostly upright');
+    assert.equal(landed.stage, 'groggy'); assert.equal(landed.reboundHeight, 0); assert.equal(landed.groggy, 1);
+    assert.ok(Math.abs(landed.victimAngle) > Math.PI * .46);
+    assert.ok(distance(hit.victim, landed.victim) > 50);
+    assert.deepEqual(landed.victim, settled.victim, 'the fallen victim stays at the recoil landing instead of being put back under the collision');
     const held = frameAtBeat(actual, .93, center), last = frameAtBeat(actual, .998, center), release = frameAtBeat(actual, 1, center);
     assert.equal(held.lift, 142);
     assert.equal(held.carrierDrive, 1);
@@ -281,4 +291,71 @@ test('a successful two-body rush is described as shoulder impact then grounded p
   assert.equal(story.step, 3); assert.match(story.action, /밀어붙/); assert.match(narration.title, /밀어붙/);
   for (const text of [story.action, story.relationLabel, ...story.steps, narration.title, narration.detail]) assert.doesNotMatch(text, /퍼올|공중|들어 올|던지/);
   assert.match(arenaStoryState(actual, actual.impact).action, /두 사람만.*떨어/);
+});
+
+test('an explicit grip gate reserves the actual charger until both wrestlers are ready', () => {
+  for (const roll of [0, 7]) for (const side of [-1, 1]) {
+    const center = { x: 500, y: 416 }, actual = { ...round(roll, side, 12000), rushLaunchAt: null }, charger = roll < 3 ? 'aggressor' : 'victim';
+    const origin = { x: center.x - side * 194, y: center.y + 62 };
+    for (const elapsed of [0, 800, 2200, 5400, 11999]) {
+      const frame = arenaPairRushTargets(actual, elapsed, center, origin);
+      assert.equal(frame.waitingForGrip, true); assert.equal(frame.launchAt, null); assert.equal(frame.stage, 'wrestle');
+      assert.deepEqual(frame[charger], origin, 'only the other two wrestlers can approach while their real grip is pending');
+      assert.equal(frame.chargeStrength, 0); assert.equal(frame.impactStrength, 0); assert.equal(frame.rebound, 0); assert.equal(frame.lift, 0);
+      assert.equal(frame.grip, 'pair');
+    }
+    const launch = { ...actual, rushLaunchAt: 2300, rushContactAt: 1000 };
+    const before = arenaPairRushTargets(launch, 2299, center, origin), starts = arenaPairRushTargets(launch, 2300, center, origin), moving = arenaPairRushTargets(launch, 2500, center, origin);
+    assert.deepEqual(before[charger], origin); assert.deepEqual(starts[charger], origin);
+    assert.equal(starts.stage, 'charge'); assert.equal(starts.waitingForGrip, false);
+    assert.ok(distance(moving[charger], origin) > 5);
+    assert.ok(starts.contactAt > starts.launchAt + 900, 'an old contact forecast cannot make a real launch teleport into the pair');
+    assert.ok(starts.requiredImpactAt <= launch.impact, 'the production bout leaves room for the entire post-contact sequence');
+    let previous = starts;
+    for (let elapsed = 2316; elapsed <= launch.impact; elapsed += 16) {
+      const frame = arenaPairRushTargets(launch, elapsed, center, origin);
+      for (const actor of ['aggressor', 'victim', 'helper']) assert.ok(distance(frame[actor], previous[actor]) / .016 < 165, `${roll}/${side}/${actor}: a delayed physical grip cannot accelerate the full encounter past its movement limit`);
+      previous = frame;
+    }
+  }
+});
+
+test('the grip gate reports the real runway and minimum remaining story time for a late or distant charger', () => {
+  for (const roll of [0, 7]) for (const side of [-1, 1]) {
+    const center = { x: 500, y: 416 }, actual = { ...round(roll, side, roll < 3 ? 7900 : 10900), rushLaunchAt: 3000, timeScale: 1 };
+    const contact = { x: center.x - side * (roll < 3 ? 36 : 53), y: center.y + 5 }, origin = { x: contact.x - side * 285, y: contact.y + 60 };
+    const frame = arenaPairRushTargets(actual, 3000, center, origin);
+    assert.ok(frame.contactAt > 4900 && frame.contactAt < 5100, 'a long runway receives actual running time after the real grip');
+    assert.ok(Math.abs(frame.requiredImpactAt - frame.contactAt - (roll < 3 ? 1800 : 4000)) < 1e-8);
+    assert.ok(frame.requiredImpactAt <= actual.impact);
+    const tooLate = arenaPairRushTargets({ ...actual, rushLaunchAt: 9500 }, 9500, center, origin);
+    assert.ok(tooLate.requiredImpactAt > actual.impact, 'the scene can reject an impossible late launch without secretly increasing running speed');
+  }
+});
+
+test('a shared throw releases every painted held endpoint without rotating or rebuilding the body rig', () => {
+  const fighter = (index, values) => ({ candidate: { id: 'v', name: 'v', color: '#e98d67' }, index, scale: 2.04, facing: 1, pose: 'carried', angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...values });
+  for (const side of [-1, 1]) for (let index = 0; index < 10; index++) {
+    const actual = round(7, side), held = frameAtBeat(actual, 1), landing = { x: side > 0 ? 885 : 115, y: 436 };
+    const carry = fighter(index, { x: held.victim.x, y: held.victim.y - held.lift, depthY: held.victim.y, facing: -side, angle: held.victimAngle, suspension: held.victimSuspension, carryStretch: held.victimCarryStretch, phase: held.phase });
+    const flight = arenaPairRushFlight(0, held.victim, landing, side, 1, { lift: held.lift, angle: held.victimAngle });
+    assert.equal(flight.stage, 'flight'); assert.equal(flight.pose, 'carried'); assert.equal(flight.height, held.lift); assert.equal(flight.angle, held.victimAngle);
+    assert.equal(flight.carryStretch, 1); assert.equal(flight.suspension, 1); assert.equal(flight.facing, -side);
+    const released = fighter(index, { x: flight.x, y: flight.y, depthY: flight.groundY, facing: flight.facing, angle: flight.angle, suspension: flight.suspension, carryStretch: flight.carryStretch, phase: flight.phase });
+    const a = sampleArenaFighterContacts(carry, actual.impact), b = sampleArenaFighterContacts(released, actual.impact);
+    for (const key of ['head', 'waist']) assert.ok(distance(a[key], b[key]) < .001, `${side}/${index}/${key}: the release begins at the held painted body`);
+    for (const key of ['hands', 'feet', 'elbows', 'shoulders']) for (let endpoint = 0; endpoint < 2; endpoint++) assert.ok(distance(a[key][endpoint], b[key][endpoint]) < .001, `${side}/${index}/${key}/${endpoint}: the flight cannot replace the held skeleton on release`);
+    for (let elapsed = 0; elapsed < 880; elapsed += 16) {
+      const sample = arenaPairRushFlight(elapsed, held.victim, landing, side, 1, { lift: held.lift, angle: held.victimAngle });
+      assert.equal(sample.angle, held.victimAngle, 'the horizontal released body does not gain an unmotivated spin');
+      assert.equal(sample.carryStretch, 1, 'hands and feet retain the held extension throughout the airborne stroke');
+      assert.ok(sample.height <= held.lift + 45, 'a tall held release does not launch into a second oversized vertical leap');
+    }
+    for (const boundary of [0, 880, 1100, 1600]) {
+      const before = arenaPairRushFlight(boundary - .001, held.victim, landing, side, 1, { lift: held.lift, angle: held.victimAngle });
+      const after = arenaPairRushFlight(boundary + .001, held.victim, landing, side, 1, { lift: held.lift, angle: held.victimAngle });
+      assert.ok(distance(before, after) < .01);
+      for (const key of ['height', 'angle', 'carryStretch', 'suspension']) assert.ok(Math.abs(before[key] - after[key]) < .001, `${boundary}/${key}: landing and recovery remain continuous`);
+    }
+  }
 });

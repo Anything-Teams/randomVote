@@ -231,3 +231,20 @@ test('the joint throw keeps the actual wrist and ankle contact throughout its co
     }
   }
 });
+
+test('an ankle drag keeps adult standing leg height while the waist bends down to both real foot ends', () => {
+  for (const side of [-1, 1]) for (let index = 0; index < 10; index++) {
+    const fallen = fighter({ index, pose: 'stunned', facing: -side, angle: -side * Math.PI * .47, carryStretch: undefined, suspension: 0 });
+    const feet = sampleArenaFighterContacts(fallen, 7990).feet;
+    const holder = fighter({ index: (index + 1) % 10, x: (feet[0].x + feet[1].x) / 2 + side * 32, y: (feet[0].y + feet[1].y) / 2 + 24, facing: -side, pose: 'drag', angle: 0, carryStretch: undefined, gripMode: 'ankle', gripTarget: feet[0], secondaryGripTarget: feet[1], gripStrength: 1, gripLocked: true });
+    drawArenaFighter(ctx, holder, 7990);
+    const rig = holder.animation.skeleton, contact = holder.animation.contactPoints;
+    assert.ok(holder.animation.motion.crouch < 6 && holder.animation.motion.lean > 45, 'an adult bends at the waist instead of dropping its pelvis almost to the floor');
+    for (let leg = 0; leg < 2; leg++) {
+      assert.ok(rig.hips[leg].y < -15 && distance(rig.hips[leg], rig.feet[leg]) > 15, 'both standing legs retain their normal visible height');
+      assert.equal(holder.animation.feet[leg].lift, 0, 'reaching the toes cannot float the support soles');
+      assert.ok(distance(contact.hands[1 - leg], feet[leg]) < .001, 'a taller stance keeps each actual hand on its held foot end');
+      assert.ok(Math.abs(distance(contact.shoulders[leg], contact.elbows[leg]) - 11 * holder.scale) < .001 && Math.abs(distance(contact.elbows[leg], contact.hands[leg]) - 10.5 * holder.scale) < .001, 'neither connected arm section can shrink to reach the opponent');
+    }
+  }
+});

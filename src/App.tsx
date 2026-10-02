@@ -10,7 +10,7 @@ import { countProgress, phaseFor, SHOW_DURATION } from './show';
 import { readSession, saveSession, type Entry } from './session';
 import { createSportsOrder, type GameMode } from './sports';
 import { basePlaybackDuration, createPlaybackDuration } from './playbackTiming';
-import { arenaPlaybackEnd } from './arenaLogic';
+import { arenaMinimumDuration, arenaPlaybackEnd } from './arenaLogic';
 
 type Status = 'setup' | 'running' | 'finished';
 const templates = ['오늘 커피 쏠 사람은?', '점심값 낼 사람은?', '벌칙 받을 사람은?', '청소 담당은?', '발표할 사람은?'];
@@ -80,10 +80,11 @@ export default function App() {
     if (new Set(names.map(name => name.toLocaleLowerCase('ko-KR'))).size !== names.length) {
       setError('같은 이름이 있어요. 이름을 다르게 입력해 주세요.'); return;
     }
-    const nextDuration = createPlaybackDuration(mode);
+    const sampledDuration = createPlaybackDuration(mode);
     const nextOrder = mode === 'election' ? [] : createSportsOrder(candidates);
     const nextRushRoll = mode === 'arena' ? randomInt(10) : 7;
     const nextEscapeSeed = mode === 'arena' ? randomInt(1_000_000) : undefined;
+    const nextDuration = mode === 'arena' ? Math.max(sampledDuration, arenaMinimumDuration(nextOrder, nextRushRoll, nextEscapeSeed)) : sampledDuration;
     const nextEnd = mode === 'arena' ? arenaPlaybackEnd(nextOrder, nextDuration, nextRushRoll, nextEscapeSeed) : nextDuration;
     setArenaRushRoll(nextRushRoll);
     setArenaEscapeSeed(nextEscapeSeed);

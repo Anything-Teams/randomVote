@@ -73,7 +73,7 @@ test('an occasional rush keeps its exact three-to-seven branch ratio and consume
     const rounds = arenaRounds(order, 44000, roll); let previousEnd = 0;
     if (!roll && rounds.some(round => round.rushOutcome)) rushGames++;
     for (const round of rounds) {
-      assert.equal(round.rim?.start ?? round.start, previousEnd); previousEnd = round.end;
+      assert.equal(round.rimCharge?.start ?? round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start, previousEnd); previousEnd = round.end;
       assert.ok(living.has(round.aggressor));
       if (round.tactic === 'betrayal') { seen.add(round.counterSide); seen.add(round.counterFailed ? 'failed' : 'succeeded'); }
       const exits = arenaEliminatedIds(round);

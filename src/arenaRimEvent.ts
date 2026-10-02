@@ -2,7 +2,7 @@ import type { ArenaPoint, ArenaRound } from './arenaLogic';
 
 export const ARENA_RIM_DURATION = 2200;
 export type ArenaRimOutcome = 'out' | 'resist';
-export type ArenaRimWindow = { start: number; end: number; outcome: ArenaRimOutcome };
+export type ArenaRimWindow = { start: number; end: number; outcome: ArenaRimOutcome; contactAt?: number | null };
 export type ArenaRimFrame = {
   active: boolean; stage: 'approach' | 'pressure' | 'brace' | 'release' | 'done';
   phase: number; side: 1 | -1; outcome: ArenaRimOutcome;
@@ -34,16 +34,20 @@ export function arenaRimTargets(round: ArenaRound, elapsed: number, center: Aren
   const pace = Math.min(1, round.timeScale ?? 1);
   const aStart = origins?.aggressor ?? inside({ x: center.x - side * 26, y: center.y });
   const vStart = origins?.victim ?? inside({ x: center.x + side * 26, y: center.y });
-  const aContact = inside({ x: aStart.x + side * 4 * pace, y: aStart.y });
-  const vContact = inside({ x: vStart.x - side * 4 * pace, y: vStart.y });
-  const approach = ease(phase / (600 / ARENA_RIM_DURATION));
-  const pressure = ease((phase - 600 / ARENA_RIM_DURATION) / (700 / ARENA_RIM_DURATION));
-  const resistance = window.outcome === 'resist' ? ease((phase - 1050 / ARENA_RIM_DURATION) / (350 / ARENA_RIM_DURATION)) : 0;
-  const release = window.outcome === 'resist' ? ease((phase - 1700 / ARENA_RIM_DURATION) / (500 / ARENA_RIM_DURATION)) : 0;
+  const meeting = { x: (aStart.x + vStart.x) / 2, y: (aStart.y + vStart.y) / 2 };
+  const aContact = origins ? inside({ x: meeting.x - side * 25, y: meeting.y }) : inside({ x: aStart.x + side * 4 * pace, y: aStart.y });
+  const vContact = origins ? inside({ x: meeting.x + side * 25, y: meeting.y }) : inside({ x: vStart.x - side * 4 * pace, y: vStart.y });
+  const approachMs = Math.max(600 * pace, Math.max(Math.hypot(aContact.x - aStart.x, aContact.y - aStart.y), Math.hypot(vContact.x - vStart.x, vContact.y - vStart.y)) * 1500 / 140);
+  const approach = ease((elapsed - window.start) / approachMs);
+  const contactAt = window.contactAt === null ? Infinity : window.contactAt ?? window.start + (window.end - window.start) * 600 / ARENA_RIM_DURATION;
+  const pressurePhase = clamp((elapsed - contactAt) / Math.max(1, window.end - contactAt));
+  const pressure = ease(pressurePhase / (700 / 1600));
+  const resistance = window.outcome === 'resist' ? ease((pressurePhase - 450 / 1600) / (350 / 1600)) : 0;
+  const release = window.outcome === 'resist' ? ease((pressurePhase - 1100 / 1600) / (500 / 1600)) : 0;
   let aggressor: ArenaPoint, victim: ArenaPoint;
   if (window.outcome === 'out') {
     const rim = 500 + side * (303 * Math.sqrt(Math.max(0, 1 - ((vContact.y - 416) / 112) ** 2)) - 3);
-    const push = drive((phase - .28) / .72), delta = (rim - vContact.x) * push;
+    const push = drive(pressurePhase), delta = (rim - vContact.x) * push;
     victim = { x: mix(vStart.x, vContact.x, approach) + delta, y: mix(vStart.y, vContact.y, approach) };
     aggressor = { x: mix(aStart.x, aContact.x, approach) + delta, y: mix(aStart.y, aContact.y, approach) };
   } else {
@@ -53,8 +57,8 @@ export function arenaRimTargets(round: ArenaRound, elapsed: number, center: Aren
     aggressor = pointMix(aStart, inside({ x: aContact.x + shift - side * 4 * release * pace, y: aContact.y + 6 * release * pace }), approach);
     victim = pointMix(vStart, inside({ x: vContact.x + shift + side * 4 * release * pace, y: vContact.y + 6 * release * pace }), approach);
   }
-  const stage = elapsed >= window.end ? 'done' : phase < 600 / ARENA_RIM_DURATION ? 'approach' : window.outcome === 'out' || phase < 1300 / ARENA_RIM_DURATION ? 'pressure' : phase < 1700 / ARENA_RIM_DURATION ? 'brace' : 'release';
+  const stage = elapsed >= window.end ? 'done' : elapsed < contactAt ? 'approach' : window.outcome === 'out' || pressurePhase < 700 / 1600 ? 'pressure' : pressurePhase < 1100 / 1600 ? 'brace' : 'release';
   return { active: elapsed >= window.start && elapsed < window.end, stage, phase, side, outcome: window.outcome, aggressor, victim,
     returnCenter: { x: (aggressor.x + victim.x) / 2, y: (aggressor.y + victim.y) / 2 },
-    pressure, resistance, release, grip: elapsed >= window.start && elapsed < window.end && phase >= 600 / ARENA_RIM_DURATION && release < .2 };
+    pressure, resistance, release, grip: elapsed >= window.start && elapsed < window.end && approach > .75 && release < .2 };
 }

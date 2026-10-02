@@ -6,10 +6,10 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { arenaTechniqueTargets } = await source('src/arenaTechniques.ts');
+const { arenaTechniqueTargets, arenaTechniqueExit, arenaFloorExitTiming, isArenaFloorDrag } = await source('src/arenaTechniques.ts');
 const { arenaAction, arenaRanks, arenaRounds } = await source('src/arenaLogic.ts');
 const { createArenaFighterAnimation, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
-const round = { id: 'elbow-test', index: 0, tactic: 'elbow', aggressor: 'counter', victim: 'lifter', start: 0, impact: 6300, resolve: 7400, end: 7400, final: false };
+const round = { id: 'elbow-test', index: 0, tactic: 'elbow', aggressor: 'counter', victim: 'lifter', start: 0, impact: 6300, resolve: 10400, end: 11000, final: false };
 const fighter = (id, index, overrides) => ({ candidate: { id, name: id, color: '#ed9166' }, index, scale: 2.04, angle: 0, alpha: 1, facing: 1, pose: 'guard', velocityX: 0, velocityY: 0, gaitDistance: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...overrides });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 function actors(actual, phase, index = 0) {
@@ -19,7 +19,7 @@ function actors(actual, phase, index = 0) {
   return { clock, frame, aggressor, victim };
 }
 
-test('a lifted fighter strikes the lifter before groggy recovery and a separate ankle throw', () => {
+test('a lifted fighter strikes the lifter before approaching its grounded feet for an ankle drag', () => {
   for (const side of [-1, 1]) {
     const actual = { ...round, contactSide: side }, lifted = actors(actual, .43), elbow = actors(actual, .55), groggy = actors(actual, .70), grab = actors(actual, .93), release = actors(actual, 1);
     assert.equal(lifted.frame.stage, 'lift-counter');
@@ -40,8 +40,10 @@ test('a lifted fighter strikes the lifter before groggy recovery and a separate 
     assert.equal(grab.frame.grip, 'ankle');
     assert.deepEqual(arenaAction(actual, grab.clock).attackers, [actual.aggressor]);
     assert.equal(arenaAction(actual, grab.clock).targetId, actual.victim);
-    assert.equal(release.frame.stage, 'release');
-    assert.equal(release.frame.grip, undefined, 'the feet are released for the actual exit');
+    assert.equal(release.frame.stage, 'drag');
+    assert.equal(release.frame.lift, 0, 'the initial counter cannot raise the groggy lifter for a second throw');
+    assert.equal(release.frame.aggressorPose, 'drag');
+    assert.equal(release.frame.grip, undefined, 'the shared grounded exit takes over the actual ankle grip');
   }
 });
 
@@ -87,7 +89,29 @@ test('an elbow victim stays where it fell until its feet are held and the attack
     frozen.feet.forEach((point, index) => assert.ok(distance(point, later.feet[index]) < .4, 'only subpixel breathing can move a grounded foot endpoint'));
     assert.ok(distance(frozen.head, later.head) < .6, 'breathing cannot turn into a movement toward the approaching attacker');
     assert.ok(side * (nearFeet.aggressor.x - (frozen.feet[0].x + frozen.feet[1].x) / 2) > 16, 'the attacker stands outside the foot ends instead of sharing the fallen torso');
-    assert.ok(actors(actual, .96).frame.lift > 20, 'the later grounded grip can still lift into its separate throwing stroke');
+    assert.equal(actors(actual, .96).frame.lift, 0, 'the lifter remains grounded when the ankles are held');
+  }
+});
+
+test('the elbow knockout reuses the suplex floor drag and throws only after reaching its rim endpoint', () => {
+  for (const unit of [40 / 44, 1, 62 / 44]) for (const direction of [-1, 1]) {
+    const actual = { ...round, impact: round.impact * unit, resolve: round.resolve * unit, timeScale: unit };
+    const timing = arenaFloorExitTiming(actual, unit), origin = { x: 500, y: 416 }, landing = { x: direction < 0 ? 115 : 885, y: 470 }, preparation = { lift: 0, angle: -direction * Math.PI * .47 };
+    assert.equal(isArenaFloorDrag(actual), true);
+    for (const age of [0, timing.stunnedUntil * .99, timing.stunnedUntil, timing.dragUntil * .80, timing.dragUntil - .001]) {
+      const frame = arenaTechniqueExit(actual, age, origin, landing, direction, unit, preparation);
+      assert.ok(frame.stage === 'stunned' || frame.stage === 'drag');
+      assert.equal(frame.height, 0, 'the groggy opponent cannot leave the ground while being pulled');
+      assert.equal(frame.angle, preparation.angle, 'the initial floor pose survives the entire ankle drag');
+      assert.deepEqual(frame, arenaTechniqueExit({ ...actual, tactic: 'suplex' }, age, origin, landing, direction, unit, preparation), 'both knockout techniques follow one shared floor model');
+    }
+    const before = arenaTechniqueExit(actual, timing.dragUntil - .001, origin, landing, direction, unit, preparation);
+    const release = arenaTechniqueExit(actual, timing.dragUntil, origin, landing, direction, unit, preparation);
+    assert.equal(release.stage, 'rim-toss');
+    assert.equal(release.height, 0, 'the actual rim throw begins from the translated floor silhouette');
+    assert.ok(distance(before, release) < .01, 'the shared drag cannot jump to another location for the throw');
+    assert.ok(arenaTechniqueExit(actual, (timing.dragUntil + timing.tossUntil) / 2, origin, landing, direction, unit, preparation).height > 40, 'only the rim release can launch a throwing arc');
+    assert.equal(arenaTechniqueExit(actual, timing.recoverUntil, origin, landing, direction, unit, preparation).stage, 'walk');
   }
 });
 
