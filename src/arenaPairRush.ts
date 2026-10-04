@@ -15,6 +15,7 @@ export type ArenaPairRushFrame = {
   chargerPose?: 'scoop' | 'push'; scoopFacing?: 1 | -1; scoopStroke: number; pushStroke: number;
   chargeStrength: number; pressure: number; rebound: number; groggy: number;
   launchAt: number | null; waitingForGrip: boolean; contactAt: number; requiredImpactAt: number;
+  contactPoint: ArenaPoint; postContactDuration: number;
   impactStrength: number; victimRecoil: number; helperRecoil: number; reboundHeight: number;
   lift: number; victimAngle: number; victimSuspension: number;
   victimCarryStretch: number; overhead: number;
@@ -33,6 +34,33 @@ const drive = (value: number, ramp = .2) => {
   const p = clamp(value);
   return (p < ramp ? p * p / (2 * ramp) : p - ramp / 2) / (1 - ramp / 2);
 };
+
+/** Real post-contact milliseconds; a long bout never slows down an individual action. */
+export const ARENA_PAIR_COUNTER_TIMING = {
+  rebound: 440, fallStart: 240, grip: 1180, lift: 1930,
+  overhead: 2660, toss: 2810, release: 3000,
+} as const;
+export const ARENA_PAIR_CONTACT_RADIUS = 22;
+
+/** Enter the near face of the wrestling pair, regardless of the eventual throwing side. */
+export function arenaPairRushContact(center: ArenaPoint, origin: ArenaPoint, layoutSide = 1): ArenaPoint {
+  const first = { x: center.x + layoutSide * 22, y: center.y + 6 };
+  const second = { x: center.x - layoutSide * 22, y: center.y - 6 };
+  const segment = { x: second.x - first.x, y: second.y - first.y };
+  const lengthSquared = segment.x ** 2 + segment.y ** 2;
+  const inside = (point: ArenaPoint) => {
+    const along = clamp(((point.x - first.x) * segment.x + (point.y - first.y) * segment.y) / lengthSquared);
+    return Math.hypot(point.x - first.x - along * segment.x, point.y - first.y - along * segment.y) <= ARENA_PAIR_CONTACT_RADIUS;
+  };
+  if (inside(origin)) return { ...origin };
+  let near = 0, far = 1;
+  for (let step = 0; step < 36; step++) {
+    const at = (near + far) / 2;
+    const point = { x: mix(origin.x, center.x, at), y: mix(origin.y, center.y, at) };
+    if (inside(point)) far = at; else near = at;
+  }
+  return { x: mix(origin.x, center.x, far), y: mix(origin.y, center.y, far) };
+}
 
 /** The caller draws this independent ten-way story roll once per run. */
 export function arenaPairRushOutcome(roll: number): ArenaPairRushOutcome {
@@ -62,7 +90,7 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   const outcome = round.rushOutcome ?? (round.secondaryVictim ? 'double-out' : 'counter-throw');
   const side = round.contactSide ?? (center.x >= 500 ? 1 : -1);
   const origin = chargerOrigin ?? { x: center.x - side * 220, y: center.y + 43 };
-  const contact = { x: center.x - side * (outcome === 'double-out' ? 36 : 53), y: center.y + 5 };
+  const contact = outcome === 'counter-throw' ? arenaPairRushContact(center, origin, side) : { x: center.x - side * 36, y: center.y + 5 };
   // Start where the third fighter actually stands. A longer runway receives
   // more time rather than moving the fighter backwards to a staging mark.
   const distance = Math.hypot(contact.x - origin.x, contact.y - origin.y);
@@ -75,16 +103,18 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   // until both wrestlers have established the actual two-way grip.
   const launchAt = round.rushLaunchAt === null ? null : Math.max(round.start, round.rushLaunchAt ?? round.start + preparation * span);
   const waitingForGrip = launchAt === null || elapsed < launchAt;
-  const runDuration = Math.max(160 * unit, distance * 1000 / (162 * .9));
+  const runDuration = outcome === 'counter-throw' && distance < 1 ? 0 : Math.max(160 * unit, distance * 1000 / (162 * .9));
   const earliestContact = (launchAt ?? round.start + preparation * span) + runDuration;
-  const contactAt = Math.max(earliestContact, round.rushContactAt ?? earliestContact);
-  const requiredImpactAt = contactAt + (outcome === 'counter-throw' ? 4000 : 1800);
+  // The Scene records the real contact from its actual runway. Consumers
+  // without that origin must use the recorded instant, not a default runway.
+  const contactAt = round.rushContactAt !== undefined && launchAt !== null && round.rushContactAt >= launchAt ? round.rushContactAt : earliestContact;
+  const postContactDuration = outcome === 'counter-throw' ? ARENA_PAIR_COUNTER_TIMING.release * unit : 1800;
+  const requiredImpactAt = contactAt + postContactDuration;
   const contactPhase = (contactAt - round.start) / span;
   const launchPhase = ((launchAt ?? round.impact) - round.start) / span;
   const released = launchAt !== null && elapsed >= round.impact;
   const runProgress = launchAt === null ? 0 : clamp((elapsed - launchAt) / Math.max(1, contactAt - launchAt));
   const approach = drive(runProgress);
-  const beat = launchAt === null ? 0 : phase <= contactPhase ? phase / contactPhase * .44 : .44 + (phase - contactPhase) / Math.max(.001, 1 - contactPhase) * .56;
   const impactAge = launchAt === null ? -1 : elapsed - contactAt;
   const impactStrength = impactAge >= 0 ? 1 - ease(impactAge / (240 * unit)) : 0;
   const impactDeflect = impactAge >= 0 ? ease(impactAge / (45 * unit)) * impactStrength : 0;
@@ -97,7 +127,7 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
     chargerFacing, chargeDirection,
     scoopStroke: 0, pushStroke: 0,
     chargeStrength, pressure: 0, rebound: 0, groggy: 0, lift: 0,
-    launchAt, waitingForGrip, contactAt, requiredImpactAt, impactStrength, victimRecoil: 0, helperRecoil: 0, reboundHeight: 0,
+    launchAt, waitingForGrip, contactAt, requiredImpactAt, contactPoint: contact, postContactDuration, impactStrength, victimRecoil: 0, helperRecoil: 0, reboundHeight: 0,
     victimCarryStretch: 0, overhead: 0, victimLift: 0, helperLift: 0, helperAngle: 0, helperSuspension: 0, carrierDrive: 0,
     victimAngle: 0, victimSuspension: 0, victimPose: undefined, grip: released ? undefined : 'pair',
   };
@@ -127,12 +157,16 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
     frame.stage = waitingForGrip ? 'wrestle' : released ? 'release' : phase < launchPhase ? 'wrestle' : phase < contactPhase ? 'charge' : progress < .08 ? 'contact' : 'push';
     return frame;
   }
-  const reboundProgress = clamp(impactAge / (650 * unit)), rebound = ease(reboundProgress);
-  const fallen = ease((impactAge - 420 * unit) / (480 * unit)), arrive = drive((beat - .44) / .18);
-  const stretch = ease((beat - .62) / .16), lifted = ease((beat - .78) / .14), tossed = drive((beat - .96) / .04);
+  const timing = ARENA_PAIR_COUNTER_TIMING;
+  const age = impactAge / unit;
+  const reboundProgress = clamp(age / timing.rebound), rebound = ease(reboundProgress);
+  const fallen = ease((age - timing.fallStart) / (timing.rebound - timing.fallStart)), arrive = drive(age / timing.grip);
+  const stretch = ease((age - timing.grip) / (timing.lift - timing.grip));
+  const lifted = ease((age - timing.lift) / (timing.overhead - timing.lift));
+  const tossed = drive((age - timing.toss) / (timing.release - timing.toss));
   // The collision deflects the runner visibly sideways before the body
   // settles. Helpers go to that landing instead of resetting a prone body.
-  const pace = Math.min(1, unit), deflection = { x: (-chargeDirection.x * 48 - chargeDirection.y * 20 * side) * pace, y: (-chargeDirection.y * 48 + chargeDirection.x * 20 * side) * pace };
+  const pace = Math.min(1, unit), deflection = { x: (-chargeDirection.x * 40 - chargeDirection.y * 12 * side) * pace, y: (-chargeDirection.y * 40 + chargeDirection.x * 12 * side) * pace };
   const fallenPoint = { x: contact.x + deflection.x, y: contact.y + deflection.y };
   const chargerX = mix(origin.x, contact.x, approach) + deflection.x * rebound;
   const chargerY = mix(origin.y, contact.y, approach) + deflection.y * rebound;
@@ -143,7 +177,9 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   // Floor-aware rotation initially shifts the stretched skeleton about 48px
   // toward its toes. Both carriers follow that offset as the body leaves the
   // sand, rather than stretching their arms beyond their anatomical reach.
-  const carrierShiftY = fallenPoint.y - contact.y;
+  // The rig and its holders share the actual landing depth. An entry from
+  // above/below the pair cannot leave holders at the old contact depth.
+  const carrierShiftY = fallenPoint.y - center.y - 5;
   frame.aggressor = { x: mix(center.x + side * 22, carriedX + side * (mix(24, 121, stretch) + lifted * 29.54), arrive), y: center.y + mix(14, mix(10, -4, lifted) + carrierShiftY, arrive) };
   frame.helper = { x: mix(center.x - side * 22, carriedX - side * (mix(85, 89, stretch) - lifted * 67.54), arrive), y: center.y + mix(-14, mix(6, -2, lifted) + carrierShiftY, arrive) };
   // Follow the painted wrists/ankles from the prone grip into the raised
@@ -155,19 +191,19 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   frame.helper.x += side * 18 * lowCarry;
   frame.helper.y += 8 * lowCarry + 4 * lifted;
   frame.rebound = rebound;
-  frame.groggy = impactAge >= 650 * unit ? 1 - stretch : 0;
-  frame.reboundHeight = impactAge >= 0 && impactAge < 650 * unit ? Math.sin(reboundProgress * Math.PI) ** 2 * 26 * pace : 0;
+  frame.groggy = age >= timing.rebound ? 1 - stretch : 0;
+  frame.reboundHeight = age >= 0 && age < timing.rebound ? Math.sin(reboundProgress * Math.PI) ** 2 * 26 * pace : 0;
   frame.lift = lifted * 142;
   frame.victimCarryStretch = stretch;
   frame.overhead = lifted;
   frame.carrierDrive = lifted;
   frame.victimAngle = side * (mix(rebound * .30, Math.PI * .47, fallen) + stretch * Math.PI * .03);
-  frame.victimPose = beat >= .62 ? 'carried' : impactAge >= 0 ? 'stunned' : undefined;
-  frame.victimSuspension = beat >= .62 ? lifted : impactAge >= 0 ? 1 - ease((impactAge - 420 * unit) / (480 * unit)) : 0;
-  frame.grip = released ? undefined : beat >= .62 ? 'arms-legs' : beat < .44 ? 'pair' : undefined;
-  frame.carrierPose = beat < .62 ? 'drag' : 'overhead';
+  frame.victimPose = age >= timing.grip ? 'carried' : impactAge >= 0 ? 'stunned' : undefined;
+  frame.victimSuspension = age >= timing.grip ? lifted : impactAge >= 0 ? 1 - fallen : 0;
+  frame.grip = released ? undefined : age >= timing.grip ? 'arms-legs' : impactAge < 0 ? 'pair' : undefined;
+  frame.carrierPose = age < timing.grip ? 'drag' : 'overhead';
   frame.armsHolderId = round.aggressor; frame.legsHolderId = round.helper;
-  frame.stage = waitingForGrip ? 'wrestle' : released ? 'release' : phase < launchPhase ? 'wrestle' : phase < contactPhase ? 'charge' : impactAge < 650 * unit ? 'rebound' : beat < .62 ? 'groggy' : beat < .78 ? 'grip' : beat < .92 ? 'lift' : beat < .96 ? 'overhead' : 'toss';
+  frame.stage = waitingForGrip ? 'wrestle' : released ? 'release' : phase < launchPhase ? 'wrestle' : phase < contactPhase ? 'charge' : age < timing.rebound ? 'rebound' : age < timing.grip ? 'groggy' : age < timing.lift ? 'grip' : age < timing.overhead ? 'lift' : age < timing.toss ? 'overhead' : 'toss';
   return frame;
 }
 

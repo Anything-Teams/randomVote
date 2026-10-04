@@ -11,11 +11,11 @@ const draw = 'arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFig
 assert.ok(source.includes(draw));
 source = source.replaceAll('drawArenaScenery(ctx, clock,', 'jointTestScenery(ctx, clock,')
   .replace(draw, 'jointTestActors = actors; arenaDrawOrder([...actors.values()]).forEach(actor => { ctx.jointStart(actor); drawArenaFighter(ctx, actor, reduced ? 0 : clock); ctx.jointEnd(); });');
-source += '\nlet jointTestActors; const jointTestScenery = () => {}; export const capturedActors = () => jointTestActors; export { render, createArenaCamera, arenaRounds };';
+source += '\nlet jointTestActors; const jointTestScenery = () => {}; export const capturedActors = () => jointTestActors; export { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks };';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, capturedActors } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks, capturedActors } = module.exports;
 const noop = () => {};
 const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
@@ -109,6 +109,46 @@ for (const reversed of [false, true]) test(`the live overhead joint throw inheri
 
 test('the two live shared-throw layouts cover both directions', () => {
   assert.deepEqual([...observedSides].sort(), [-1, 1]);
+});
+
+for (const reversed of [false, true]) test(`the live pair counter stops at the near contact and completes at ordinary action speed (${reversed ? 'reversed' : 'normal'})`, () => {
+  const scene = game(reversed);
+  let previous, contacted = false, held = false, released = false, resolved = false;
+  for (let elapsed = 0; elapsed <= planned.resolve + 32; elapsed += 16) {
+    const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
+    if (!contact?.chargerOrigin || contact.round.rushLaunchAt == null) continue;
+    const actual = contact.round, frame = arenaPairRushTargets(actual, elapsed, contact.center, contact.chargerOrigin);
+    const victim = actors.get(planned.victim);
+    const detail = `${reversed}/${elapsed}/${frame.stage}`;
+    assert.ok(Math.abs(actual.impact - frame.contactAt - 3000 * actual.timeScale) < .001, `the actual scene cannot stretch the counter to fill the planned round: ${detail}`);
+    if (elapsed >= frame.contactAt && elapsed < actual.impact) {
+      contacted = true;
+      const displacement = { x: scene.sim.bodies.get(planned.victim).x - frame.contactPoint.x, y: scene.sim.bodies.get(planned.victim).y - frame.contactPoint.y };
+      if (frame.stage === 'rebound' || frame.stage === 'groggy') assert.ok(displacement.x * frame.chargeDirection.x + displacement.y * frame.chargeDirection.y <= .001, `the runner rebounds on the entry side instead of passing through both opponents: ${detail}`);
+      assert.equal(victim.facing, frame.chargerFacing, `collision and falling cannot mirror the whole body in one frame: ${detail}`);
+      if (previous && elapsed < frame.contactAt + 1930 * actual.timeScale) {
+        const root = victim.animation.contactPoints.origin, delta = { x: root.x - previous.origin.x, y: root.y - previous.origin.y };
+        points(victim.animation.contactPoints).forEach((point, index) => assert.ok(distance(point, { x: points(previous)[index].x + delta.x, y: points(previous)[index].y + delta.y }) < 20, `the painted head, hands and feet move continuously through the impact and prone grip: ${detail}`));
+      }
+      if (frame.stage === 'overhead') {
+        assert.ok(Math.abs(scene.sim.bodies.get(planned.victim).y - victim.y - 142) < .001, 'the actual-contact action clock reaches the full supported lift before release');
+        held = true;
+      }
+      if (frame.lift > 1) {
+        for (const [id, endpoints] of [[frame.armsHolderId, victim.animation.contactPoints.hands], [frame.legsHolderId, victim.animation.contactPoints.feet]]) {
+          const hands = actors.get(id).animation.contactPoints.hands;
+          endpoints.forEach(endpoint => assert.ok(Math.min(...hands.map(hand => distance(hand, endpoint))) < 4, `both helpers keep their actual wrist/ankle holds throughout the supported lift: ${detail}/${id}`));
+        }
+      }
+    }
+    if (scene.sim.exits.get(planned.victim)?.round.id === planned.id) released = true;
+    if (elapsed >= actual.resolve) {
+      assert.equal(resolvedRanks(order, [actual], elapsed)[actual.victim], order.indexOf(actual.victim) + 1, 'the roster resolves the earlier physical throw at the same time');
+      resolved = true;
+    }
+    previous = structuredClone(victim.animation.contactPoints);
+  }
+  assert.ok(contacted && held && released && resolved, 'the complete physical counter is exercised');
 });
 
 test('a paused direct seek reconstructs the overhead release height and its first airborne frame', () => {

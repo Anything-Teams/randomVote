@@ -34,15 +34,17 @@ export function createArenaFighterAnimation(): ArenaFighterAnimation {
 
 function knee(a: Point, b: Point, upper: number, lower: number, bend: number): Point {
   const dx = b.x - a.x, dy = b.y - a.y, raw = Math.hypot(dx, dy);
-  const length = Math.max(.01, Math.min(upper + lower - .02, raw));
+  const length = Math.max(Math.abs(upper - lower) + .02, Math.min(upper + lower - .02, raw));
   const along = (upper * upper - lower * lower + length * length) / (2 * length);
   const height = Math.sqrt(Math.max(0, upper * upper - along * along));
   const nx = dx / (raw || 1), ny = dy / (raw || 1);
   return { x: a.x + nx * along + ny * height * bend, y: a.y + ny * along - nx * height * bend };
 }
-function reachable(a: Point, b: Point, length: number): Point {
-  const distance = Math.hypot(b.x - a.x, b.y - a.y), amount = Math.min(1, length / Math.max(.01, distance));
-  return { x: a.x + (b.x - a.x) * amount, y: a.y + (b.y - a.y) * amount };
+function reachable(a: Point, b: Point, length: number, minimum = 0): Point {
+  const dx = b.x - a.x, dy = b.y - a.y, distance = Math.hypot(dx, dy);
+  const reach = Math.max(minimum, Math.min(length, distance));
+  if (distance < .001) return minimum ? { x: a.x, y: a.y + minimum } : { ...a };
+  return { x: a.x + dx / distance * reach, y: a.y + dy / distance * reach };
 }
 /** Knees bend forward into depth. Their full 3D bend must not appear as sideways bowing. */
 function legKnee(hip: Point, foot: Point, depth: number, yaw: number): Point {
@@ -335,7 +337,9 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     // The helpers hold two wrists and two ankles, with no generic airborne tuck.
     const armX = Math.min(4.6, (18 + index % 3) * .43 * .58);
     target.crouch = mix(.4, .7, stretch); target.lean = 0; target.hipX = 0; target.head = 0; target.mouth = .7;
-    target.backX = mix(-11, -armX, stretch); target.frontX = mix(12, armX, stretch); target.backY = target.frontY = mix(-2, -46.8, stretch);
+    // Wrists travel around the shoulders as the helpers straighten the arms.
+    const unfold = Math.sin(Math.PI * stretch) * 8;
+    target.backX = mix(-11, -armX, stretch) - unfold; target.frontX = mix(12, armX, stretch) + unfold; target.backY = target.frontY = mix(-2, -46.8, stretch);
     target.spread = 1 + personality * .035; target.contact = 0; target.shoulderLift = stretch * 6; target.clapTurn = 0; target.cheerTurn = 0; target.applause = 0;
   }
   if (pose === 'overhead') {
@@ -490,7 +494,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   if (released) hands = hands.map((hand, arm) => pointMix(hand, released.snapshot.hands[arm], releaseWeight));
   const overheadReach = pose === 'overhead' ? clamp(actor.overheadRaise ?? 1) : pose === 'scoop' ? ease((clamp(actor.scoopStroke ?? phase) - .18) / .54) : 0;
   const upperArm = mix(11, 14, overheadReach), lowerArm = mix(10.5, 14, overheadReach), armReach = mix(21.3, 27.8, overheadReach);
-  hands = hands.map((hand, arm) => reachable(shoulders[arm], hand, armReach));
+  hands = hands.map((hand, arm) => reachable(shoulders[arm], hand, armReach, Math.abs(upperArm - lowerArm) + .02));
   if (pose === 'clap' && motion.contact < .03 && target.frontX - target.backX < 5.01 && hands[1].x - hands[0].x < 5.4) {
     // Resolve palm contact at the chest; two hands stay distinct and share one height.
     const center = { x: (hands[0].x + hands[1].x) / 2, y: (hands[0].y + hands[1].y) / 2 };
