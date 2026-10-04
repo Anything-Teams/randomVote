@@ -176,7 +176,7 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   const reboundProgress = clamp(age / timing.rebound), rebound = ease(reboundProgress);
   const fallen = ease((age - timing.fallStart) / (timing.rebound - timing.fallStart));
   const stretch = ease((age - timing.grip) / (timing.lift - timing.grip));
-  // Straightening the held arms and lifting the body are one continuous pull.
+  // Both shoulder and ankle holds rise together in one continuous pull.
   const lifted = ease((age - timing.grip) / (timing.overhead - timing.grip));
   const tossed = drive((age - timing.toss) / (timing.release - timing.toss));
   // The collision deflects the runner visibly sideways before the body
@@ -190,7 +190,7 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   // the actual hips rise above the same patch of sand.
   frame.victim = { x: mix(chargerX, fallenPoint.x, stretch) - side * 48.96 * lifted + side * tossed * 18, y: mix(chargerY, fallenPoint.y, stretch) };
   // The former opponents stop wrestling, go to opposite ends of the stunned
-  // charger, and keep those arm/ankle holds through the shared lifting stroke.
+  // charger, and keep those shoulder/ankle holds through the shared lifting stroke.
   // Both carriers approach the landing with normal planted steps, then
   // follow the unfolding limb ends while the horizontal hips rise in place.
   // The rig and its holders share the actual landing depth. An entry from
@@ -202,7 +202,7 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
     const bodyX = fallenPoint.x - side * 48.96 * rise + side * toss * 18;
     return legs
       ? { x: mix(center.x - side * 22, bodyX - side * (mix(85, 89, unfold) - rise * 67.54), approach) + side * 18 * low, y: center.y + mix(-14, mix(6, -2, rise) + carrierShiftY, approach) + 8 * low + 4 * rise }
-      : { x: mix(center.x + side * 22, bodyX + side * (mix(24, 121, unfold) + rise * 29.54), approach) - side * 20 * low, y: center.y + mix(14, mix(10, -4, rise) + carrierShiftY, approach) + 4 * low + 6 * rise };
+      : { x: mix(center.x + side * 22, bodyX + side * mix(55, 60, rise), approach), y: center.y + mix(14, mix(-7, -9, rise) + carrierShiftY, approach) };
   };
   frame.aggressor = carrierGround(carryOrigins?.pair[0] ?? { x: center.x + side * 22, y: center.y + 14 }, age, at => desired(at, false));
   frame.helper = carrierGround(carryOrigins?.pair[1] ?? { x: center.x - side * 22, y: center.y - 14 }, age, at => desired(at, true));

@@ -48,8 +48,8 @@ function context() {
   };
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
-function game(seed, reversed = false, mirrored = false) {
-  const props = { candidates: (reversed ? [...order].reverse() : order).map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
+function game(seed, reversed = false, mirrored = false, candidateOrder) {
+  const props = { candidates: (candidateOrder ?? (reversed ? [...order].reverse() : order)).map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
   return { sim, ctx, step(elapsed, paused = false) {
     ctx.records.clear();
@@ -67,6 +67,7 @@ function game(seed, reversed = false, mirrored = false) {
         if (contact.slideTripOrigins) {
           for (const point of Object.values(contact.slideTripOrigins)) point.x = 1000 - point.x;
         }
+        if (contact.linkedRushOrigins) contact.linkedRushOrigins = undefined;
       }
     }
     return capturedActors();
@@ -137,11 +138,68 @@ test('a close opponent uses the ordinary trip instead of backing up to invent a 
   assert.ok(declined && resolved, 'the nearby ordinary exchange still completes the chosen elimination');
 });
 
-for (const mirrored of [false, true]) test(`two live allies join arms, hit the neck, and inherit the exact shared throw (${mirrored ? 'mirrored' : 'ordinary'})`, () => {
-  const seed = 570, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.linkedRush);
+test('a paused initial seek applies the same minimum slide distance as live play', () => {
+  const seed = 46, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.slideTrip);
+  const scene = game(seed, false, false, ['4', '1', '2', '3', '5']), actors = scene.step(planned.start, true), contact = scene.sim.contacts.get(planned.id);
+  assert.ok(distance(scene.sim.bodies.get(planned.aggressor), scene.sim.bodies.get(planned.victim)) < 130);
+  assert.equal(contact.round.slideTrip, undefined, 'reset and paused seeks cannot allow a close slide');
+  assert.equal(contact.slideTripOrigins, undefined);
+  assert.equal(actors.get(planned.aggressor).slideProgress, undefined, 'no sliding rig is painted before the ordinary close exchange');
+});
+
+for (const mirrored of [false, true]) test(`a rare live two-foot hop avoids the slide, lands inside and resumes the same deciding bout (${mirrored ? 'mirrored' : 'ordinary'})`, () => {
+  const seed = 1566, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.slideTrip?.evade);
+  assert.ok(planned, 'the production independent rare branch selects a two-foot dodge');
+  const scene = game(seed, false, mirrored), stages = new Set();
+  let jumped = false, passed = false, recovered = false, resolved = false, fallback;
+  for (let elapsed = 0; elapsed <= planned.resolve + 4000; elapsed += 16) {
+    const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
+    if (!contact?.slideTripOrigins) continue;
+    const actual = contact.round, driver = actors.get(actual.aggressor), victim = actors.get(actual.victim);
+    assert.ok(driver && victim, 'both participants stay painted throughout the dodge and deciding bout');
+    if (actual.slideTrip) {
+      const window = actual.slideTrip, frame = arenaSlideTripTargets(window, elapsed, contact.center, contact.slideTripOrigins, actual.contactSide);
+      stages.add(frame.stage);
+      assert.ok(frame.canPerform && frame.startingGap >= 130, 'the rare hop starts from an eligible real runway');
+      assert.equal(window.hookAt, null); assert.equal(window.kickAt, null);
+      assert.equal(Math.abs(victim.angle), 0, 'a successful two-foot dodge never includes a fallen defender');
+      assert.ok(!scene.sim.exits.has(actual.victim) && !scene.sim.exits.has(actual.aggressor), 'the missed slide cannot eliminate either participant');
+      assert.equal(capturedRanks()[actual.victim], undefined);
+      assert.ok(points(victim.animation.contactPoints).every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
+      if (window.jumpAt === elapsed) jumped = true;
+      if (window.passAt === elapsed) {
+        const ankle = contact.slideTripOrigins.standingAnkle, feet = victim.animation.contactPoints.feet;
+        assert.ok(driver.animation.contactPoints.feet.some(foot => distance(foot, ankle) < 8), 'the sliding sole reaches the former ankle line');
+        assert.ok(feet.every(foot => foot.y < ankle.y - 16), 'both actual feet clear the incoming sliding sole');
+        assert.ok(feet.every(foot => driver.animation.contactPoints.feet.every(sliding => distance(foot, sliding) > 16)), 'no actual hook contact occurs in the air');
+        passed = true;
+      }
+    } else {
+      if (!recovered) {
+        assert.ok(jumped && passed, 'the physical hop and cleared feet are recorded before resuming');
+        assert.equal(victim.depthY - victim.y, 0); assert.equal(victim.pose, 'guard'); assert.equal(driver.pose, 'guard');
+        const point = scene.sim.bodies.get(actual.victim);
+        assert.ok(Math.hypot((point.x - 500) / 303, (point.y - 416) / 112) < 1, 'the dodging defender lands inside the sand');
+        assert.ok(distance(point, contact.slideTripOrigins.victim) < .001, 'the hop lands on its original footprint');
+        assert.ok(!scene.sim.exits.has(actual.victim));
+        fallback = actual; recovered = true;
+      }
+      assert.equal(actual.aggressor, planned.aggressor); assert.equal(actual.victim, planned.victim);
+      if (elapsed >= actual.resolve) {
+        assert.ok(fallback && scene.sim.exits.has(actual.victim), 'only the following ordinary bout releases the selected loser');
+        assert.equal(capturedRanks()[actual.victim], order.indexOf(actual.victim) + 1); resolved = true; break;
+      }
+    }
+  }
+  assert.ok(jumped && passed && recovered && resolved, `the full missed slide and unchanged deciding result complete: ${[...stages]}`);
+  assert.ok(stages.has('jump') && stages.has('pass') && stages.has('land') && stages.has('recover'));
+});
+
+for (const mirrored of [false, true]) test(`two live allies independently clothesline the neck and chest before the exact shared throw (${mirrored ? 'mirrored' : 'ordinary'})`, () => {
+  const seed = 865, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.linkedRush);
   assert.ok(planned, 'the production extremely rare roll selects the linked attack');
   const scene = game(seed, false, mirrored), previous = new Map();
-  let linked = false, hit = false, held = false, thrown = false, resolved = false, previousVictim;
+  let extended = false, hit = false, held = false, thrown = false, resolved = false, previousVictim;
   for (let elapsed = 0; elapsed <= planned.resolve + 1500; elapsed += 16) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
     if (!contact?.linkedRushOrigins || !contact.round.linkedRush) continue;
@@ -158,17 +216,26 @@ for (const mirrored of [false, true]) test(`two live allies join arms, hit the n
     }
     if (window.launchAt === elapsed) {
       const pair = pairIds.map(id => actors.get(id));
-      const palms = pair.map(actor => actor.animation.contactPoints.hands[actor.linkedArm]);
-      assert.ok(distance(palms[0], palms[1]) < 4, 'both actual palms meet before the shared run');
-      linked = true;
+      const palms = pair.map(actor => actor.animation.contactPoints.hands[actor.clotheslineArm]);
+      assert.ok(distance(palms[0], palms[1]) > 12, 'each attacker extends a separate arm rather than holding the other hand');
+      assert.ok(pair.every(actor => actor.linkedArm === undefined && actor.linkedHandTarget === undefined), 'the former hand-link rig is unused');
+      extended = true;
     }
     if (window.contactAt === elapsed) {
       assert.ok(contact.pairCarryOrigins, 'the hit captures the existing bodies instead of restaging a joint throw');
-      assert.ok(distance(contact.pairCarryOrigins.victim, scene.sim.bodies.get(actual.victim)) < .001, 'the shared fall starts at the victim already touched by the joined arms');
-      const pair = pairIds.map(id => actors.get(id)), palms = pair.map(actor => actor.animation.contactPoints.hands[actor.linkedArm]);
+      assert.ok(distance(contact.pairCarryOrigins.victim, scene.sim.bodies.get(actual.victim)) < .001, 'the shared fall starts at the victim already struck by both separate forearms');
+      const pair = pairIds.map(id => actors.get(id)), palms = pair.map(actor => actor.animation.contactPoints.hands[actor.clotheslineArm]);
       const head = victim.animation.contactPoints.head, neck = { x: head.x, y: head.y + victim.scale * 20 };
-      assert.ok(distance(palms[0], palms[1]) < 4, 'the joined-arm contact must actually be painted before the arms are released');
-      assert.ok(palms.every(palm => distance(palm, neck) < 8), 'the final painted hand line reaches the actual neck on the recorded impact frame');
+      assert.ok(distance(palms[0], palms[1]) > 12, 'the separate strikes remain visible on the impact frame');
+      const strikes = contact.linkedRushOrigins.strikeTargets.map(point => ({ x: neck.x + point.x - contact.linkedRushOrigins.neck.x, y: neck.y + point.y - contact.linkedRushOrigins.neck.y }));
+      pair.forEach((actor, index) => {
+        const arm = actor.clotheslineArm, rig = actor.animation.contactPoints, elbow = rig.elbows[arm], hand = rig.hands[arm], point = strikes[index];
+        const dx = hand.x - elbow.x, dy = hand.y - elbow.y, length = dx * dx + dy * dy;
+        const along = Math.max(0, Math.min(1, ((point.x - elbow.x) * dx + (point.y - elbow.y) * dy) / length));
+        assert.ok(distance(point, { x: elbow.x + dx * along, y: elbow.y + dy * along }) < 8, 'each actual forearm independently reaches its neck or upper-chest point');
+        assert.ok(Math.abs(distance(rig.shoulders[arm], elbow) - 11 * actor.scale) < .001);
+        assert.ok(Math.abs(distance(elbow, hand) - 10.5 * actor.scale) < .001, 'the impact cannot stretch the striking arm');
+      });
       assert.equal(actual.impact - window.contactAt, 2200, 'the existing ordinary-speed shared throw is reused');
       hit = true;
     }
@@ -176,7 +243,9 @@ for (const mirrored of [false, true]) test(`two live allies join arms, hit the n
       const frame = arenaPairRushTargets(actual, elapsed, contact.center, contact.chargerOrigin, contact.pairCarryOrigins);
       if (frame.lift > 1) {
         const contacts = victim.animation.contactPoints;
-        for (const [id, endpoints] of [[frame.armsHolderId, contacts.hands], [frame.legsHolderId, contacts.feet]]) {
+        assert.equal(victim.carrySupport, 'shoulder');
+        for (const [id, endpoints] of [[frame.armsHolderId, contacts.shoulders], [frame.legsHolderId, contacts.feet]]) {
+          assert.equal(actors.get(id).gripMode, id === frame.armsHolderId ? 'shoulder' : 'ankle');
           const hands = actors.get(id).animation.contactPoints.hands;
           endpoints.forEach(endpoint => assert.ok(hands.some(hand => distance(hand, endpoint) < 4), `all four actual joint holds stay attached: ${detail}/${id}`));
         }
@@ -185,8 +254,11 @@ for (const mirrored of [false, true]) test(`two live allies join arms, hit the n
     }
     if (exit?.round.id === actual.id && !thrown) {
       assert.equal(previousVictim?.pose, 'carried', 'the free flight inherits the last supported body');
+      assert.equal(victim.carrySupport, 'shoulder', 'the linked throw keeps the same supported body shape after release');
       assert.ok(Math.abs(exit.lift - 142) < .01, 'the throw starts at the same existing overhead height');
       assert.ok(distance(previousVictim.contacts.origin, { x: exit.origin.x, y: exit.origin.y - exit.lift }) < .01, 'releasing the shared body cannot teleport it');
+      const now = victim.animation.contactPoints, delta = { x: now.origin.x - previousVictim.contacts.origin.x, y: now.origin.y - previousVictim.contacts.origin.y };
+      for (const limb of ['shoulders', 'elbows', 'hands', 'feet']) now[limb].forEach((point, index) => assert.ok(distance(point, { x: previousVictim.contacts[limb][index].x + delta.x, y: previousVictim.contacts[limb][index].y + delta.y }) < .01, 'releasing the shoulder-supported body preserves every limb'));
       thrown = true;
     }
     if (elapsed >= actual.resolve) {
@@ -195,5 +267,28 @@ for (const mirrored of [false, true]) test(`two live allies join arms, hit the n
     }
     previousVictim = snapshot(victim, scene.sim.bodies.get(actual.victim));
   }
-  assert.ok(linked && hit && held && thrown && resolved, 'the actual linked attack, groggy fall, four-point lift and single throw all complete');
+  assert.ok(extended && hit && held && thrown && resolved, 'the actual double clothesline, groggy fall, four-point lift and single throw all complete');
+});
+
+test('a fresh paused shared-throw release reconstructs supported arms and continues the same smooth release', () => {
+  const seed = 1, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.rushOutcome === 'counter-throw');
+  assert.ok(planned, 'the ordinary production rush selects a shared counter throw');
+  const elapsed = planned.impact + 150, scene = game(seed), actors = scene.step(elapsed, true);
+  const contact = scene.sim.contacts.get(planned.id);
+  assert.equal(contact.pairArmRelease.size, 2, 'a fresh seek captures both shoulder/ankle carriers without needing earlier painted frames');
+  const released = new Map();
+  for (const [id, source] of contact.pairArmRelease) {
+    const actor = actors.get(id), rig = actor.animation.contactPoints;
+    assert.ok(actor.carrierRelease && source.hands.every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
+    assert.ok(['shoulder', 'ankle'].includes(actor.gripMode), 'the supported arm proportions survive a paused seek');
+    released.set(id, structuredClone(rig));
+  }
+  const frozen = scene.step(elapsed, true);
+  for (const [id, source] of released) {
+    for (const limb of ['shoulders', 'elbows', 'hands']) source[limb].forEach((point, arm) => assert.ok(distance(point, frozen.get(id).animation.contactPoints[limb][arm]) < .001, 'paused release geometry remains completely still'));
+  }
+  const next = scene.step(elapsed + 1, true);
+  for (const [id, source] of released) {
+    for (const limb of ['elbows', 'hands']) source[limb].forEach((point, arm) => assert.ok(distance(point, next.get(id).animation.contactPoints[limb][arm]) < 2, 'a tiny forward seek follows the supported release arc instead of snapping to default overhead arms'));
+  }
 });

@@ -370,7 +370,7 @@ test('arena bouts begin immediately, connect without filler, and finish at their
         if (['armspin', 'trip', 'sidekick', 'suplex'].includes(round.tactic)) {
           prelimTechniques.add(round.tactic);
           const nominal = (round.end - round.start) / unit;
-          assert.ok(Math.abs(nominal - (round.slideTrip ? 7100 : round.tactic === 'suplex' ? 8200 : round.tactic === 'sidekick' ? 3400 : 5800)) < 1e-6, 'each technique retains its complete strike and landing window');
+          assert.ok(Math.abs(nominal - (round.wrestlingMove || round.kickCatch || round.slideTrip ? 7100 : round.tactic === 'suplex' ? 8200 : round.tactic === 'sidekick' ? 3400 : 5800)) < 1e-6, 'each technique retains its complete strike and landing window');
           if (round.tactic === 'suplex') assert.ok(Math.abs((round.resolve - round.impact) / unit - 4100) < 1e-6, 'a landed suplex still has time to drag and toss');
         }
       }

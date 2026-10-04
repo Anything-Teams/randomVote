@@ -3,13 +3,59 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
 const bundle = await build({ entryPoints: ['src/arenaSlideTrip.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { arenaSlideTripOutcome, arenaSlideTripTargets, ARENA_SLIDE_TRIP_CHANCE, ARENA_SLIDE_TRIP_TIMING } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+const { arenaSlideTripOutcome, arenaSlideTripEvadeOutcome, arenaSlideTripTargets, ARENA_SLIDE_TRIP_CHANCE, ARENA_SLIDE_TRIP_EVADE_CHANCE, ARENA_SLIDE_TRIP_MIN_GAP, ARENA_SLIDE_TRIP_TIMING, ARENA_SLIDE_TRIP_JUMP_DURATION } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 const center = { x: 500, y: 416 }, distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const window = { start: 1000, end: 8000 };
 
 test('sliding trips use exactly two percent of one independent cosmetic roll', () => {
   assert.equal(Array.from({ length: 1000 }, (_, roll) => arenaSlideTripOutcome(roll)).filter(Boolean).length, 1000 * ARENA_SLIDE_TRIP_CHANCE);
   for (const invalid of [-1, .2, 1000, NaN]) assert.throws(() => arenaSlideTripOutcome(invalid), RangeError);
+});
+
+test('jump dodges use a separate two percent branch among eligible slides', () => {
+  assert.equal(Array.from({ length: 1000 }, (_, roll) => arenaSlideTripEvadeOutcome(roll)).filter(Boolean).length, 1000 * ARENA_SLIDE_TRIP_EVADE_CHANCE);
+  for (const invalid of [-1, .2, 1000, NaN]) assert.throws(() => arenaSlideTripEvadeOutcome(invalid), RangeError);
+});
+
+test('a running slide requires the real starting gap and runway even with recorded or replayed clocks', () => {
+  for (const side of [-1, 1]) for (const separation of [25, 100, ARENA_SLIDE_TRIP_MIN_GAP - 1, ARENA_SLIDE_TRIP_MIN_GAP, 180]) {
+    const origins = { driver: { x: 500 - side * separation, y: 416 }, victim: { x: 500, y: 416 } };
+    for (const recorded of [{ ...window }, { ...window, launchAt: 1000, hookAt: 1400, kickAt: 2400 }]) {
+      const frame = arenaSlideTripTargets(recorded, 3000, center, origins, side);
+      assert.equal(frame.canPerform, separation >= ARENA_SLIDE_TRIP_MIN_GAP);
+      if (!frame.canPerform) {
+        assert.deepEqual(frame.driver, origins.driver, 'an ineligible layout cannot move backwards or produce a slide');
+        assert.equal(frame.canLaunch, false); assert.equal(frame.canHook, false); assert.equal(frame.canKick, false);
+        assert.equal(Math.abs(frame.victimAngle), 0, 'a close layout never scripts an ankle hook even from recorded clocks');
+      }
+    }
+  }
+  const vertical = { driver: { x: 500, y: 286 }, victim: { x: 500, y: 416 } };
+  assert.equal(arenaSlideTripTargets(window, 4000, center, vertical).canPerform, false, 'distance alone cannot invent a forward running runway');
+});
+
+test('a recorded two-foot dodge never hooks or kicks and returns both actors to the same sand footprints', () => {
+  for (const side of [-1, 1]) {
+    const origins = { driver: { x: 500 - side * 220, y: 416 }, victim: { x: 500, y: 416 } };
+    const first = arenaSlideTripTargets({ ...window, evade: true }, window.start, center, origins, side);
+    const launchAt = first.plannedLaunchAt, jumpAt = first.plannedJumpAt, passAt = first.plannedHookAt;
+    const recorded = { ...window, evade: true, launchAt, jumpAt, passAt, hookAt: null, kickAt: null };
+    let peak = 0, previous = arenaSlideTripTargets(recorded, window.start, center, origins, side);
+    for (let clock = window.start + 16; clock < first.requiredEndAt + 200; clock += 16) {
+      const frame = arenaSlideTripTargets(recorded, clock, center, origins, side);
+      assert.equal(frame.hookAt, null); assert.equal(frame.kickAt, null); assert.equal(frame.canHook, false); assert.equal(frame.canKick, false);
+      assert.deepEqual(frame.victim, origins.victim, 'the two-foot hop keeps its landing footprint inside the arena');
+      assert.equal(frame.victimAngle, 0); assert.equal(frame.victimSlam, undefined, 'the dodging opponent never falls or becomes groggy');
+      assert.ok(distance(frame.driver, previous.driver) / .016 <= 240 + 1e-6, 'the missed slide and recovery remain bounded');
+      peak = Math.max(peak, frame.victimHeight); previous = frame;
+    }
+    assert.ok(peak > 91 && peak <= 92);
+    const passing = arenaSlideTripTargets(recorded, passAt, center, origins, side);
+    assert.equal(passing.stage, 'pass'); assert.ok(passing.victimHeight > 70 && passing.victimJumpTuck > .6, 'both knees are raised when the slide reaches the ankle line');
+    const recovered = arenaSlideTripTargets(recorded, first.requiredEndAt + 200, center, origins, side);
+    assert.equal(recovered.recovered, true); assert.equal(recovered.driverPose, 'guard'); assert.equal(recovered.victimPose, 'guard'); assert.equal(recovered.victimHeight, 0);
+    assert.equal(recovered.landingAt - jumpAt, ARENA_SLIDE_TRIP_JUMP_DURATION);
+  }
 });
 
 test('a real runway accelerates into a brief feet-first slide with bounded speed and no reset', () => {

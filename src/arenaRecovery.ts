@@ -3,7 +3,7 @@ import type { ArenaPose } from './game/ArenaFighter';
 import { arenaTechniqueTargets } from './arenaTechniques';
 
 export const ARENA_RECOVERY_THROW_SPAN = 3900;
-export const ARENA_RECOVERY_EXIT_DURATION = 1250;
+export const ARENA_RECOVERY_EXIT_DURATION = 2600;
 export const ARENA_RECOVERY_DURATION = ARENA_RECOVERY_THROW_SPAN + ARENA_RECOVERY_EXIT_DURATION;
 export type ArenaRecoveryWindow = { start: number; end: number; throwAt?: number; kind?: 'overhead-escape' };
 const clamp = (p: number) => Math.max(0, Math.min(1, p));
@@ -79,17 +79,29 @@ export function arenaRecoveryTargets(round: ArenaRound, elapsed: number, center:
   // Most of the rotation happens around the high part of the arc. The last
   // quarter of the descent lets the straightened feet read before contact.
   const turn = side * Math.PI * 2 * ease((flight - .08) / .76);
+  const thrownFrom = inside({ x: center.x - side * 23, y: center.y });
+  const away = { x: landing.x - thrownFrom.x, y: landing.y - thrownFrom.y };
+  const length = Math.max(1, Math.hypot(away.x, away.y));
+  // A survivor uses the landing momentum to leave this opponent behind.
+  // Bend along the sand when the rim leaves no straight runway.
+  const departure = [0, .55, -.55, 1.1, -1.1, 1.55, -1.55]
+    .map(turn => inside({ x: landing.x + (away.x * Math.cos(turn) - away.y * Math.sin(turn)) / length * 72, y: landing.y + (away.x * Math.sin(turn) + away.y * Math.cos(turn)) / length * 38 }))
+    .filter(point => (point.x - landing.x) * away.x + (point.y - landing.y) * away.y >= -1e-8)
+    .sort((a, b) => Math.hypot(b.x - thrownFrom.x, b.y - thrownFrom.y) - Math.hypot(a.x - thrownFrom.x, a.y - thrownFrom.y))[0] ?? landing;
+  const retreat = inside({ x: thrownFrom.x - away.x / length * 28, y: thrownFrom.y - away.y / length * 14 });
+  const separating = ease((throwAge - 1100) / 1000);
+  const thrower = { x: mix(thrownFrom.x, retreat.x, separating), y: mix(thrownFrom.y, retreat.y, separating) };
+  const receiver = landed ? { x: mix(landing.x, departure.x, separating), y: mix(landing.y, departure.y, separating) } : { x: mix(initial.x, landing.x, flight), y: mix(initial.y, landing.y, flight) };
   return {
     kind: undefined,
     active: elapsed >= round.recovery.start && elapsed < round.recovery.end,
-    stage: progress < .30 ? 'approach' : progress < .52 ? 'hold' : throwAge < 0 ? 'lift' : !landed ? 'somersault' : throwAge < 1100 ? 'land' : 'release',
+    stage: progress < .30 ? 'approach' : progress < .52 ? 'hold' : throwAge < 0 ? 'lift' : !landed ? 'somersault' : throwAge < 1100 ? 'land' : throwAge < 2100 ? 'separate' : 'release',
     side, phase: throwAge < 0 ? take : clamp(throwAge / 350), airborne,
-    thrower: inside({ x: center.x - side * 23, y: center.y }),
-    receiver: { x: mix(initial.x, landing.x, flight), y: mix(initial.y, landing.y, flight) },
+    thrower, receiver,
     height, angle: turn, grip: progress >= .30 && throwAge < 0,
     throwAt: round.recovery.throwAt ?? round.recovery.start + throwSpan * unit,
     flightPhase: flight, throwPhase: clamp(throwAge / 350), liftPhase: take,
-    landingPhase: clamp((throwAge - 880) / 220), returnCenter: { x: (center.x - side * 23 + landing.x) / 2, y: (center.y + landing.y) / 2 },
+    landingPhase: clamp((throwAge - 880) / 220), returnCenter: { x: (retreat.x + departure.x) / 2, y: (retreat.y + departure.y) / 2 },
     throwerPose: undefined, overheadRaise: undefined, receiverPose: undefined, receiverSlam: undefined,
     suspension: undefined, jumpTuck: undefined, throwerBalance: undefined,
     throwerEffort: undefined, receiverEffort: undefined, liftPreparation: undefined,

@@ -38,7 +38,8 @@ function fixture(tactic, { rushRoll = 7, count = 5, predicate, maxSeeds = 80 } =
 }
 
 test('a live sidekick never throws its opponent before the recorded sole contact even when the approach passes the planned impact', () => {
-  const scene = game(Array.from({ length: 5 }, (_, i) => `review-2-${i}`)), round = scene.rounds.find(round => round.tactic === 'sidekick');
+  const found = fixture('sidekick', { predicate: round => round.tactic === 'sidekick' && !round.wrestlingMove && !round.kickCatch && !round.recovery && !round.rim && !round.rimCharge && round.rimPushRoll >= 700 });
+  const scene = game(found.order, found.seed, found.duration), round = found.round;
   assert.ok(round);
   let launched = false, contactAt;
   for (let elapsed = 0; elapsed < round.resolve; elapsed += 16) {

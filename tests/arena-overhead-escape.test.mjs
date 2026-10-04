@@ -9,6 +9,7 @@ async function source(path) {
 const { arenaRecoveryTargets, ARENA_RECOVERY_EXIT_DURATION } = await source('src/arenaRecovery.ts');
 const { arenaTechniqueTargets } = await source('src/arenaTechniques.ts');
 const { arenaAction, arenaActionWords, arenaNarration, arenaRanks, arenaRounds, arenaMinimumDuration } = await source('src/arenaLogic.ts');
+const { arenaEscapeRoll } = await source('src/arenaEscape.ts');
 const { arenaStoryState } = await source('src/arenaStoryLogic.ts');
 const { sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -22,7 +23,11 @@ test('overhead escape is an independent two percent suplex surprise and preserve
   let eligible = 0, escapes = 0;
   for (let seed = 0; seed < 8192; seed++) {
     const rounds = arenaRounds(fixtureOrder, 44000, 7, seed), final = rounds.at(-1);
-    if (final.tactic === 'suplex') eligible++;
+    // Later cosmetic moves may replace a failed suplex trial. Count the
+    // original eligibility before those moves, including their failures.
+    const originallySuplex = arenaEscapeRoll(seed, final.index + 39) % 100 >= 8;
+    if (originallySuplex) eligible++;
+    assert.equal(final.recovery?.kind === 'overhead-escape', originallySuplex && arenaEscapeRoll(seed, final.index + 307) % 100 < 2);
     if (final.recovery?.kind !== 'overhead-escape') continue;
     escapes++;
     assert.equal(final.tactic, 'suplex');

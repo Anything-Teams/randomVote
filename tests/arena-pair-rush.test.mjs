@@ -136,17 +136,17 @@ test('both rush outcomes keep bounded continuous movement without returning to a
   }
 });
 
-test('both holders keep both painted hand and toe endpoints attached from the floor to the overhead throw', () => {
+test('both holders keep both painted shoulder and toe endpoints attached from the floor to the overhead throw', () => {
   const fighter = (id, index, values) => ({ candidate: { id, name: id, color: '#dd784c' }, index, x: 500, y: 416, scale: 2.04, facing: 1, pose: 'brace', angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...values });
   for (const side of [-1, 1]) for (let bodyIndex = 0; bodyIndex < 10; bodyIndex++) for (let victimIndex = 0; victimIndex < 10; victimIndex++) for (const phase of [.62, .66, .70, .74, .78, .80, .82, .84, .86, .93, .96, .99]) {
     const actual = round(7, side), frame = frameAtBeat(actual, phase), clock = actual.start + frame.phase * (actual.impact - actual.start);
-    const victim = fighter(actual.victim, victimIndex, { ...frame.victim, y: frame.victim.y - frame.lift, depthY: frame.victim.y, facing: -side, phase, pose: frame.victimPose, angle: frame.victimAngle, suspension: frame.victimSuspension, carryStretch: frame.victimCarryStretch });
+    const victim = fighter(actual.victim, victimIndex, { ...frame.victim, y: frame.victim.y - frame.lift, depthY: frame.victim.y, facing: -side, phase, pose: frame.victimPose, angle: frame.victimAngle, suspension: frame.victimSuspension, carryStretch: frame.victimCarryStretch, carrySupport: 'shoulder' });
     const body = sampleArenaFighterContacts(victim, clock);
-    for (const [id, points, position, facing, index] of [[actual.aggressor, body.hands, frame.aggressor, -side, bodyIndex], [actual.helper, body.feet, frame.helper, side, bodyIndex]]) {
-      const holder = fighter(id, index, { ...position, facing, phase, pose: frame.carrierPose, gripMode: id === frame.legsHolderId ? 'ankle' : 'wrist', overheadRaise: frame.overhead, carrierDrive: frame.carrierDrive, gripTarget: points[0], secondaryGripTarget: points[1], gripStrength: 1, gripLocked: true });
+    for (const [id, points, position, facing, index] of [[actual.aggressor, body.shoulders, frame.aggressor, -side, bodyIndex], [actual.helper, body.feet, frame.helper, side, bodyIndex]]) {
+      const holder = fighter(id, index, { ...position, facing, phase, pose: frame.carrierPose, gripMode: id === frame.legsHolderId ? 'ankle' : 'shoulder', overheadRaise: frame.overhead, carrierDrive: frame.carrierDrive, gripTarget: points[0], secondaryGripTarget: points[1], gripStrength: 1, gripLocked: true });
       Object.assign(holder, arenaCarryHolderPoint(holder, points, clock));
       const contact = sampleArenaFighterContacts(holder, clock);
-      for (let hand = 0; hand < 2; hand++) assert.ok(distance(contact.hands[1 - hand], points[hand]) < .01, `${side}/${phase}/${id}/${hand}: each painted hand must hold its actual fingertip or toe`);
+      for (let hand = 0; hand < 2; hand++) assert.ok(distance(contact.hands[1 - hand], points[hand]) < .01, `${side}/${phase}/${id}/${hand}: each painted hand must hold its actual shoulder or toe`);
       if (frame.stage === 'overhead') {
         assert.ok(body.waist.y < contact.head.y, 'the held body reaches above the carrier’s head before the throw');
         for (let arm = 0; arm < 2; arm++) {
@@ -443,11 +443,11 @@ test('a shared throw releases every painted held endpoint without rotating or re
   const fighter = (index, values) => ({ candidate: { id: 'v', name: 'v', color: '#e98d67' }, index, scale: 2.04, facing: 1, pose: 'carried', angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...values });
   for (const side of [-1, 1]) for (let index = 0; index < 10; index++) {
     const actual = round(7, side), held = frameAtBeat(actual, 1), landing = { x: side > 0 ? 885 : 115, y: 436 };
-    const carry = fighter(index, { x: held.victim.x, y: held.victim.y - held.lift, depthY: held.victim.y, facing: -side, angle: held.victimAngle, suspension: held.victimSuspension, carryStretch: held.victimCarryStretch, phase: held.phase });
+    const carry = fighter(index, { x: held.victim.x, y: held.victim.y - held.lift, depthY: held.victim.y, facing: -side, angle: held.victimAngle, suspension: held.victimSuspension, carryStretch: held.victimCarryStretch, carrySupport: 'shoulder', phase: held.phase });
     const flight = arenaPairRushFlight(0, held.victim, landing, side, 1, { lift: held.lift, angle: held.victimAngle });
     assert.equal(flight.stage, 'flight'); assert.equal(flight.pose, 'carried'); assert.equal(flight.height, held.lift); assert.equal(flight.angle, held.victimAngle);
     assert.equal(flight.carryStretch, 1); assert.equal(flight.suspension, 1); assert.equal(flight.facing, -side);
-    const released = fighter(index, { x: flight.x, y: flight.y, depthY: flight.groundY, facing: flight.facing, angle: flight.angle, suspension: flight.suspension, carryStretch: flight.carryStretch, phase: flight.phase });
+    const released = fighter(index, { x: flight.x, y: flight.y, depthY: flight.groundY, facing: flight.facing, angle: flight.angle, suspension: flight.suspension, carryStretch: flight.carryStretch, carrySupport: 'shoulder', phase: flight.phase });
     const a = sampleArenaFighterContacts(carry, actual.impact), b = sampleArenaFighterContacts(released, actual.impact);
     for (const key of ['head', 'waist']) assert.ok(distance(a[key], b[key]) < .001, `${side}/${index}/${key}: the release begins at the held painted body`);
     for (const key of ['hands', 'feet', 'elbows', 'shoulders']) for (let endpoint = 0; endpoint < 2; endpoint++) assert.ok(distance(a[key][endpoint], b[key][endpoint]) < .001, `${side}/${index}/${key}/${endpoint}: the flight cannot replace the held skeleton on release`);

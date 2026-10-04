@@ -74,7 +74,7 @@ function game(reversed = false) {
 function snapshot(actor, body) {
   return { x: actor.x, y: actor.y, depthY: actor.depthY, height: actor.depthY - actor.y, heldHeight: body.y - actor.animation.contactPoints.origin.y, angle: actor.angle, facing: actor.facing, pose: actor.pose, contacts: structuredClone(actor.animation.contactPoints) };
 }
-const points = contacts => [contacts.origin, contacts.head, contacts.waist, ...contacts.hands, ...contacts.feet];
+const points = contacts => [contacts.origin, contacts.head, contacts.waist, ...contacts.shoulders, ...contacts.elbows, ...contacts.hands, ...contacts.feet];
 const intersectsViewport = values => Math.max(...values.map(point => point.x)) > 0 && Math.min(...values.map(point => point.x)) < 1000 && Math.max(...values.map(point => point.y)) > 0 && Math.min(...values.map(point => point.y)) < 620;
 const observedSides = new Set();
 
@@ -90,6 +90,7 @@ for (const reversed of [false, true]) test(`the live overhead joint throw inheri
     if (exit && exit.round.id === planned.id) {
       observedSides.add(exit.side);
       if (!released) {
+        assert.equal(actor.carrySupport, 'shoulder', 'the released body keeps its relaxed shoulder-supported rig');
         assert.ok(previous?.pose === 'carried' && Math.abs(previous.heldHeight - 142) < .01, `the last frame actually holds the victim above the carriers: ${detail()}`);
         assert.ok(Math.abs(exit.lift - 142) < .01, `release cannot replace the painted overhead height with zero: ${detail()}`);
         assert.ok(distance(previous.contacts.origin, { x: exit.origin.x, y: exit.origin.y - exit.lift }) < .01, `the exit starts at the last painted horizontal root: ${detail()}`);
@@ -150,9 +151,12 @@ for (const reversed of [false, true]) test(`the live pair counter stops at the n
         held = true;
       }
       if (frame.lift > 1) {
-        for (const [id, endpoints] of [[frame.armsHolderId, victim.animation.contactPoints.hands], [frame.legsHolderId, victim.animation.contactPoints.feet]]) {
+        assert.equal(victim.carrySupport, 'shoulder');
+        for (const [id, endpoints] of [[frame.armsHolderId, victim.animation.contactPoints.shoulders], [frame.legsHolderId, victim.animation.contactPoints.feet]]) {
+          assert.equal(actors.get(id).gripMode, id === frame.armsHolderId ? 'shoulder' : 'ankle');
           const hands = actors.get(id).animation.contactPoints.hands;
-          endpoints.forEach(endpoint => assert.ok(Math.min(...hands.map(hand => distance(hand, endpoint))) < 4, `both helpers keep their actual wrist/ankle holds throughout the supported lift: ${detail}/${id}`));
+          endpoints.forEach(endpoint => assert.ok(Math.min(...hands.map(hand => distance(hand, endpoint))) < 4, `both helpers keep their actual shoulder/ankle holds throughout the supported lift: ${detail}/${id}`));
+          if (frame.stage === 'overhead') assert.ok(victim.animation.contactPoints.waist.y < actors.get(id).animation.contactPoints.head.y, `the shoulder-supported body clears both carrier heads at the peak: ${detail}/${id}`);
         }
       }
     }

@@ -57,6 +57,30 @@ test('both carried arms retain their anatomical lengths through every 16ms floor
   }
 });
 
+test('shoulder support preserves relaxed complete arms and body width from the prone pickup through shared flight', () => {
+  for (const side of [-1, 1]) for (const facing of [-1, 1]) for (let index = 0; index < 10; index++) {
+    const actor = fighter({ index, facing, carrySupport: 'shoulder', motionImmediate: true });
+    let previous;
+    for (let frame = 0; frame <= 50; frame++) {
+      const stretch = smooth(frame / 50);
+      Object.assign(actor, { pose: frame === 50 ? 'airborne' : 'carried', carryStretch: stretch, suspension: stretch, y: 416 - stretch * 142, angle: side * Math.PI * (.47 + .03 * stretch) });
+      const { contacts, local, matrix, painted } = paint(actor, 1000 + frame * 16);
+      assert.equal(actor.animation.motion.shoulderLift, 0, 'the shoulder hold never lifts or twists the victim arm joint');
+      assert.ok(Math.abs(Math.hypot(matrix[0], matrix[1]) - actor.scale) < 1e-8, 'supported torso and shorts retain their full width');
+      assert.ok(Math.abs(Math.hypot(matrix[2], matrix[3]) - actor.scale) < 1e-8);
+      assert.ok(painted.every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
+      for (let arm = 0; arm < 2; arm++) {
+        const shoulder = local(contacts.shoulders[arm]), elbow = local(contacts.elbows[arm]), hand = local(contacts.hands[arm]);
+        assert.ok(Math.abs(distance(shoulder, elbow) - 11) < .001);
+        assert.ok(Math.abs(distance(elbow, hand) - 10.5) < .001, 'resting the arms cannot shorten or overextend the forearm');
+        assert.ok(hand.y > shoulder.y + 8, 'the relaxed hand remains beside the body instead of stretching behind the head');
+      }
+      if (previous) parts(contacts).forEach((point, part) => assert.ok(distance(point, parts(previous)[part]) < 10, 'the supported limbs follow a continuous lift and release'));
+      previous = structuredClone(contacts);
+    }
+  }
+});
+
 test('the held and flying fighter keeps adult body width and complete world-space limbs throughout unfolding', () => {
   for (const facing of [-1, 1]) for (const side of [-1, 1]) for (let index = 0; index < 10; index++) for (const carryStretch of [0, .25, .5, .75, 1]) for (const suspension of [0, 1]) {
     const actor = fighter({ index, facing, carryStretch, suspension, angle: side * Math.PI * (.47 + .03 * carryStretch), y: suspension ? 274 : 416, motionImmediate: true });
@@ -147,19 +171,19 @@ test('an ankle pickup starts from the same actual drag skeleton before either su
   }
 });
 
-test('sampled holder placement keeps four actual limb holds throughout the full-width lift with complete arms', () => {
+test('sampled holder placement keeps both shoulders and both ankles supported throughout the full-width lift', () => {
   for (const side of [-1, 1]) for (let index = 0; index < 10; index++) for (let frame = 0; frame <= 50; frame++) {
-    const raise = frame / 50, victim = fighter({ index, facing: -side, carryStretch: raise, suspension: raise, y: 416 - raise * 142, angle: side * Math.PI * (.47 + .03 * raise), motionImmediate: true });
+    const raise = frame / 50, victim = fighter({ index, facing: -side, carryStretch: raise, carrySupport: 'shoulder', suspension: raise, y: 416 - raise * 142, angle: side * Math.PI * (.47 + .03 * raise), motionImmediate: true });
     const held = sampleArenaFighterContacts(victim, 1000 + frame * 16);
-    for (const gripMode of ['wrist', 'ankle']) {
-      const endpoints = gripMode === 'wrist' ? held.hands : held.feet;
-      const holder = fighter({ index: (index + 3) % 10, facing: gripMode === 'wrist' ? -side : side, pose: 'overhead', angle: 0, carryStretch: undefined, suspension: 0, overheadRaise: raise, gripMode, motionImmediate: true });
+    for (const gripMode of ['shoulder', 'ankle']) {
+      const endpoints = gripMode === 'shoulder' ? held.shoulders : held.feet;
+      const holder = fighter({ index: (index + 3) % 10, facing: gripMode === 'shoulder' ? -side : side, pose: 'overhead', angle: 0, carryStretch: undefined, suspension: 0, overheadRaise: raise, gripMode, motionImmediate: true });
       const saved = structuredClone(holder.animation), ground = arenaCarryHolderPoint(holder, endpoints, 1000 + frame * 16);
       assert.deepEqual(holder.animation, saved, 'placement sampling does not advance the live foot motor');
       Object.assign(holder, ground, { depthY: ground.y, gripTarget: endpoints[0], secondaryGripTarget: endpoints[1], gripStrength: 1, gripLocked: true });
       const { contacts, local } = paint(holder, 1000 + frame * 16);
       for (let arm = 0; arm < 2; arm++) {
-        assert.ok(distance(contacts.hands[arm], endpoints[1 - arm]) < .001, `${side}/${index}/${raise}/${gripMode}/${arm}: both actual hands stay on the full-width limb ends`);
+        assert.ok(distance(contacts.hands[arm], endpoints[1 - arm]) < .001, `${side}/${index}/${raise}/${gripMode}/${arm}: both actual hands stay on the supported shoulders or ankles`);
         const shoulder = local(contacts.shoulders[arm]), elbow = local(contacts.elbows[arm]), hand = local(contacts.hands[arm]);
         assert.ok(Math.abs(distance(shoulder, elbow) - (11 + raise * 3)) < .001);
         assert.ok(Math.abs(distance(elbow, hand) - (10.5 + raise * 3.5)) < .001);
@@ -179,11 +203,11 @@ test('a nearby preferred ground stays within normal step speed while the synchro
     const previous = [undefined, undefined];
     for (let age = ARENA_PAIR_COUNTER_TIMING.grip; age < ARENA_PAIR_COUNTER_TIMING.release; age += 16) {
       const motion = arenaPairRushTargets(round, age, { x: 500, y: 416 }, { x: 500, y: 416 });
-      const victim = fighter({ index, x: motion.victim.x, y: motion.victim.y - motion.lift, angle: motion.victimAngle, facing: motion.chargerFacing, carryStretch: motion.victimCarryStretch, suspension: motion.victimSuspension, motionImmediate: true });
+      const victim = fighter({ index, x: motion.victim.x, y: motion.victim.y - motion.lift, angle: motion.victimAngle, facing: motion.chargerFacing, carryStretch: motion.victimCarryStretch, carrySupport: 'shoulder', suspension: motion.victimSuspension, motionImmediate: true });
       const held = sampleArenaFighterContacts(victim, age);
       for (let end = 0; end < 2; end++) {
-        const endpoints = end ? held.feet : held.hands;
-        const holder = fighter({ index: (index + 3) % 10, facing: end ? side : -side, pose: 'overhead', angle: 0, carryStretch: undefined, overheadRaise: motion.overhead, carrierDrive: motion.carrierDrive, gripMode: end ? 'ankle' : 'wrist', motionImmediate: true });
+        const endpoints = end ? held.feet : held.shoulders;
+        const holder = fighter({ index: (index + 3) % 10, facing: end ? side : -side, pose: 'overhead', angle: 0, carryStretch: undefined, overheadRaise: motion.overhead, carrierDrive: motion.carrierDrive, gripMode: end ? 'ankle' : 'shoulder', motionImmediate: true });
         const ground = arenaCarryHolderPoint(holder, endpoints, age, previous[end]);
         if (previous[end]) assert.ok(distance(ground, previous[end]) / .016 < 165, `${side}/${index}/${age}/${end}: anatomical grip preservation cannot force a faster than normal ground step`);
         Object.assign(holder, ground, { gripTarget: endpoints[0], secondaryGripTarget: endpoints[1], gripStrength: 1, gripLocked: true });

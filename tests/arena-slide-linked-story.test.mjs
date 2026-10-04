@@ -91,6 +91,23 @@ test('slide story and visible head words wait for the actual slide, ankle hook a
   assert.doesNotMatch(arenaStoryState(kickPending, kickAt - 1).action, /장외로 나갑/);
 });
 
+test('rare slide dodge explanations follow the recorded hop and landing without claiming an ankle hook or exit', () => {
+  const order = ['1', '2', '3', '4', '5'], planned = arenaRounds(order, 44000, 7, 1566).find(round => round.slideTrip?.evade);
+  const round = { ...planned, start: 1000, impact: 7000, resolve: 8100, end: 8100,
+    slideTrip: { start: 1000, end: 7000, evade: true, plannedLaunchAt: 1800, plannedPassAt: 2200, launchAt: 1800, jumpAt: 2000, passAt: 2200, hookAt: null, kickAt: null } };
+  const candidates = order.map(id => ({ id, name: id, color: '#ffad72' }));
+  for (const [clock, step, stage] of [[1000, 0, 'approach'], [1900, 1, 'slide'], [2100, 2, 'jump'], [2200, 3, 'pass'], [2520, 4, 'land'], [2681, 5, 'recover']]) {
+    const frame = arenaSlideTripTargets(round.slideTrip, clock, { x: 500, y: 416 });
+    const story = arenaStoryState(round, clock), words = arenaActionWords(round, clock);
+    assert.equal(frame.stage, stage); assert.equal(story.step, step);
+    assert.deepEqual(story.right, [round.victim]);
+    assert.ok(words.every(item => !/발걸기|발차기|장외|넘어진다/.test(item.word)), 'words cannot claim the missed tackle hit');
+    assert.doesNotMatch(arenaNarration(round, candidates, order, clock).title, /걸렸다|발차기|장외/);
+  }
+  const pending = { ...round, slideTrip: { ...round.slideTrip, jumpAt: null, passAt: null } };
+  assert.equal(arenaSlideTripTargets(pending.slideTrip, 2100, { x: 500, y: 416 }).stage, 'slide', 'narration cannot launch an unrecorded hop');
+});
+
 test('linked story never turns the attacked player into the charger and reads the shared throw from real neck contact', () => {
   const order = ['1', '2', '3', '4', '5'], planned = arenaRounds(order, 44000, 7, 570).find(round => round.linkedRush);
   assert.ok(planned);
@@ -98,10 +115,11 @@ test('linked story never turns the attacked player into the charger and reads th
   const round = { ...planned, start, impact, resolve: impact + 1100, end: impact + 1100, timeScale: 1, rushLaunchAt: launchAt, rushContactAt: contactAt,
     linkedRush: { start, end: impact, launchAt, contactAt } };
   const candidates = order.map(id => ({ id, name: id, color: '#ffad72' }));
-  for (const [clock, step, word] of [[start, 0, '팔 연결!'], [launchAt, 1, '연계 돌진!'], [contactAt, 2, '목에 충돌!'], [contactAt + 450, 3, '그로기!'], [contactAt + 720, 4, '손끝 잡기!'], [contactAt + 900, 5, '함께 들기!'], [impact - 100, 6, '함께 던지기!']]) {
+  for (const [clock, step, word] of [[start, 0, '팔 뻗기!'], [launchAt, 1, '더블 클로스라인!'], [contactAt, 2, '목 · 가슴 가격!'], [contactAt + 450, 3, '그로기!'], [contactAt + 720, 4, '어깨 잡기!'], [contactAt + 900, 5, '함께 들기!'], [impact - 100, 6, '함께 던지기!']]) {
     const story = arenaStoryState(round, clock), words = arenaActionWords(round, clock);
     assert.equal(story.kind, 'linked-rush'); assert.equal(story.step, step);
     assert.deepEqual(story.left, [round.aggressor, round.helper]); assert.deepEqual(story.right, [round.victim]);
+    assert.doesNotMatch(story.action + story.label + story.relationLabel, /팔 연결|팔을 연결|연결한 팔|서로의 팔/);
     assert.equal(words[0].word, word);
     assert.ok(arenaNarration(round, candidates, order, clock).title.length > 0);
     if (step === 1) assert.ok(words.every(item => item.id !== round.victim), 'the two linked attackers run, not the attacked player');

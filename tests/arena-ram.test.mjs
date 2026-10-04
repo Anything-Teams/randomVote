@@ -22,10 +22,10 @@ test('a successful charge hits without becoming a grip or a lifting attack', () 
   const hit = arenaAction(round, atPhase(.96)), release = arenaAction(round, round.impact);
   assert.deepEqual(hit.attackers, [round.aggressor]);
   assert.equal(hit.targetId, round.victim);
-  assert.equal(hit.liftedId, round.victim);
-  assert.ok(hit.lift > 15, 'the impact visibly knocks the receiver off the ground');
+  assert.equal(hit.liftedId, undefined);
+  assert.equal(hit.lift, 0, 'the receiver stays grounded until the actual deciding impact');
   assert.equal(release.liftedId, round.victim);
-  assert.equal(release.lift, 26);
+  assert.equal(release.lift, 0, 'the impact starts flight from the grounded receiver without a stalled raised recoil');
   for (const time of [atPhase(.5), atPhase(.96), round.impact, round.impact + 200]) {
     const driver = arenaAction(round, time).actors.find(actor => actor.id === round.aggressor);
     assert.ok(!['lift', 'throw'].includes(driver.pose), 'the driver keeps running through contact instead of performing a throw');
@@ -57,7 +57,7 @@ test('the driving fighter reaches real contact within bounded live movement in s
 
 test('collision recoil hands its actual height and origin directly to the outgoing flight', () => {
   const contact = arenaRamTargets(round, round.impact, { x: 675, y: 430 });
-  const action = arenaAction(round, round.impact), preparation = { lift: action.lift, angle: -.11 };
+  const action = arenaAction(round, round.impact), preparation = { lift: action.lift, angle: -.11, immediate: true };
   const released = arenaThrow(0, contact.victim, { x: 885, y: 460 }, contact.side, 1, preparation);
   assert.equal(released.groundX, contact.victim.x);
   assert.equal(released.groundY, contact.victim.y);
@@ -78,11 +78,12 @@ test('a real shoulder hit keeps flying in its incoming direction even before the
     assert.equal(actual.tactic, 'ram', 'the two actual fighters have a valid aligned runway');
     const contact = arenaRamTargets(actual, actual.impact, center), preContact = arenaRamTargets(actual, actual.start + (actual.impact - actual.start) * .82, center);
     assert.equal(contact.side, incoming);
-    assert.ok(incoming * (contact.victim.x - preContact.victim.x) > 17, 'the struck opponent recoils away from the arriving shoulder');
+    assert.deepEqual(contact.victim, preContact.victim, 'the receiver does not shuffle or float while waiting for the arriving hit');
+    assert.equal(preContact.stage, 'charge', 'the driver keeps charging instead of pausing in a recoil pose');
     const exitDirection = arenaExitDirection(actual, contact.victim, 0);
     assert.equal(exitDirection, incoming, 'landing follows the real incoming shoulder, not the nearest screen edge');
     const landing = { x: exitDirection < 0 ? 115 : 885, y: 436 };
-    const preparation = { lift: 26, angle: 0, rotation: exitDirection };
+    const preparation = { lift: 0, angle: 0, rotation: exitDirection, immediate: true };
     let previous = arenaThrow(0, contact.victim, landing, exitDirection, unit, preparation), traveled = 0;
     for (let age = 8 * unit; age <= 880 * unit; age += 8 * unit) {
       const flight = arenaThrow(age, contact.victim, landing, exitDirection, unit, preparation);
@@ -113,7 +114,7 @@ test('occasional successful charges knock out only the drawn loser and preserve 
     const order = Array.from({ length: count }, (_, index) => `fighter-${variation}-${index}`);
     const rounds = arenaRounds(order);
     roundsSeen += rounds.length;
-    for (const bout of rounds.filter(item => item.tactic === 'ram')) {
+    for (const bout of rounds.filter(item => item.tactic === 'ram' && !item.wrestlingMove)) {
       charges++;
       assert.equal(bout.helper, undefined);
       const action = arenaAction(bout, bout.impact);
@@ -124,4 +125,20 @@ test('occasional successful charges knock out only the drawn loser and preserve 
     assert.deepEqual(arenaRanks(order, 44000), Object.fromEntries(order.map((id, rank) => [id, rank + 1])));
   }
   assert.ok(charges > 0 && charges < roundsSeen * .3, 'a direct charge is an occasional different outcome among the other bouts');
+});
+
+test('a head-on hit has no stationary recoil and begins outward flight on its first frame', () => {
+  for (const side of [-1, 1]) {
+    const actual = { ...round, contactSide: side }, center = { x: 500, y: 416 };
+    const contact = arenaRamTargets(actual, actual.impact, center);
+    for (const age of [-480, -240, -80, -16]) {
+      const running = arenaRamTargets(actual, actual.impact + age, center);
+      assert.equal(running.stage, 'charge'); assert.equal(running.impact, 0);
+      assert.deepEqual(running.victim, contact.victim);
+    }
+    const landing = { x: contact.victim.x + side * 200, y: contact.victim.y + 10 };
+    const start = arenaThrow(0, contact.victim, landing, side, 1, { lift: 0, angle: 0, immediate: true });
+    const next = arenaThrow(16, contact.victim, landing, side, 1, { lift: 0, angle: 0, immediate: true });
+    assert.equal(start.stage, 'flight'); assert.ok(side * (next.groundX - start.groundX) > 3); assert.ok(next.height > 8);
+  }
 });
