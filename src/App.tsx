@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import GameStage from './GameStage';
 import BroadcastShow from './BroadcastShow';
 import RacingShow from './RacingShow';
@@ -44,6 +44,9 @@ export default function App() {
   const timer = useRef<number | null>(null);
   const playback = useRef({ elapsed: 0, startedAt: 0, paused: false, duration: SHOW_DURATION });
   const nextId = useRef(saved.entries.length + 1);
+  const extendArenaTimeline = useCallback((end: number) => {
+    if (Number.isFinite(end)) playback.current.duration = Math.max(playback.current.duration, end);
+  }, []);
 
   useEffect(() => () => { if (timer.current !== null) window.clearInterval(timer.current); }, []);
   useEffect(() => { saveSession({ entries, topic, mode, ladderTarget }); }, [entries, topic, mode, ladderTarget]);
@@ -117,9 +120,10 @@ export default function App() {
     timer.current = window.setInterval(() => {
       const clock = playback.current;
       if (clock.paused) return;
-      const next = Math.min(nextEnd, clock.elapsed + performance.now() - clock.startedAt);
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { finishNow(); return; }
+      const next = Math.min(clock.duration, clock.elapsed + performance.now() - clock.startedAt);
       setElapsed(next);
-      if (next >= nextEnd) {
+      if (next >= clock.duration) {
         if (timer.current !== null) window.clearInterval(timer.current);
         timer.current = null;
         setStatus('finished');
@@ -173,7 +177,7 @@ export default function App() {
   }
 
   const sportsProps = { candidates, order, elapsed, duration, paused, preview: status === 'setup', arenaRushRoll, arenaEscapeSeed };
-  const sportsScene = mode === 'racing' ? <RacingShow {...sportsProps} /> : mode === 'ladder' ? <LadderShow {...sportsProps} targetLane={status === 'setup' ? targetLane : runTarget} onTargetChange={status === 'setup' ? setLadderTarget : undefined} /> : <ArenaShow {...sportsProps} />;
+  const sportsScene = mode === 'racing' ? <RacingShow {...sportsProps} /> : mode === 'ladder' ? <LadderShow {...sportsProps} targetLane={status === 'setup' ? targetLane : runTarget} onTargetChange={status === 'setup' ? setLadderTarget : undefined} /> : <ArenaShow {...sportsProps} onArenaTimelineUpdate={status === 'running' ? extendArenaTimeline : undefined} />;
 
   return (
     <div className={`site-shell ${status !== 'setup' ? 'show-mode' : ''}`}>

@@ -111,3 +111,18 @@ test('an elbow sequence cannot announce dragging before the actual ankle grip, e
   assert.ok(arenaActionWords(round, elapsed).some(word => word.word === '발끝 잡기!'));
   assert.doesNotMatch(story.steps[story.step] + narration.title, /끌기|던지기|던졌다/);
 });
+
+test('floor drag finishes call the held throw before announcing an actual release', () => {
+  for (const tactic of ['suplex', 'elbow']) {
+    const round = { ...base, tactic, impact: 4000, resolve: 11000, end: 12000, elbowGripAt: 4000, floorFinish: { dragUntil: 1600, throwAt: 5600, releaseAt: 6600 } };
+    assert.ok(arenaActionWords(round, 5900).some(call => call.id === 'a' && call.word === '던지기!'));
+    assert.match(arenaNarration(round, candidates, ['a', 'v'], 5900).detail, /손은 붙어/);
+    assert.doesNotMatch(arenaNarration(round, candidates, ['a', 'v'], 5900).title, /던졌다|장외/);
+    assert.match(arenaStoryState(round, 5900).action, /머리 위/);
+    assert.match(arenaNarration(round, candidates, ['a', 'v'], 6700).title, /던졌다/);
+    const waiting = { ...round, floorFinish: { dragUntil: 1600, throwAt: null, releaseAt: null } };
+    assert.ok(!arenaActionWords(waiting, 8000).some(call => call.word === '던지기!'));
+    assert.doesNotMatch(arenaNarration(waiting, candidates, ['a', 'v'], 8000).title, /던졌다|장외/);
+    assert.match(arenaStoryState(waiting, 8000).action, /아직/);
+  }
+});

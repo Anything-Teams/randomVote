@@ -133,10 +133,12 @@ test('the elbow knockout reuses the suplex floor drag and throws only after reac
     }
     const before = arenaTechniqueExit(actual, timing.dragUntil - .001, origin, landing, direction, unit, preparation);
     const release = arenaTechniqueExit(actual, timing.dragUntil, origin, landing, direction, unit, preparation);
-    assert.equal(release.stage, 'rim-toss');
+    assert.equal(release.stage, 'hold');
+    const airborne = arenaTechniqueExit(actual, timing.throwUntil, origin, landing, direction, unit, preparation);
+    assert.equal(airborne.stage, 'rim-toss');
     assert.equal(release.height, 0, 'the actual rim throw begins from the translated floor silhouette');
     assert.ok(distance(before, release) < .01, 'the shared drag cannot jump to another location for the throw');
-    assert.ok(arenaTechniqueExit(actual, (timing.dragUntil + timing.tossUntil) / 2, origin, landing, direction, unit, preparation).height > 40, 'only the rim release can launch a throwing arc');
+    assert.ok(arenaTechniqueExit(actual, (timing.throwUntil + timing.tossUntil) / 2, origin, landing, direction, unit, preparation).height > 40, 'only the rim release can launch a throwing arc');
     assert.equal(arenaTechniqueExit(actual, timing.recoverUntil, origin, landing, direction, unit, preparation).stage, 'walk');
   }
 });

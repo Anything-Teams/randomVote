@@ -228,9 +228,11 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
       state.steps = ['몸통 맞잡기', '들렸다!', '머리에 엘보우', '풀리며 쓰러졌다', '기절', '발끝으로 접근', '두 발끝 잡기', '모래 위로 끌기', '끝에서 던지기', '장외 착지', '몸 일으키기'];
       const stages = ['approach', 'lift-counter', 'elbow', 'elbow-impact', 'groggy', 'ankle-approach', 'ankle-grip'];
       const age = elapsed - round.impact, timing = arenaFloorExitTiming(round);
-      state.step = round.elbowGripAt !== null && elapsed >= round.impact ? age < timing.stunnedUntil ? 6 : age < timing.dragUntil ? 7 : age < timing.tossUntil ? 8 : age < timing.landUntil ? 9 : 10 : Math.max(0, stages.indexOf(technique.stage));
+      const holding = age >= timing.dragUntil && (age < timing.throwUntil || !!round.floorFinish && round.floorFinish.releaseAt == null);
+      state.step = round.elbowGripAt !== null && elapsed >= round.impact ? age < timing.stunnedUntil ? 6 : age < timing.dragUntil ? 7 : holding || age < timing.tossUntil ? 8 : age < timing.landUntil ? 9 : 10 : Math.max(0, stages.indexOf(technique.stage));
       state.action = ['서로 거리를 좁히며 몸통을 맞잡을 틈을 봅니다.', '상대가 허리를 잡아 들어 올립니다. 들린 선수가 팔꿈치를 접어 반격을 준비합니다.', '공중에서 팔꿈치를 내리찍습니다! 상대의 머리에 정확히 닿습니다.', '머리에 충격을 받은 상대가 손을 놓고 쓰러집니다. 들렸던 선수는 착지합니다.', '상대가 기절 상태로 누웠습니다. 별이 맴돌고 팔과 다리에 힘이 풀립니다.', '착지한 선수가 옆으로 돌아 누운 상대의 발끝에 접근합니다.', '두 발끝을 양손으로 잡았습니다. 몸은 모래 위에 누운 채 끌기를 준비합니다.', '발끝을 놓지 않고 한 발씩 뒤로 디딥니다. 상대가 모래 위를 따라 경계까지 끌려갑니다.', '모래판 안에 발을 딛고 두 발끝을 놓아 넘깁니다! 쓰러진 상대만 장외로 날아갑니다.', '던져진 상대가 모래판 밖에 떨어졌습니다. 공격한 선수는 안에서 자세를 고칩니다.', '장외에 누운 선수가 몸을 일으킵니다. 자세를 회복한 뒤 시상 자리로 이동합니다.'][state.step];
-      if (elapsed >= round.impact && (round.elbowGripAt === null || age < timing.recoverUntil)) return state;
+      if (holding) state.action = round.floorFinish && round.floorFinish.throwAt == null ? '경계 안쪽에 두 발을 딛고 상대의 발끝을 단단히 붙잡습니다. 아직 손을 놓지 않았습니다.' : '두 발끝을 머리 위로 들어 올리고 몸을 뒤로 젖혀 경계 쪽으로 넘깁니다. 던질 힘을 싣는 동안 두 손은 발끝을 놓지 않습니다.';
+      if (elapsed >= round.impact && (round.elbowGripAt === null || holding || age < timing.recoverUntil)) return state;
       break;
     }
     case 'armspin':
@@ -267,14 +269,16 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
         }
       } else if (round.tactic === 'suplex') {
         const timing = arenaFloorExitTiming(round), age = elapsed - round.impact;
+        const holding = age >= timing.dragUntil && (age < timing.throwUntil || !!round.floorFinish && round.floorFinish.releaseAt == null);
         state.steps = ['견제 · 회피', '허리 잡아 들기', '머리 위로!', '내리찍기', '등 · 어깨 충돌', '기절', '발끝 잡아 끌기', '끝에서 던지기', '장외 착지', '몸 일으키기'];
-        state.step = opening ? 0 : technique.stage === 'grip' || technique.stage === 'lift' ? 1 : technique.stage === 'overhead' ? 2 : technique.stage === 'slam' ? technique.slamImpact > 0 ? 4 : 3 : age < timing.stunnedUntil ? 5 : age < timing.dragUntil ? 6 : age < timing.tossUntil ? 7 : age < timing.landUntil ? 8 : 9;
+        state.step = opening ? 0 : technique.stage === 'grip' || technique.stage === 'lift' ? 1 : technique.stage === 'overhead' ? 2 : technique.stage === 'slam' ? technique.slamImpact > 0 ? 4 : 3 : age < timing.stunnedUntil ? 5 : age < timing.dragUntil ? 6 : holding || age < timing.tossUntil ? 7 : age < timing.landUntil ? 8 : 9;
         state.action = ['밀기를 막았습니다. 자세를 낮춰 상대의 허리를 노립니다.', '허리를 양팔로 감싸고 발을 딛어 머리 위로 들어 올립니다.', '상대를 머리 위에 높이 들었습니다! 정점에서 몸을 고정합니다.', '잡고 있던 상대를 아래로 힘껏 내리찍습니다!', '쾅! 등과 어깨가 모래판에 부딪쳤습니다. 충격으로 팔과 다리의 힘이 풀립니다.', '바닥에 쓰러진 상대가 잠깐 기절합니다. 공격한 선수는 발끝으로 이동합니다.', '양손으로 발끝을 잡고 장외 방향으로 끕니다. 공격하는 선수는 모래판 안에 남습니다.', '발을 디딘 채 잡은 발끝을 놓아 넘깁니다. 상대만 모래판 밖으로 떨어집니다.', '넘겨진 상대가 모래판 밖에 떨어졌습니다. 안의 선수는 자세를 고칩니다.', '장외에 누운 선수가 몸을 일으킵니다. 자세를 회복한 뒤 시상 자리로 이동합니다.'][state.step];
         if (technique.aggressorEffort !== undefined) {
           state.relationLabel = '허리 맞잡고 힘겨루기';
           state.action = '허리를 맞잡고 서로 버팁니다. 무릎을 굽혀 체중을 실은 뒤 들어 올릴 틈을 만듭니다.';
         }
-        if (elapsed >= round.impact && age < timing.recoverUntil) return state;
+        if (holding) state.action = round.floorFinish && round.floorFinish.throwAt == null ? '모래판 끝 안쪽에 멈춰 두 발끝을 양손으로 단단히 붙잡습니다. 상대는 아직 손에서 풀리지 않았습니다.' : '잡은 두 발끝을 머리 위로 들어 올립니다. 안에 딛고 있는 두 발로 버티며 경계 쪽으로 넘길 힘을 싣고, 던지는 마지막 순간에 손을 놓습니다.';
+        if (elapsed >= round.impact && (holding || age < timing.recoverUntil)) return state;
       } else {
         state.steps = ['견제 · 준비', '한 번 도약', '공중 옆차기', '발끝 충돌 · 장외'];
         state.step = opening || technique.stage === 'plant' ? 0 : technique.stage === 'jump' ? 1 : technique.stage === 'kick' ? 2 : 3;

@@ -17,7 +17,7 @@ export { arenaTechniqueTargets, arenaTechniqueExit, isArenaFinalTechnique } from
 
 export type ArenaTactic = 'team' | 'bait' | 'catch' | 'ram' | 'spin' | 'shove' | 'double-shove' | 'edge' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final' | 'armspin' | 'trip' | 'suplex' | 'sidekick' | 'elbow';
 export type ArenaChargeSetup = { charger: ArenaPoint; receiver: ArenaPoint; side: 1 | -1; contactAt?: number | null; contactCharger?: ArenaPoint; contactReceiver?: ArenaPoint; loadDuration?: number; turnDuration?: number };
-export type ArenaRound = { suplexGripAt?: number | null; elbowGripAt?: number | null; id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; secondaryVictim?: string; counterSide?: 'front' | 'back'; counterFailed?: boolean; contactSide?: 1 | -1; chargeSetup?: ArenaChargeSetup; rushOutcome?: ArenaPairRushOutcome; rushContactAt?: number; rushPushDuration?: number; pairPickupAt?: number | null; rushLaunchAt?: number | null; sidekickLaunchAt?: number; pushContactAt?: number | null; timeScale?: number; prepares?: string; escape?: ArenaEscapeWindow; recovery?: ArenaRecoveryWindow; rim?: ArenaRimWindow; rimCharge?: ArenaRimChargeWindow; rimPushRoll?: number; rimPush?: boolean; wrestlingMove?: ArenaWrestlingMoveWindow; kickCatch?: ArenaKickCatchWindow; tripCounter?: boolean; supermanPunch?: ArenaSupermanPunchWindow; slideTrip?: ArenaSlideTripWindow; linkedRush?: ArenaLinkedRushWindow; pairDodge?: ArenaPairDodgeWindow & { partnerId: string; allowOut: boolean }; passingTrip?: ArenaPassingTripWindow & { joined?: boolean }; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
+export type ArenaRound = { floorFinish?: { dragUntil: number; throwAt?: number | null; releaseAt?: number | null }; suplexGripAt?: number | null; elbowGripAt?: number | null; id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; secondaryVictim?: string; counterSide?: 'front' | 'back'; counterFailed?: boolean; contactSide?: 1 | -1; chargeSetup?: ArenaChargeSetup; rushOutcome?: ArenaPairRushOutcome; rushContactAt?: number; rushPushDuration?: number; pairPickupAt?: number | null; rushLaunchAt?: number | null; sidekickLaunchAt?: number; pushContactAt?: number | null; timeScale?: number; prepares?: string; escape?: ArenaEscapeWindow; recovery?: ArenaRecoveryWindow; rim?: ArenaRimWindow; rimCharge?: ArenaRimChargeWindow; rimPushRoll?: number; rimPush?: boolean; wrestlingMove?: ArenaWrestlingMoveWindow; kickCatch?: ArenaKickCatchWindow; tripCounter?: boolean; supermanPunch?: ArenaSupermanPunchWindow; slideTrip?: ArenaSlideTripWindow; linkedRush?: ArenaLinkedRushWindow; pairDodge?: ArenaPairDodgeWindow & { partnerId: string; allowOut: boolean }; passingTrip?: ArenaPassingTripWindow & { joined?: boolean }; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
 export type ArenaPoint = { x: number; y: number };
 export type ArenaMovingBody = ArenaPoint & { facing: number; motorX?: number; motorY?: number };
 export type ArenaPodiumPlace = ArenaPoint & { id: string; rank: 1 | 2 | 3; readyAt: number };
@@ -296,12 +296,13 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
       const initialLift = !!technique.victimGrip;
       const floor = post && round.elbowGripAt !== null ? arenaTechniqueExit(round, elapsed - round.impact, { x: 500, y: 416 }, { x: 885, y: 436 }, 1, round.timeScale ?? 1) : undefined;
       const dragging = floor?.stage === 'stunned' || floor?.stage === 'drag';
-      action.stage = technique.phase < .30 ? 'approach' : initialLift ? technique.aggressorLift > 0 ? 'lift' : 'link' : floor ? dragging ? 'link' : floor.stage === 'rim-toss' ? 'throw' : 'release' : technique.stage === 'ankle-grip' ? 'link' : 'counter';
+      const held = floor?.stage === 'hold', raising = held && (!round.floorFinish || round.floorFinish.throwAt != null && elapsed >= round.floorFinish.throwAt);
+      action.stage = technique.phase < .30 ? 'approach' : initialLift ? technique.aggressorLift > 0 ? 'lift' : 'link' : floor ? raising ? 'lift' : dragging || held ? 'link' : floor.stage === 'rim-toss' ? 'throw' : 'release' : technique.stage === 'ankle-grip' ? 'link' : 'counter';
       action.attackers = initialLift ? [v] : [a]; action.targetId = initialLift ? a : v;
       // The technique renderer owns the counterattacker's held height.
       action.lift = 0; action.liftedId = undefined;
-      const ap: ArenaActionPose = floor ? dragging ? 'drag' : floor.stage === 'rim-toss' ? 'throw' : 'guard' : technique.aggressorPose ?? 'guard';
-      action.actors = [actor(a, 'aggressor', technique.aggressor.x - 500, technique.aggressor.y - 416, ap, floor?.phase ?? technique.phase, (dragging || !post && technique.grip) ? v : undefined, floor?.stage === 'drag' ? '발끝 잡아 끌기' : floor?.stage === 'rim-toss' ? '경계에서 던지기' : '들린 뒤 반격'), actor(v, 'victim', technique.victim.x - 500, technique.victim.y - 416, initialLift ? 'lift' : technique.victimPose ? 'stunned' : 'guard', technique.phase, initialLift ? a : undefined, '먼저 들어 올린 선수')];
+      const ap: ArenaActionPose = floor ? raising ? 'overhead' : dragging || held ? 'drag' : floor.stage === 'rim-toss' ? 'throw' : 'guard' : technique.aggressorPose ?? 'guard';
+      action.actors = [actor(a, 'aggressor', technique.aggressor.x - 500, technique.aggressor.y - 416, ap, floor?.phase ?? technique.phase, (dragging || held || !post && technique.grip) ? v : undefined, floor?.stage === 'drag' ? '발끝 잡아 끌기' : raising ? '발끝을 들어 던질 힘 싣기' : floor?.stage === 'rim-toss' ? '경계에서 던지기' : '들린 뒤 반격'), actor(v, 'victim', technique.victim.x - 500, technique.victim.y - 416, initialLift ? 'lift' : dragging || held || technique.victimPose ? 'stunned' : 'guard', technique.phase, initialLift ? a : undefined, '먼저 들어 올린 선수')];
       return action;
     }
     action.actors = [
@@ -499,7 +500,7 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
     : window.kind === 'dropkick' ? ['달려들기', '발 딛고 도약', '두 발 뻗기', '가슴에 실제 접촉', '공격자 착지', '공격자 자세 회복', '상대만 장외']
     : window.kind === 'spinebuster' ? ['상대 돌진', '허리 받아내기', '무게 받아 들기', '뒤로 누우며 메치기', '기절', '발목으로 접근', '두 발목 잡기', '모래 끝까지 끌기', '장내에서 던지기', '상대만 장외']
     : window.kind === 'powerbomb' ? ['돌진', '허리 감싸 잡기', '어깨 위로 들어 올리기', '무게를 받쳐 버티기', '등부터 모래에 내려찍기', '자세 회복', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
-    : window.kind === 'scoopslam' ? ['상대 돌진', '발 딛고 준비', '달려오는 몸 받치기', '다리로 들어 올리기', '거꾸로 돌려 메치기', '머리부터 모래에 충돌', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
+    : window.kind === 'scoopslam' ? ['상대 돌진', '발 딛고 준비', '상체와 허벅지 받치기', '몸에 붙여 안아 들기', '발을 딛고 몸 돌리기', '함께 낮아지며 등부터 메치기', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
     : ['거리 좁히기', '발 딛고 준비', labels[window.kind], '머리 위로 들어 넘기기', '모래 위에 넘어졌다', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외'];
   const stage = frame.stage as string;
   let step = Math.max(0, ['approach', 'load', 'attack', 'contact', 'fall', 'groggy', 'ankle-approach', 'ankle-grip', 'toss', 'release'].indexOf(stage));
@@ -514,7 +515,7 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
     if (counterWaiting) wordId = round.victim;
     word = reverse || window.kind === 'clothesline' ? '돌진!' : '준비!';
     title = word; detail = counterWaiting ? `${v}가 달려오기 시작합니다. ${a}는 아직 평소 서 있는 자세를 유지합니다.` : reverse ? `${a}가 중심을 낮추고 다가오는 ${v}의 허리를 노립니다.` : `${a}가 발을 딛고 힘을 모읍니다.`;
-  } else if ((window.kind === 'clothesline' || window.kind === 'powerbomb') && stage === 'recover') {
+  } else if ((window.kind === 'clothesline' || window.kind === 'powerbomb' || window.kind === 'scoopslam') && stage === 'recover') {
     word = ''; title = '공격자가 중심을 회복한다';
     detail = `${a}가 모래를 짚고 몸을 일으킵니다. ${v}는 기절한 채 누워 있습니다.`;
   } else if (window.kind === 'spinebuster' && stage === 'recover') {
@@ -530,8 +531,8 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
     word = '돌진 카운터!'; title = '머리 위로 들어 넘기기!';
     detail = `${a}가 달려온 ${v}를 머리 위로 들어 올립니다. 잡은 몸을 등 뒤로 넘길 때까지 두 발로 버팁니다.`;
   } else if (window.kind === 'scoopslam' && (stage === 'lift' || stage === 'turn')) {
-    word = '안아 메치기!'; title = stage === 'lift' ? '몸에 붙여 들어 올리기' : '거꾸로 돌려 메치기';
-    detail = stage === 'lift' ? `${a}가 ${v}의 등과 허벅지를 받친 채 다리를 펴 들어 올립니다.` : `${a}가 안고 있는 ${v}를 거꾸로 돌린 뒤 머리부터 모래로 내려찍습니다.`;
+    word = '안아 메치기!'; title = stage === 'lift' ? '몸에 붙여 안아 들어 올리기' : '발을 고쳐 딛으며 몸을 돌린다';
+    detail = stage === 'lift' ? `${a}가 ${v}의 상체와 허벅지를 받쳐 가슴 옆으로 안아 올립니다.` : `${a}가 두 발로 무게를 받으며 골반과 상체를 함께 돌립니다. 안긴 ${v}의 몸도 잡은 팔을 따라 돌아갑니다.`;
   } else if (window.kind === 'powerbomb' && (stage === 'lift' || stage === 'turn')) {
     word = '들어올리기!'; title = stage === 'lift' ? '어깨 위로 들어 올리기!' : '어깨 위에서 무게를 받친다';
     detail = `${a}가 두 손으로 ${v}의 허리를 받쳐 어깨 위까지 들어 올립니다. ${v}는 아직 눈을 뜬 채 균형을 잡으려 합니다.`;
@@ -547,7 +548,10 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
     else if (window.kind === 'spinebuster') {
       word = stage === 'fall' ? '내려찍기!' : '돌진 받아내기!'; title = word;
       detail = stage === 'fall' ? `${a}가 잡은 ${v}의 허리를 놓지 않고 뒤로 누우며 등부터 모래 위에 메칩니다.` : contact ? `${a}가 두 발로 버티며 ${v}의 달려오던 무게를 허리에서 받아냅니다.` : `${a}가 달려오는 ${v}의 허리를 두 손으로 받아냅니다.`;
-    } else detail = contact ? `${a}가 ${v}를 안아 들어 거꾸로 돌린 뒤 머리부터 모래에 메칩니다. 머리가 닿은 곳을 축으로 몸이 쓰러집니다.` : `${a}가 ${v}의 허리와 몸통을 감싸 안을 틈을 봅니다.`;
+    } else {
+      word = stage === 'fall' ? '메치기!' : '받아내기!'; title = stage === 'fall' ? '몸을 함께 낮추며 등부터 메친다' : '달려오는 상체와 허벅지를 받친다';
+      detail = stage === 'fall' ? `${a}가 몸을 돌리며 한쪽 무릎과 상체를 함께 낮춥니다. 안고 있던 ${v}의 등과 어깨가 모래에 닿는 순간 기절합니다.` : contact ? `${a}가 ${v}의 상체와 허벅지를 양팔로 받쳐 달려오던 무게를 받아냅니다.` : `${a}가 달려오는 ${v}를 받아 안을 틈을 봅니다.`;
+    }
   } else if (stage === 'groggy') {
     wordId = round.victim; word = '기절!'; title = '모래 위에 쓰러졌다';
     detail = `${v}가 모래 위에 누워 있습니다. ${a}가 일어나 발목 쪽을 살핍니다.`;
@@ -570,7 +574,7 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
   if (window.kind === 'clothesline') step = stage === 'approach' || stage === 'load' ? 0 : stage === 'attack' ? 1 : stage === 'contact' || stage === 'fall' ? 2 : stage === 'recover' || stage === 'groggy' ? 3 : stage === 'ankle-approach' ? 4 : stage === 'ankle-grip' ? 5 : stage === 'drag' ? 6 : stage === 'toss' ? 7 : 8;
   if (window.kind === 'spinebuster') step = stage === 'approach' ? 0 : stage === 'load' || stage === 'attack' || stage === 'contact' ? 1 : stage === 'lift' ? 2 : stage === 'fall' ? 3 : stage === 'groggy' || stage === 'recover' ? 4 : stage === 'ankle-approach' ? 5 : stage === 'ankle-grip' ? 6 : stage === 'drag' ? 7 : stage === 'toss' ? 8 : 9;
   if (window.kind === 'powerbomb') step = stage === 'approach' || stage === 'load' ? 0 : stage === 'attack' || stage === 'contact' ? 1 : stage === 'lift' ? 2 : stage === 'turn' ? 3 : stage === 'fall' ? 4 : stage === 'recover' ? 5 : stage === 'groggy' ? 6 : stage === 'ankle-approach' ? 7 : stage === 'ankle-grip' ? 8 : stage === 'spin' ? 9 : stage === 'toss' ? 10 : 11;
-  if (window.kind === 'scoopslam') step = stage === 'approach' ? 0 : stage === 'load' ? 1 : stage === 'attack' || stage === 'contact' ? 2 : stage === 'lift' ? 3 : stage === 'turn' ? 4 : stage === 'fall' ? 5 : stage === 'groggy' ? 6 : stage === 'ankle-approach' ? 7 : stage === 'ankle-grip' ? 8 : stage === 'spin' ? 9 : stage === 'toss' ? 10 : 11;
+  if (window.kind === 'scoopslam') step = stage === 'approach' ? 0 : stage === 'load' ? 1 : stage === 'attack' || stage === 'contact' ? 2 : stage === 'lift' ? 3 : stage === 'turn' ? 4 : stage === 'fall' ? 5 : stage === 'groggy' || stage === 'recover' ? 6 : stage === 'ankle-approach' ? 7 : stage === 'ankle-grip' ? 8 : stage === 'spin' ? 9 : stage === 'toss' ? 10 : 11;
   if (window.kind === 'backbodydrop') step = stage === 'lift' ? 3 : stage === 'spin' ? 8 : stage === 'toss' ? 9 : stage === 'release' ? 10 : step;
   // Describe what the bodies have begun doing. The selected finish must not
   // reveal a counter or a slam while its fighters are still running in.
@@ -670,13 +674,13 @@ export function arenaActionWords(round: ArenaRound, elapsed: number): { id: stri
     const reactionAt = round.tactic === 'trip' ? tech.kickReactionAt : round.impact;
     const exit = elapsed >= reactionAt ? arenaTechniqueExit(round, elapsed - reactionAt, { x: 500, y: 416 }, { x: 885, y: 436 }, 1, unit) : undefined;
     if (round.tactic === 'trip') return exit?.stage === 'roll' ? [...(tech.stage === 'kick' ? [{ id: a, word: '발차기!' }] : []), { id: v, word: '구르기!' }] : tech.stage === 'hook' && !exit ? [{ id: a, word: round.tripCounter ? '발걸기 되치기!' : '발걸기!' }] : tech.stage === 'kick' && !exit ? [{ id: a, word: '발차기!' }] : tech.stage === 'fall' && !exit ? [{ id: v, word: '넘어진다!' }] : [];
-    if (exit) return exit.stage === 'drag' ? [{ id: a, word: '끌기!' }] : exit.stage === 'rim-toss' && exit.phase < .40 ? [{ id: a, word: '던지기!' }] : [];
+    if (exit) return exit.stage === 'drag' ? [{ id: a, word: '끌기!' }] : ((exit.stage === 'hold' && (!round.floorFinish || round.floorFinish.throwAt != null && elapsed >= round.floorFinish.throwAt)) || (exit.stage === 'rim-toss' && exit.phase < .40)) ? [{ id: a, word: '던지기!' }] : [];
     return tech.stage === 'lift' ? [{ id: a, word: '들어올리기!' }] : tech.stage === 'overhead' ? [{ id: a, word: '머리 위로!' }] : tech.stage === 'slam' ? [{ id: tech.slamImpact > 0 ? v : a, word: tech.slamImpact > 0 ? '충돌!' : '내리찍기!' }] : tech.stage === 'stunned' ? [{ id: v, word: '기절!' }] : [];
   }
   if (round.tactic === 'elbow') {
     const tech = arenaTechniqueTargets(round, elapsed, { x: 500, y: 416 });
     const exit = round.elbowGripAt !== null && elapsed >= round.impact ? arenaTechniqueExit(round, elapsed - round.impact, { x: 500, y: 416 }, { x: 885, y: 436 }, 1, unit) : undefined;
-    if (exit) return exit.stage === 'stunned' ? [{ id: a, word: '발끝 잡기!' }] : exit.stage === 'drag' ? [{ id: a, word: '끌기!' }] : exit.stage === 'rim-toss' && exit.phase < .40 ? [{ id: a, word: '던지기!' }] : [];
+    if (exit) return exit.stage === 'stunned' ? [{ id: a, word: '발끝 잡기!' }] : exit.stage === 'drag' ? [{ id: a, word: '끌기!' }] : ((exit.stage === 'hold' && (!round.floorFinish || round.floorFinish.throwAt != null && elapsed >= round.floorFinish.throwAt)) || (exit.stage === 'rim-toss' && exit.phase < .40)) ? [{ id: a, word: '던지기!' }] : [];
     return tech.stage === 'lift-counter' ? [{ id: v, word: '들기!' }] : tech.stage === 'elbow' || tech.stage === 'elbow-impact' ? [{ id: a, word: '엘보우!' }] : tech.stage === 'groggy' ? [{ id: v, word: '기절!' }] : tech.stage === 'ankle-approach' ? [{ id: a, word: '발끝으로!' }] : tech.stage === 'ankle-grip' ? [{ id: a, word: '발끝 잡기!' }] : [];
   }
   if (elapsed - round.impact > 480 * unit) return [];
@@ -1136,6 +1140,7 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
     const age = elapsed - round.impact, timing = arenaFloorExitTiming(round);
     if (round.elbowGripAt !== null && elapsed >= round.impact && age < timing.recoverUntil) return age < timing.stunnedUntil ? { title: '쓰러진 상대의 발끝을 붙잡는다', detail: `${a}가 누운 ${v}의 발끝에 다가갑니다. 모래 위에 누운 몸의 두 발끝을 양손으로 붙잡습니다.` }
       : age < timing.dragUntil ? { title: '발끝 잡아 끌기 · 경계가 가까워진다', detail: `${a}가 발을 바꿔 디디며 ${v}를 모래 위로 끕니다. 쓰러진 몸은 경계 쪽으로 따라 움직입니다.` }
+      : age < timing.throwUntil || round.floorFinish && round.floorFinish.releaseAt == null ? round.floorFinish && round.floorFinish.throwAt == null ? { title: '모래판 안에 발을 딛고 발끝을 잡는다', detail: `${a}가 경계 안쪽에 멈춰 ${v}의 두 발끝을 단단히 붙잡습니다. 아직 손을 놓지 않았습니다.` } : { title: '끝에서 들어 올려 던지기!', detail: `${a}가 모래판 안에 발을 딛고 두 발끝을 머리 위로 들어 올립니다. 잡은 몸을 경계 쪽으로 넘길 때까지 손은 붙어 있습니다.` }
       : age < timing.tossUntil ? { title: '끝에서 던졌다! 상대만 장외로', detail: `${a}가 모래판 안에 발을 딛고 잡은 발끝을 놓아 넘깁니다. ${v}만 경계 밖으로 날아갑니다.` }
       : age < timing.landUntil ? { title: '모래판 밖에 착지했다', detail: `${v}가 경계 아래로 떨어졌습니다. ${a}는 모래판 안에서 자세를 고칩니다.` }
       : { title: '넘어진 선수가 다시 몸을 일으킨다', detail: `${v}가 장외에서 몸을 일으킵니다. 자세를 회복한 뒤 시상 자리로 이동합니다.` };

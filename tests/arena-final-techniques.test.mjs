@@ -6,7 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { arenaFinalTechniques, arenaTechniqueTargets, arenaTechniqueReactionAt, arenaTechniqueExit, arenaSuplexRim, arenaSidekickWindow } = await source('src/arenaTechniques.ts');
+const { arenaFinalTechniques, arenaFloorExitTiming, arenaTechniqueTargets, arenaTechniqueReactionAt, arenaTechniqueExit, arenaSuplexRim, arenaSidekickWindow } = await source('src/arenaTechniques.ts');
 const { arenaAction, arenaRanks, arenaRounds } = await source('src/arenaLogic.ts');
 const { createArenaFighterAnimation, drawArenaFighter, arenaSpinGripPair, arenaSpinSnapshot, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const ctx = Object.fromEntries(['save', 'restore', 'translate', 'rotate', 'scale', 'fillRect', 'beginPath', 'ellipse', 'fill', 'moveTo', 'lineTo', 'closePath'].map(key => [key, () => {}]));
@@ -275,10 +275,13 @@ test('an overhead waist lift reads its raised hold before accelerating into a sl
     const dragging = arenaAction(round, round.impact + 700);
     assert.equal(dragging.actors.find(actor => actor.id === round.aggressor).pose, 'drag', 'the connected action cannot become a generic guard or throw during the ankle drag');
     assert.equal(dragging.actors.find(actor => actor.id === round.victim).pose, 'stunned');
-    const toss = arenaTechniqueExit(round, 2950, origin, landing, stunned.side, 1, preparation);
+    const timing = arenaFloorExitTiming(round);
+    const heldFloor = arenaTechniqueExit(round, timing.dragUntil + 500, origin, landing, stunned.side, 1, preparation);
+    assert.equal(heldFloor.stage, 'hold');
+    const toss = arenaTechniqueExit(round, timing.throwUntil + 350, origin, landing, stunned.side, 1, preparation);
     assert.equal(toss.stage, 'rim-toss');
     assert.ok(toss.height > 30, 'the last stroke throws only the opponent over the rim');
-    const resolved = arenaTechniqueExit(round, round.resolve - round.impact, origin, landing, stunned.side, 1, preparation);
+    const resolved = arenaTechniqueExit(round, timing.landUntil, origin, landing, stunned.side, 1, preparation);
     assert.ok(distance(resolved, landing) < 1e-8, 'the drawn loser reaches the outside landing by the ranking reveal');
   }
 });

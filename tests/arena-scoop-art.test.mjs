@@ -29,7 +29,7 @@ function humanBones(actor, frame) {
   }
 }
 
-test('a scoop supports the load with a planted upright lift instead of the spinebuster dive', () => {
+test('a scoop cradles the runner through a planted hip pivot and lowers beside the opponent back', () => {
   for (const facing of [-1, 1]) for (const step of [16, 50]) {
     const actor = fighter({ facing });
     paint(actor, 0);
@@ -38,14 +38,14 @@ test('a scoop supports the load with a planted upright lift instead of the spine
     const turnAt = timing.load + timing.lift, downAt = turnAt + timing.turn;
     for (let clock = 0; clock <= downAt + timing.slam; clock += step) {
       const model = arenaWrestlingMoveTargets({ kind: 'scoopslam', start: 0, end: 9000, launchAt: 0, contactAt: 0, ankleGripAt: null }, clock, { x: 500, y: 416 }, { driver: { x: 470, y: 416 }, victim: { x: 530, y: 416 } });
-      Object.assign(actor, { scoopLoad: model.scoopLoad, scoopLift: model.scoopLift, scoopTurn: model.scoopTurn, scoopDown: model.scoopDown });
+      Object.assign(actor, { scoopLoad: model.scoopLoad, scoopLift: model.scoopLift, scoopTurn: model.scoopTurn, scoopDown: model.scoopDown, scoopRecover: model.scoopRecover, yaw: model.driverYaw });
       const frame = paint(actor, clock);
       humanBones(actor, frame);
       assert.equal(actor.animation.airborne, false);
       assert.ok(actor.animation.feet.every(foot => foot.lift === 0), 'the wrestler drives through planted feet');
-      assert.ok(frame.rig.motion.crouch <= 5.81, 'accepting weight uses a knee bend rather than a seated pose');
-      assert.ok(frame.skeleton.feet.every((foot, leg) => distance(foot, frame.skeleton.hips[leg]) > 14), 'both supporting legs retain space beneath the hips throughout the load');
-      assert.ok(frame.rig.motion.lean <= 24, 'the standing scoop avoids the forward diving tackle posture');
+      assert.ok(frame.rig.motion.crouch <= 8.51, 'the catcher takes the receiving weight and then lowers its knees only for the back-first slam');
+      assert.ok(frame.skeleton.feet.every((foot, leg) => distance(foot, frame.skeleton.hips[leg]) > 11), 'both supporting legs retain space beneath the hips throughout the load');
+      assert.ok(frame.rig.motion.lean <= 30, 'the catcher follows the supported back down without diving past the victim');
       if (previous) frame.contacts.hands.forEach((hand, arm) => assert.ok(distance(hand, previous.hands[arm]) < (step === 16 ? 8 : 22), 'both support arms follow the body continuously'));
       previous = frame.contacts;
     }
@@ -81,52 +81,49 @@ test('a cradled wrestler responds with folded arms and soft knees through pickup
   }
 });
 
-test('a complete scoop inverts the actual head above the sand before its head-first impact and continuous floor roll', () => {
+test('a complete scoop carries across the chest, pivots and lands the supported back with a continuous normal rig', () => {
   for (const side of [-1, 1]) for (const step of [16, 50]) {
     const contactAt = 1000, center = { x: 500, y: 416 };
     const driverRoot = { x: 500 - side * 24, y: 416 }, victimRoot = { x: 500 + side * 30, y: 416 };
     const actor = fighter({ index: 1, facing: -side, ...victimRoot });
     const grounded = paint(actor, contactAt);
     const floorRoot = { x: driverRoot.x + side * 62, y: victimRoot.y };
-    const flat = sampleArenaFighterContacts({ ...actor, ...floorRoot, pose: 'stunned', angle: -side * Math.PI * 1.5, suspension: 0, slamProgress: { tuck: 0, slump: 1 }, carryStretch: 1, carrySupport: 'cradle', animation: undefined, motionImmediate: true }, contactAt);
-    const inverted = sampleArenaFighterContacts({ ...actor, pose: 'carried', carryStretch: 1, carrySupport: 'cradle', suspension: 1, angle: -side * Math.PI * .94, animation: undefined, motionImmediate: true }, contactAt);
-    const impactWaist = { x: driverRoot.x + side * 27, y: floorRoot.y - (inverted.head.y - inverted.waist.y) };
-    const origins = { driver: driverRoot, victim: { x: driverRoot.x + side * 200, y: victimRoot.y }, contactDriver: driverRoot, contactVictim: victimRoot, scoopWaist: grounded.contacts.waist, scoopFloorVictim: floorRoot, scoopFloorWaist: flat.waist, scoopImpactWaist: impactWaist };
+    const flat = sampleArenaFighterContacts({ ...actor, ...floorRoot, pose: 'stunned', angle: side * Math.PI / 2, suspension: 0, slamProgress: { tuck: 0, slump: 1 }, animation: undefined, motionImmediate: true }, contactAt);
+    const origins = { driver: driverRoot, victim: { x: driverRoot.x + side * 200, y: victimRoot.y }, contactDriver: driverRoot, contactVictim: victimRoot, scoopWaist: grounded.contacts.waist, scoopFloorVictim: floorRoot, scoopFloorWaist: flat.waist };
     const window = { kind: 'scoopslam', start: 0, end: 12000, launchAt: 800, contactAt, ankleGripAt: null, releaseAt: null };
     const downAt = timing.load + timing.lift + timing.turn, floorAge = downAt + timing.slam;
-    const impactAge = arenaWrestlingMoveTargets(window, contactAt, center, origins, side).slamImpactAt - contactAt;
-    const times = [...new Set([0, ...Array.from({ length: Math.ceil(floorAge / step) }, (_, n) => Math.min(floorAge, (n + 1) * step)), downAt, impactAge, floorAge])].sort((a, b) => a - b);
-    let previous = grounded, previousAge = 0, invertedSeen = false, hitSeen = false;
+    const times = [...new Set([0, ...Array.from({ length: Math.ceil(floorAge / step) }, (_, n) => Math.min(floorAge, (n + 1) * step)), timing.load + timing.lift, downAt, floorAge])].sort((a, b) => a - b);
+    let previous = grounded, previousAge = 0, liftedSeen = false, turnSeen = false, floorSeen = false;
     for (const age of times) {
       const frame = arenaWrestlingMoveTargets(window, contactAt + age, center, origins, side);
-      Object.assign(actor, { x: frame.victim.x, y: frame.victim.y - frame.victimHeight, depthY: frame.victim.y, pose: frame.victimPose, angle: frame.victimAngle, suspension: frame.victimSuspension, phase: frame.victimPhase, carryStretch: frame.victimCarryStretch, carrySupport: 'cradle', carryEntry: true, slamEntry: frame.victimSlam !== undefined, slamProgress: frame.victimSlam });
+      Object.assign(actor, { x: frame.victim.x, y: frame.victim.y - frame.victimHeight, depthY: frame.victim.y, pose: frame.victimPose, angle: frame.victimAngle, suspension: frame.victimSuspension, phase: frame.victimPhase, carryStretch: frame.victimCarryStretch, carrySupport: frame.victimCarryStretch === undefined ? undefined : 'cradle', carryEntry: true, slamEntry: frame.victimSlam !== undefined, slamProgress: frame.victimSlam, scoopVictim: frame.scoopVictim, scoopLoad: frame.scoopLoad, scoopLift: frame.scoopLift, scoopTurn: frame.scoopTurn, scoopDown: frame.scoopDown, eyesClosed: frame.victimEyesClosed });
       const rig = sampleArenaFighterContacts(actor, contactAt + age);
       const offset = { x: frame.scoopSupport.x - rig.waist.x, y: frame.scoopSupport.y - rig.waist.y };
       actor.x += offset.x; actor.y += offset.y; actor.depthY += offset.y;
       const painted = paint(actor, contactAt + age);
       humanBones(actor, painted);
-      if (age > previousAge) for (const key of ['head', 'waist']) assert.ok(distance(painted.contacts[key], previous.contacts[key]) < 5 + (age - previousAge) * 1.5, 'the complete head and trunk follow their continuous supported arc');
-      if (age === downAt) {
-        assert.ok(Math.abs(frame.victimAngle) >= Math.PI * .93);
-        assert.ok(painted.contacts.feet.every(foot => foot.y < painted.contacts.head.y - 110), 'both normal legs are visibly above the upside-down head');
-        assert.ok(painted.contacts.head.y < floorRoot.y - 18, 'the turned head waits above the sand before the descending stroke');
-        invertedSeen = true;
+      assert.ok(Math.abs(frame.victimAngle) <= Math.PI / 2 + 1e-8, 'the cradle rotates into a back-first quarter turn without an inverted head-first wheel');
+      if (age > previousAge) for (const point of ['head', 'waist', 'back']) assert.ok(distance(painted.contacts[point], previous.contacts[point]) < 5 + (age - previousAge) * 1.5, 'the supported trunk follows its continuous hip pivot');
+      if (age === timing.load + timing.lift) {
+        assert.ok(frame.victimHeight > 40 && Math.abs(frame.victimAngle) > Math.PI * .25);
+        assert.equal(frame.gripStrength, 1); liftedSeen = true;
       }
-      if (age === impactAge) {
-        assert.ok(Math.abs(painted.contacts.head.y - floorRoot.y) < 2, 'the actual top of the inverted painted head reaches the sand at the impact clock');
-        assert.equal(frame.slamImpactAt, contactAt + impactAge);
-        assert.equal(frame.gripStrength, 1, 'the back and thigh are supported until the actual head lands');
-        hitSeen = true;
+      if (age === downAt) {
+        assert.ok(Math.abs(frame.victimAngle) > Math.PI * .46);
+        assert.ok(painted.contacts.head.y < floorRoot.y - 28, 'the supported head remains above the sand while the chest-height body pivots');
+        assert.equal(frame.victimEyesClosed, false); turnSeen = true;
       }
       if (age === floorAge) {
-        assert.equal(frame.victimAngle, -side * Math.PI * 1.5);
-        assert.ok(side * (painted.contacts.head.x - (painted.contacts.feet[0].x + painted.contacts.feet[1].x) / 2) > 110, 'continuing the inversion exchanges the resting head and feet direction');
-        assert.ok(distance(painted.contacts.waist, flat.waist) < .001, 'the final resting rig matches the precomputed physical floor pose');
-        assert.equal(frame.victimSlam.slump, 1); assert.equal(frame.canRelease, false);
+        assert.equal(frame.victimAngle, side * Math.PI / 2);
+        assert.equal(frame.victimCarryStretch, undefined, 'floor contact inherits the final slam rig instead of restarting a carried body');
+        assert.ok(side * (painted.contacts.head.x - (painted.contacts.feet[0].x + painted.contacts.feet[1].x) / 2) > 110);
+        assert.ok(distance(painted.contacts.waist, flat.waist) < .001);
+        assert.ok(painted.contacts.back.y <= floorRoot.y && painted.contacts.back.y > floorRoot.y - 28, 'the complete back lies at the same physical sand plane');
+        assert.equal(frame.victimEyesClosed, true); assert.equal(frame.victimSlam.slump, 1); assert.equal(frame.canRelease, false); floorSeen = true;
       }
       previous = painted; previousAge = age;
     }
-    assert.ok(invertedSeen && hitSeen);
+    assert.ok(liftedSeen && turnSeen && floorSeen);
   }
 });
 
@@ -199,10 +196,10 @@ test('the complete scoop overlaps the load, rising turn and downward stroke befo
       }
       if (previous) assert.ok(distance(frame.scoopSupport, previous.scoopSupport) < (step === 16 ? 8 : 24), 'the real supported waist follows one continuous gather, lift and lowering arc');
       previous = frame;
-      if (age >= duration && age < duration + commonTiming.groggy) assert.equal(frame.driverPose, 'scoopslam', 'the receiving arms follow the back onto the sand before beginning the ankle reach');
+      if (age >= duration && frame.scoopRecover < 1) assert.equal(frame.driverPose, 'scoopslam', 'the catcher rises from its actual lowered stance before starting the ankle reach');
     }
     assert.ok(overlapFrames >= (step === 16 ? 12 : 4), 'even at 20fps the body begins the next stage before the previous stage comes to rest');
-    const ankleGripAt = contactAt + duration + commonTiming.groggy + commonTiming.ankleReach;
+    const ankleGripAt = arenaWrestlingMoveTargets(window, contactAt + duration, center, origins, facing).pickupReadyAt + commonTiming.ankleReach;
     const held = { ...window, ankleGripAt };
     for (let age = 0; age < finishTiming.ankleLoad; age += step) {
       const frame = arenaWrestlingMoveTargets(held, ankleGripAt + age, center, origins, facing);

@@ -134,6 +134,9 @@ for (const outcome of ['resist', 'dodge']) test(`a live outer charge ${outcome} 
   const found = fixture(`outer charge ${outcome}`, { count: 6, predicate: (round, rounds) => {
     if (!(round.rimCharge?.start > 3000 && round.rimCharge.outcome === outcome)) return false;
     const previous = rounds[rounds.indexOf(round) - 1];
+    // This independent optional story begins while both fighters are free.
+    // A previous rim drag now retains its actual held throw before resolving.
+    if (['suplex', 'elbow'].includes(previous.tactic) || ['clothesline', 'spinebuster'].includes(previous.wrestlingMove?.kind)) return false;
     const occupied = [previous.aggressor, previous.victim, previous.helper, previous.pairDodge?.partnerId, previous.passingTrip?.passerId, previous.recovery?.throwerId];
     return !occupied.includes(round.aggressor) && !occupied.includes(round.victim);
   } }), scene = game(found.order, found.seed, found.duration), round = found.round;
@@ -258,7 +261,7 @@ test('a live slammed body stays grounded through pickup and drag while both hand
       pickupSeen = true;
       assert.ok(driver.animation.motion.crouch < 6 && driver.animation.skeleton.hips.every(hip => hip.y <= -14), 'the ankle holder bends an adult torso with full-height legs');
       const feet = victim.animation.contactPoints.feet, hands = driver.animation.contactPoints.hands;
-      maxHandGap = Math.max(maxHandGap, ...feet.map((foot, i) => distance(foot, hands[1 - i])));
+      maxHandGap = Math.max(maxHandGap, ...feet.map((foot, i) => distance(foot, hands[i])));
     }
     previous = { body: { x: body.x, y: body.y } };
   }
@@ -295,7 +298,7 @@ test('a live elbow counter leaves its stunned opponent at the hit and the holder
       gripSeen = true;
       assert.ok(driver.animation.motion.crouch < 6 && driver.animation.skeleton.hips.every(hip => hip.y <= -14), 'the live holder keeps adult leg proportions while reaching down');
       const feet = victim.animation.contactPoints.feet, hands = driver.animation.contactPoints.hands;
-      maxHandGap = Math.max(maxHandGap, ...feet.map((foot, i) => distance(foot, hands[1 - i])));
+      maxHandGap = Math.max(maxHandGap, ...feet.map((foot, i) => distance(foot, hands[i])));
     }
     lastDriver = { x: driver.x, y: driver.y };
     previousBody = { x: body.x, y: body.y };

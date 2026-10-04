@@ -47,6 +47,7 @@ for (const direction of ['right', 'left', 'up', 'down']) test(`scoop entry ${dir
       const rig = actor.animation.contactPoints, feet = actor.animation.feet, skeleton = actor.animation.skeleton;
       if (actor.pose === 'run' && Math.hypot(actor.velocityX, actor.velocityY) > 80) {
         runFrames++;
+        assert.ok(actor.animation.supportHip.y + 20 < 3.5, 'the actual incoming runner stays above the seated pelvis compression while its material heel bears the weight');
         for (let leg = 0; leg < 2; leg++) {
           const thigh = distance(skeleton.hips[leg], skeleton.knees[leg]), shin = distance(skeleton.knees[leg], skeleton.feet[leg]);
           assert.ok(thigh <= 11.001 && shin <= 11.001 && thigh > 2.5 && shin > 2.5, `the actual running leg has connected normal-length bones in every direction: ${JSON.stringify({ direction, delta, elapsed, leg, thigh, shin, velocity: [actor.velocityX, actor.velocityY], foot: feet[leg], hip: skeleton.hips[leg], knee: skeleton.knees[leg], ankle: skeleton.feet[leg] })}`);

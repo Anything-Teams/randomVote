@@ -53,6 +53,15 @@ test('a full rushing run uses a brief support compression rather than a sustaine
       body.x = 500 + vx * clock / 1000; body.y = 416 + vy * clock / 1000; body.depthY = body.y; body.gaitDistance = Math.hypot(vx, vy) * clock / 1000;
       const frame = paint(body, clock);
       assert.ok(body.animation.motion.crouch <= 3.41, 'the rushing pelvis does not remain lowered into the former 6px sitting posture');
+      assert.ok(body.animation.supportHip.y + 20 < 3.5, `the actual painted pelvis stays above the seated compression even when its support heel approaches full reach: ${JSON.stringify({ vx, vy, step, clock, hip: body.animation.supportHip })}`);
+      for (let leg = 0; leg < 2; leg++) {
+        const hip = frame.skeleton.hips[leg], joint = frame.skeleton.knees[leg], foot = frame.skeleton.feet[leg];
+        const upper = { x: hip.x - joint.x, y: hip.y - joint.y }, lower = { x: foot.x - joint.x, y: foot.y - joint.y };
+        const cosine = (upper.x * lower.x + upper.y * lower.y) / (Math.hypot(upper.x, upper.y) * Math.hypot(lower.x, lower.y));
+        if (!vy) assert.ok(Math.acos(Math.max(-1, Math.min(1, cosine))) < Math.PI * .86, 'a side-on rushing knee remains softly bent instead of repeatedly locking straight');
+        const hem = frame.skeleton.shorts[leg].slice(2, 4);
+        assert.ok(hem.every(point => Number.isFinite(point.x) && Number.isFinite(point.y)), 'the moving trouser cuffs stay connected to finite thigh geometry');
+      }
       for (let leg = 0; leg < 2; leg++) if (!frame.feet[leg].swinging && frame.feet[leg].lift < .001) {
         assert.equal(frame.skeleton.footAngles[leg], 0);
         if (previous && !previous.feet[leg].swinging && previous.feet[leg].lift < .001) assert.ok(distance(frame.contacts.feet[leg], previous.contacts.feet[leg]) < .001, 'the rush pushes against its same material support heel');

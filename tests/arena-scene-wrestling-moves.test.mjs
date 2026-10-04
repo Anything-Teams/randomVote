@@ -227,11 +227,12 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           assert.ok(frame.victimHeight > 105, 'the lifted body does not begin its flip at chest height');
         }
       }
-      if (kind === 'scoopslam' && frame.scoopHeadPivot && !frame.ankleSpin && !exit) {
+      if (kind === 'scoopslam' && contactSeen && elapsed >= frame.floorAt && !frame.ankleSpin && !exit) {
         pivotFrames++;
-        assert.ok(Math.abs(paintedVictim.head.x - contact.wrestlingMoveOrigins.scoopHeadImpact.x) < 1e-6, 'the crown that struck the floor fixes the collapse axis instead of sliding sideways');
-        assert.ok(paintedVictim.head.y <= contact.wrestlingMoveOrigins.scoopHeadImpact.y + 1e-6, 'the rolling skull stays above its actual impact plane');
-        assert.ok(paintedVictim.headSides.every(point => point.y <= contact.wrestlingMoveOrigins.scoopFloorVictim.y + .001), 'the temples cannot sink below the sand while the torso collapses');
+        assert.ok(Math.abs(frame.victimAngle - frame.side * Math.PI / 2) < 1e-8, 'the quarter-turn lands on the complete back instead of inverting onto the crown');
+        assert.equal(victim.pose, 'stunned'); assert.equal(victim.carryStretch, undefined, 'the supported carry ends at the actual back landing');
+        assert.ok(distance(paintedVictim.waist, contact.wrestlingMoveOrigins.scoopFloorWaist) < 1, 'the back support fixes its actual floor point until the caster reaches the ankles');
+        assert.ok(paintedVictim.headSides.every(point => point.y < contact.wrestlingMoveOrigins.scoopFloorVictim.y + 1), 'the flat landed skull remains above the actual sand plane');
       }
       if (kind === 'scoopslam' && contactSeen && frame.gripMode === 'cradle' && !exit) {
         scoopStages.add(frame.stage);
@@ -338,7 +339,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
     if (kind === 'scoopslam') {
       assert.ok(['contact', 'lift', 'turn', 'fall', 'groggy'].every(stage => scoopStages.has(stage)), 'a scoop visibly receives the weight, rises, turns and lands before the ankle finish');
       assert.ok(overlapLiftTurnFrames >= (frameDelta === 16 ? 6 : 2), 'the back and thigh stay supported as the rising body flows directly into its turn');
-      assert.ok(pivotFrames >= (frameDelta === 16 ? 12 : 4), 'the actual crown remains the collapse axis from impact through the resting floor pose');
+      assert.ok(pivotFrames >= (frameDelta === 16 ? 12 : 4), 'the actual back landing and stunned recovery have a visible floor beat before the ankle finish');
     }
     if (kind === 'clothesline') assert.ok(sharedFallSeen && standingBeforeGrip && ['fall', 'recover', 'ankle-approach', 'ankle-grip', 'drag', 'toss'].every(stage => clotheslineStages.has(stage)), 'the complete collision, rise, ankle pickup, drag and throw can each be seen');
   }

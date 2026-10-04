@@ -13,8 +13,10 @@ export function arenaFloorExitTiming(round: ArenaRound, unit = round.timeScale ?
   // The elbow sequence already approaches and takes the actual ankles before
   // this clock starts. Repeating the pickup pause here stopped both bodies.
   const pickup = round.tactic === 'elbow' ? 0 : 900;
-  const dragEnd = pickup + finish - 900;
-  return { stunnedUntil: pickup * scale, dragUntil: dragEnd * scale, tossUntil: (dragEnd + 880) * scale, landUntil: (dragEnd + 1080) * scale, recoverUntil: (dragEnd + 1580) * scale };
+  const dragUntil = round.floorFinish?.dragUntil ?? (pickup + finish - 900) * scale;
+  const throwAt = round.floorFinish?.throwAt ?? round.impact + dragUntil;
+  const throwUntil = (round.floorFinish?.releaseAt ?? throwAt + 1000 * scale) - round.impact;
+  return { stunnedUntil: pickup * scale, dragUntil, throwUntil, tossUntil: throwUntil + 880 * scale, landUntil: throwUntil + 1080 * scale, recoverUntil: throwUntil + 1580 * scale };
 }
 /** A single quick jump keeps the airborne kick independent of the bout's introduction. */
 export function arenaSidekickWindow(round: ArenaRound) {
@@ -224,7 +226,7 @@ export function arenaTechniqueExit(round: ArenaRound, age: number, origin: Arena
     }
   } else if (isArenaFloorDrag(round)) {
     const scale = Math.max(.001, unit), timing = arenaFloorExitTiming(round, unit), stunned = timing.stunnedUntil / scale, finish = timing.dragUntil / scale;
-    const tossEnd = timing.tossUntil / scale, landEnd = timing.landUntil / scale, recoverEnd = timing.recoverUntil / scale;
+    const throwEnd = timing.throwUntil / scale, tossEnd = timing.tossUntil / scale, landEnd = timing.landUntil / scale, recoverEnd = timing.recoverUntil / scale;
     const desired = arenaSuplexRim(origin, direction), ramp = .12;
     // The held body and its driver share this integrated floor path. A far
     // opposite rim must not demand a faster pull than the standing gait.
@@ -239,8 +241,11 @@ export function arenaTechniqueExit(round: ArenaRound, age: number, origin: Arena
       const groundX = mix(origin.x, rim.x, cruise), groundY = mix(origin.y, rim.y, cruise);
       return { x: groundX, y: groundY, groundX, groundY, height: 0, angle: preparation.angle, phase, stage: 'drag' };
     }
+    if (ms < throwEnd || round.floorFinish && round.floorFinish.releaseAt == null) {
+      return { ...rim, groundX: rim.x, groundY: rim.y, height: 0, angle: preparation.angle, phase: clamp((ms - finish) / Math.max(1, throwEnd - finish)), stage: 'hold' };
+    }
     if (ms < tossEnd) {
-      const phase = clamp((ms - finish) / (tossEnd - finish)), groundX = mix(rim.x, landing.x, ease(phase)), groundY = mix(rim.y, landing.y, ease(phase));
+      const phase = clamp((ms - throwEnd) / (tossEnd - throwEnd)), groundX = mix(rim.x, landing.x, ease(phase)), groundY = mix(rim.y, landing.y, ease(phase));
       const height = Math.sin(phase * Math.PI) * 42;
       return { x: groundX, y: groundY - height, groundX, groundY, height, angle: preparation.angle + direction * Math.PI * .65 * ease(phase), phase, stage: 'rim-toss' };
     }
