@@ -139,6 +139,18 @@ test('all pose and location boundaries are continuous and recorded contact is th
   assert.deepEqual(frame(opening.contactAt + 150), frame(opening.contactAt + 150), 'pause/seek sampling is pure');
 });
 
+test('an upward exit supplies its real rear ledge and continuous depth progress', () => {
+  const anchor = { x: 500, y: 352 }, initial = { charger: { x: 500, y: 478 }, pair: [{ x: 478, y: 358 }, { x: 522, y: 346 }] };
+  const actual = { ...window, outcome: 'out' }, opening = arenaPairDodgeTargets(actual, window.start, anchor, initial);
+  const frame = at => arenaPairDodgeTargets({ ...actual, contactAt: opening.contactAt, end: opening.requiredEndAt }, at, anchor, initial);
+  assert.equal(frame(opening.outAt).rearExit, true);
+  assert.ok(Math.abs(sandRadius(frame(opening.outAt).exitRim) - 1) < 1e-6);
+  assert.equal(frame(opening.outAt).exitProgress, 0);
+  assert.equal(frame(opening.outAt + 650).exitProgress, 1);
+  assert.ok(frame(opening.outAt + 300).charger.y < frame(opening.outAt).exitRim.y, 'the runner continues behind the rear ledge');
+  assert.equal(plan({ ...window, outcome: 'out' }).frame(9999).rearExit, false, 'side falls use their original visible fall');
+});
+
 test('the painted tucked soles clear the actual charging head when each fighter crosses its lane', () => {
   const actor = (id, index, point, facing, extra) => ({ candidate: { id, name: id, color: '#dd784c' }, index, ...point, scale: 2.04, facing, pose: 'run', angle: 0, alpha: 1, velocityX: facing * 162, velocityY: 0, gaitDistance: 30, phase: .5, motionImmediate: true, ...extra });
   for (const charger of [{ x: 300, y: 416 }, { x: 700, y: 416 }]) {

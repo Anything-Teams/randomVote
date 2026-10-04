@@ -8,7 +8,7 @@ async function source(path) {
 }
 const { ARENA_RECOVERY_DURATION, ARENA_RECOVERY_THROW_SPAN, ARENA_RECOVERY_EXIT_DURATION, arenaRecoveryTargets } = await source('src/arenaRecovery.ts');
 const { arenaEscapeRoll } = await source('src/arenaEscape.ts');
-const { arenaAction, arenaActionWords, arenaBeat, arenaThrow, arenaFocusRound, arenaPlaybackEnd, arenaRanks, arenaRounds } = await source('src/arenaLogic.ts');
+const { arenaAction, arenaActionWords, arenaBeat, arenaThrow, arenaFocusRound, arenaPlaybackEnd, arenaRanks, arenaRounds, arenaSoloFinalTactics } = await source('src/arenaLogic.ts');
 const { sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const sandRadius = point => Math.hypot((point.x - 500) / 303, (point.y - 416) / 112);
@@ -97,7 +97,9 @@ test('the optional somersault recovery selects five percent of eligible story ro
   const samples = 4096, original = [...order], expected = Object.fromEntries(order.map((id, index) => [id, index + 1]));
   for (let seed = 0; seed < samples; seed++) {
     const rounds = arenaRounds(order, 44_000, 7, seed), final = rounds.at(-1);
-    if (final.recovery?.kind !== 'overhead-escape') {
+    const baseTactic = arenaSoloFinalTactics[arenaEscapeRoll(seed, final.index + 1717) % arenaSoloFinalTactics.length];
+    const earlierSpecial = final.supermanPunch || final.slideTrip || final.tripCounter || final.kickCatch;
+    if (eligible.has(baseTactic) && !earlierSpecial && final.recovery?.kind !== 'overhead-escape') {
       eligibleSamples++;
       const roll = arenaEscapeRoll(seed, final.index + 67) % 100;
       assert.equal(!!final.recovery, roll < 5, 'all existing rolls 0–3 survive; only roll 4 adds a new somersault');
@@ -135,7 +137,7 @@ test('a recovery keeps both drawn participants alive until the later deciding bo
         assert.equal(arenaFocusRound(order, elapsed, duration, rushRoll, seed).id, round.id);
         const action = arenaAction(round, elapsed);
         assert.equal(action.outcome, 'pending');
-        assert.deepEqual(action.actors.map(actor => actor.id), [round.aggressor, round.victim]);
+        assert.deepEqual(action.actors.map(actor => actor.id), [round.recovery.throwerId ?? round.aggressor, round.victim]);
         assert.ok(!before[round.aggressor] && !before[round.victim]);
       }
       assert.deepEqual(arenaRanks(order, round.resolve - .001, duration, rushRoll, seed), before);

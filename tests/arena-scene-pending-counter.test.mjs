@@ -46,6 +46,34 @@ const fixtures = [
   { count: 10, seed: 123456, order: shuffled(10, 123456) },
 ];
 
+test('a delayed collision that pushes out both wrestlers keeps their actual roster until the real finish', () => {
+  const order = ['1', '2', '3', '4', '5'], duration = 44000;
+  const planned = arenaRounds(order, duration, 0, 1), rush = planned.find(round => round.rushOutcome === 'double-out');
+  assert.ok(rush);
+  const props = { candidates: order.map(id => ({ id, name: `선수${id}`, color: '#ffad72' })), order, duration, arenaRushRoll: 0, arenaEscapeSeed: 1, paused: false, preview: false };
+  const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
+  let delayed = false;
+  for (let elapsed = 0; elapsed <= rush.resolve + 500; elapsed += 50) {
+    if (!delayed && elapsed >= rush.start + 100) {
+      const contact = sim.contacts.get(rush.id);
+      assert.ok(contact);
+      const impact = rush.resolve + 4800;
+      contact.round = { ...contact.round, rushLaunchAt: rush.resolve + 1000, rushContactAt: rush.resolve + 3000, impact, resolve: impact + 1100, end: impact + 1100 };
+      delayed = true;
+    }
+    render(ctx, props, elapsed, elapsed, sim, 50, false);
+    if (delayed && elapsed >= rush.resolve) {
+      const actors = capturedActors();
+      for (const id of [rush.victim, rush.helper]) {
+        assert.ok(actors.has(id) && !sim.exits.has(id), 'the original scheduled finish cannot remove a waiting wrestler');
+        assert.equal(actors.get(id).pose === 'clap', false);
+      }
+      assert.equal(sim.camera.zoom, 1, 'an unfinished three-person collision cannot activate the later final camera');
+    }
+  }
+  assert.ok(delayed && ctx.stadiumDraws > 100, 'the real stadium is painted throughout the delayed contact');
+});
+
 function game(fixture) {
   const { count, order, seed } = fixture;
   const duration = Math.max(44000, arenaMinimumDuration(order, 7, seed));

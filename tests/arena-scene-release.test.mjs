@@ -63,12 +63,12 @@ test('a live recovery keeps the ordinary hold and full lift timing before one ai
   for (let elapsed = 0; elapsed < recovery.end; elapsed += 16) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(round.id);
     if (!contact || elapsed < recovery.start) continue;
-    const actual = contact.round, frame = arenaRecoveryTargets(actual, elapsed, contact.center), actor = actors.get(round.victim), thrower = actors.get(round.aggressor), body = scene.sim.bodies.get(round.victim);
+    const actual = contact.round, frame = arenaRecoveryTargets(actual, elapsed, contact.center), actor = actors.get(round.victim), thrower = actors.get(round.recovery.throwerId ?? round.aggressor), body = scene.sim.bodies.get(round.victim);
     const height = (actor.depthY ?? body.y) - actor.y;
     assert.equal(scene.sim.exits.has(round.victim), false, 'a surviving throw cannot create an eliminated actor');
     assert.equal(scene.sim.exits.has(round.aggressor), false);
     if (frame.stage === 'hold') { held = true; assert.equal(thrower.pose, 'grapple'); assert.ok(height < .01, 'the normal holding interval cannot turn into a shortened lift'); }
-    if (frame.height > 1 && frame.grip) { lifted = true; assert.ok(Math.abs(height - frame.height) < 1e-8, 'the live body shares the normal lift profile'); }
+    if (frame.height > 1 && frame.grip) { lifted = true; assert.ok(Math.abs(height - frame.height) < 1e-8, `the live body shares the normal lift profile: ${JSON.stringify({ elapsed, seed: found.seed, order: found.order, round: actual, height, expectedHeight: frame.height, body: { x: body.x, y: body.y }, receiver: frame.receiver, thrower: { x: thrower.x, y: thrower.y, pose: thrower.pose }, actor: { x: actor.x, y: actor.y, pose: actor.pose } })}`); }
     if (elapsed < recovery.throwAt) assert.equal(frame.airborne, false, 'the release cannot happen before the full normal throw span');
     if (frame.airborne) {
       flew = true; assert.ok(elapsed >= recovery.throwAt); assert.equal(actor.pose, 'airborne');

@@ -95,7 +95,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
   for (const frameDelta of [16, 50]) {
     const scene = game(kind, { mirrored, frameDelta });
     let contactSeen = false, releaseSeen = false, finalSeen = false, fallbackSeen = false, attackerJumped = false, attackerLanded = false;
-    let actualContactAt, kickSeen = false, anklesSeen = false, ankleFrames = 0, previousRig;
+    let actualContactAt, kickSeen = false, anklesSeen = false, ankleFrames = 0, previousRig, runSeen = false, floorSeen = false;
     const detail = (elapsed, frame) => `${kind}/${mirrored}/${frameDelta}ms/${elapsed}/${frame?.stage}`;
     for (let elapsed = 0; elapsed <= 20000; elapsed += frameDelta) {
       const actors = scene.step(elapsed), contact = scene.sim.contacts.get(scene.planned.id), actual = contact?.round;
@@ -109,18 +109,34 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       assert.ok(!scene.sim.exits.has(scene.planned.aggressor), 'the inside surviving caster can never become a new elimination');
       if (!actual?.wrestlingMove) {
         fallbackSeen ||= contactSeen;
-        assert.ok(kind === 'bulldog', `${kind} must exercise the selected technique instead of only its ordinary fallback`);
+        assert.fail(`${kind} must exercise its complete selected technique instead of only an ordinary fallback`);
         previousRig = structuredClone(paintedVictim); continue;
       }
       const window = actual.wrestlingMove, frame = arenaWrestlingMoveTargets(window, elapsed, contact.center, contact.wrestlingMoveOrigins, actual.contactSide);
       assert.ok(inside(scene.sim.bodies.get(actual.aggressor)), `caster stays inside: ${detail(elapsed, frame)}`);
+      if (kind !== 'dropkick' && window.contactAt != null && !exit && previousRig) {
+        const cap = 8 + frameDelta * .9;
+        for (const [point, prior] of paintedPoints(paintedVictim).map((point, index) => [point, paintedPoints(previousRig)[index]])) {
+          assert.ok(distance(point, prior) < cap, `a fall or ankle pickup cannot flip a painted joint by ${distance(point, prior).toFixed(2)}px in one frame: ${detail(elapsed, frame)}`);
+        }
+      }
       if (window.contactAt == null) {
         assert.equal(exit, undefined, 'a planned collision cannot create a premature exit');
         assert.equal(capturedRanks()[actual.victim], undefined);
+        if (kind === 'clothesline') runSeen ||= driver.pose === 'run' && Math.hypot(driver.velocityX, driver.velocityY) > 80;
+        if ((kind === 'backbodydrop' || kind === 'spinebuster') && window.launchAt != null) {
+          assert.ok(distance(frame.driver, contact.wrestlingMoveOrigins.driver) < .001, 'the receiver waits in place while the drawn loser runs toward the waist catch');
+          runSeen ||= victim.pose === 'run' && Math.hypot(victim.velocityX, victim.velocityY) > 80;
+        }
       }
+      floorSeen ||= window.contactAt != null && elapsed >= frame.floorAt && frame.victimHeight < .001 && frame.victimSlam?.slump === 1;
       if (window.contactAt === elapsed) {
         actualContactAt = elapsed; contactSeen = true;
-        if (kind === 'clothesline') assert.ok(segmentGap(contact.wrestlingMoveOrigins.target, paintedDriver.elbows[1], paintedDriver.hands[1]) < 8, `actual forearm reaches neck: ${detail(elapsed, frame)}`);
+        if (kind === 'clothesline') {
+          assert.ok(runSeen && elapsed - window.launchAt >= 320, 'the solo clothesline accelerates in a real run before striking');
+          assert.ok(distance(frame.driver, contact.wrestlingMoveOrigins.launchDriver) > 70);
+          assert.ok(segmentGap(contact.wrestlingMoveOrigins.target, paintedDriver.elbows[1], paintedDriver.hands[1]) < 8, `actual forearm reaches neck: ${detail(elapsed, frame)}`);
+        }
         else if (kind === 'dropkick') {
           paintedDriver.feet.forEach((foot, leg) => assert.ok(distance(foot, frame.footTargets[leg]) < 7, `both real soles reach the chest: ${detail(elapsed, frame)}`));
           assert.ok((driver.depthY ?? scene.sim.bodies.get(actual.aggressor).y) - driver.y > 20, 'the two-foot strike takes place in the actual jump');
@@ -134,6 +150,9 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       if (kind === 'bulldog' && contactSeen && frame.gripStrength > .95 && frame.stage === 'fall') {
         paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, paintedVictim.headSides[arm]) < 8, `head grip remains attached through the common fall (gap ${distance(hand, paintedVictim.headSides[arm]).toFixed(2)}px): ${detail(elapsed, frame)}`));
       }
+      if ((kind === 'backbodydrop' || kind === 'spinebuster') && contactSeen && frame.gripMode === 'waist' && frame.gripStrength > .95) {
+        assert.ok(paintedDriver.hands.some(hand => distance(hand, paintedVictim.waist) < 8), `the received waist remains supported while the catcher still holds it: ${detail(elapsed, frame)}`);
+      }
       if (kind === 'spinebuster') {
         if (window.kickAt == null) assert.equal(exit, undefined, 'the floor slam must wait for the separate actual kick');
         if (window.kickAt === elapsed) {
@@ -142,10 +161,11 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           assert.ok(distance(paintedDriver.feet[1], paintedVictim.waist) < 8, `the final real sole reaches the fallen waist: ${detail(elapsed, frame)}`);
         }
       }
-      if (kind === 'scoopslam') {
+      if (['clothesline', 'bulldog', 'backbodydrop', 'scoopslam'].includes(kind)) {
         if (window.ankleGripAt == null) assert.equal(exit, undefined, 'the slam does not replace actual two-toe pickup');
         if (window.ankleGripAt != null && !exit) {
           anklesSeen = true; ankleFrames++;
+          assert.ok(floorSeen, 'the opponent lies at the actual slam point before its ankles can be picked up');
           paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, paintedVictim.feet[arm]) < 8, `both painted toes stay in the palms for the complete preflight stroke (gap ${distance(hand, paintedVictim.feet[arm]).toFixed(2)}px): ${detail(elapsed, frame)}`));
         }
       }
@@ -153,7 +173,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         releaseSeen = true;
         assert.ok(contactSeen && actualContactAt <= elapsed, 'the actual hit precedes the only exit');
         if (kind === 'spinebuster') assert.ok(kickSeen && window.kickAt != null);
-        if (kind === 'scoopslam') assert.ok(anklesSeen && ankleFrames >= (frameDelta === 16 ? 8 : 4), 'the grab persists during the complete 300ms throw stroke');
+        if (['clothesline', 'bulldog', 'backbodydrop', 'scoopslam'].includes(kind)) assert.ok(anklesSeen && ankleFrames >= (frameDelta === 16 ? 8 : 4), 'the actual two-ankle grab persists during the complete 300ms throw stroke');
         if (kind === 'backbodydrop') assert.ok(elapsed - actualContactAt >= 680, 'the loser completes the inside flip before being released behind the catcher');
         if (previousRig) {
           const cap = 15 + frameDelta * .5;
@@ -164,8 +184,9 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       previousRig = structuredClone(paintedVictim);
     }
     assert.ok(contactSeen && finalSeen, JSON.stringify({ kind, mirrored, frameDelta, contactSeen, releaseSeen, finalSeen, kickSeen, anklesSeen, fallbackSeen }));
-    if (kind === 'bulldog') assert.ok(fallbackSeen, 'the common fall recovers into the real deciding bout with the same drawn opponents');
-    else assert.ok(releaseSeen, 'a contacted finishing technique must complete its real release');
+    assert.equal(fallbackSeen, false, 'a connected finishing technique cannot replace its floor pickup with a rematch');
+    assert.ok(releaseSeen, 'a contacted finishing technique must complete its real release');
+    if (kind === 'backbodydrop' || kind === 'spinebuster') assert.ok(runSeen, 'the incoming opponent has a visible actual run before the receiver catches');
     if (kind === 'dropkick') assert.ok(attackerJumped && attackerLanded, 'the attacking jump returns to the sand while only the hit loser exits');
   }
 });

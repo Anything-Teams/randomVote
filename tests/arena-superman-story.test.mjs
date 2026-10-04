@@ -15,7 +15,7 @@ test('one independent cosmetic outcome in a thousand enables the Superman punch'
   for (const roll of [-1, 1000, .1, NaN]) assert.throws(() => arenaSupermanPunchOutcome(roll), RangeError);
 });
 
-test('the rare punch reserves only a solo preliminary and preserves each supplied rank and ordinary fallback tactic', () => {
+test('the rare punch reserves a solo preliminary or final and preserves each supplied rank and ordinary fallback tactic', () => {
   let selected = 0;
   for (const count of [2, 3, 5, 10]) for (let seed = 0; seed < 1024; seed++) {
     const order = Array.from({ length: count }, (_, i) => String(i + 1)), original = [...order];
@@ -25,7 +25,7 @@ test('the rare punch reserves only a solo preliminary and preserves each supplie
     for (const [index, round] of rounds.entries()) {
       if (!round.supermanPunch) continue;
       selected++;
-      assert.ok(!round.final && !round.exchange && !round.helper && !round.secondaryVictim && !round.rushOutcome);
+      assert.ok(!round.exchange && !round.helper && !round.secondaryVictim && !round.rushOutcome);
       assert.ok(!round.linkedRush && !round.slideTrip && !round.passingTrip && !round.pairDodge && !round.tripCounter && !round.escape && !round.recovery && !round.rim && !round.rimCharge);
       assert.equal(round.tactic, 'ram', 'a declined jump still has an existing ground tactic');
       assert.equal(round.supermanPunch.start, rounds[index - 1]?.resolve ?? 0);
@@ -45,7 +45,7 @@ test('the rare punch reserves only a solo preliminary and preserves each supplie
 });
 
 const order = ['1', '2', '3', '4', '5'];
-const planned = arenaRounds(order, 44000, 7, 139).find(round => round.supermanPunch);
+const planned = Array.from({ length: 2048 }, (_, seed) => arenaRounds(order, 44000, 7, seed).find(round => round.supermanPunch)).find(Boolean);
 assert.ok(planned, 'the numeric-id production seed must select the rare punch');
 const start = 1000, launchAt = 1560, hitAt = launchAt + 250;
 const round = { ...planned, start, impact: hitAt, resolve: hitAt + 1100, end: hitAt + 1100, timeScale: 1,

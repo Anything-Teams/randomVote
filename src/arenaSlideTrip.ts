@@ -97,7 +97,8 @@ export function arenaSlideTripTargets(window: ArenaSlideTripWindow, elapsed: num
   const hooked = hookAt !== null && elapsed >= hookAt;
   const victim = hooked ? { ...(initial.hookVictim ?? initial.victim) } : { ...initial.victim };
   const hookDriver = initial.hookDriver ?? slideGoal;
-  const driver = beforeLaunch ? run.point : hooked ? { ...hookDriver } : slide.point;
+  const kickStep = initial.kickTarget ? { x: initial.kickTarget.x - side * 48, y: hookDriver.y } : hookDriver;
+  const driver = beforeLaunch ? run.point : hooked ? blend(hookDriver, side * (kickStep.x - hookDriver.x) > 0 ? kickStep : hookDriver, rise) : slide.point;
   const inKick = kickReadyAt !== null && elapsed >= kickReadyAt;
   const released = kickAt !== null && elapsed >= kickAt;
   const frontKick = inKick ? released ? mix(.62, 1, ease((elapsed - kickAt!) / ARENA_SLIDE_TRIP_TIMING.kickRetract)) : .62 * ease((elapsed - kickReadyAt) / ARENA_SLIDE_TRIP_TIMING.kickWindup) : undefined;

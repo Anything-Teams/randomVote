@@ -13,12 +13,12 @@ const rankRead = 'const ranks = props.preview ? {} : resolvedRanks(order, rounds
 assert.ok(source.includes(rankRead));
 source = source.replaceAll('drawArenaScenery(ctx, clock,', 'recoveryTestScenery(ctx, clock,')
   .replace(rankRead, `${rankRead} recoveryTestRanks = ranks;`)
-  .replace(draw, 'recoveryTestActors = actors; arenaDrawOrder([...actors.values()]).forEach(actor => { ctx.surpriseStart(actor); drawArenaFighter(ctx, actor, reduced ? 0 : clock); ctx.surpriseEnd(); });');
-source += '\nlet recoveryTestActors, recoveryTestRanks; const recoveryTestScenery = () => {}; export const capturedActors = () => recoveryTestActors; export const capturedRanks = () => recoveryTestRanks; export { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaRecoveryTargets };';
+  .replace(draw, 'recoveryTestActors = actors; recoveryTestWords = words; arenaDrawOrder([...actors.values()]).forEach(actor => { ctx.surpriseStart(actor); drawArenaFighter(ctx, actor, reduced ? 0 : clock); ctx.surpriseEnd(); });');
+source += '\nlet recoveryTestActors, recoveryTestRanks, recoveryTestWords; const recoveryTestScenery = () => {}; export const capturedActors = () => recoveryTestActors; export const capturedRanks = () => recoveryTestRanks; export const capturedWords = () => recoveryTestWords; export { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaRecoveryTargets };';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaRecoveryTargets, capturedActors, capturedRanks } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaRecoveryTargets, capturedActors, capturedRanks, capturedWords } = module.exports;
 const noop = () => {};
 const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
@@ -48,12 +48,12 @@ function context() {
   };
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
-function game(seed, reversed = false, mirrored = false, candidateOrder) {
-  const props = { candidates: (candidateOrder ?? (reversed ? [...order].reverse() : order)).map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
+function game(seed, reversed = false, mirrored = false, candidateOrder, suppliedOrder = order, frameDelta = 16) {
+  const props = { candidates: (candidateOrder ?? (reversed ? [...order].reverse() : order)).map(id => ({ id, name: id, color: '#ffad72' })), order: suppliedOrder, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
   return { sim, ctx, step(elapsed, paused = false) {
     ctx.records.clear();
-    render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : 16, false);
+    render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : frameDelta, false);
     // The rare punch has a deterministic ordinary layout. Reflect its real
     // initialized bodies once to exercise the other physical heading as well.
     if (mirrored && elapsed === 0) {
@@ -78,26 +78,83 @@ function snapshot(actor, body) {
 const points = contacts => [contacts.origin, contacts.head, contacts.waist, ...contacts.hands, ...contacts.feet];
 const intersectsViewport = values => Math.max(...values.map(point => point.x)) > 0 && Math.min(...values.map(point => point.x)) < 1000 && Math.max(...values.map(point => point.y)) > 0 && Math.min(...values.map(point => point.y)) < 620;
 
-test('the live somersault survivor runs away before any new grip while the thrower calls the throw', () => {
-  const scene = game(41), planned = arenaRounds(order, duration, rushRoll, 41).find(round => round.recovery && !round.recovery.kind);
-  assert.ok(planned);
-  let landedGap, departureGap, running = false, airborne = false, previous, maxClosing = 0;
-  for (let elapsed = 0; elapsed <= planned.start + 16; elapsed += 16) {
+const fixtures = [
+  { kind: undefined, seed: 3, order: ['1', '2', '4', '5', '3'] },
+  { kind: 'overhead-escape', seed: 117, order: ['1', '5', '4', '3', '2'] },
+];
+for (const fixture of fixtures) for (const [mirrored, frameDelta] of [[false, 16], [true, 50]]) test(`live ${fixture.kind ?? 'somersault'} leaves the original thrower, meets another survivor and cannot remake the old duel (${mirrored ? 'mirror' : 'ordinary'}, ${frameDelta}ms)`, () => {
+  const planned = arenaRounds(fixture.order, duration, rushRoll, fixture.seed).find(round => round.recovery?.kind === fixture.kind && round.recovery && !round.final);
+  assert.ok(planned && planned.index === 0, 'a real numeric-id draw chooses the first recovery without injecting clocks');
+  const originalThrower = planned.recovery.throwerId;
+  assert.ok(originalThrower && originalThrower !== planned.aggressor);
+  const scene = game(fixture.seed, false, mirrored, order, fixture.order, frameDelta);
+  let landedGap, departureGap, running = false, airborne = false, previous, maxClosing = 0, finished = false, deciding = false, rankResolved = false, called = false;
+  const isOldPair = round => [round.aggressor, round.victim].includes(originalThrower) && [round.aggressor, round.victim].includes(planned.victim);
+  for (let elapsed = 0; elapsed < 16000; elapsed += frameDelta) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
-    if (!contact || elapsed < planned.recovery.start || elapsed >= planned.start) continue;
-    const frame = arenaRecoveryTargets(contact.round, elapsed, contact.center), survivor = actors.get(planned.victim), thrower = actors.get(planned.aggressor);
-    const gap = distance(scene.sim.bodies.get(planned.victim), scene.sim.bodies.get(planned.aggressor));
-    if (frame.airborne) airborne = true;
-    if (frame.stage === 'land') landedGap = gap;
-    if (frame.stage === 'separate' || frame.stage === 'release') {
-      assert.equal(survivor.gripTarget, undefined); assert.equal(thrower.gripTarget, undefined);
-      if (survivor.pose === 'run') running = true;
-      if (previous) maxClosing = Math.max(maxClosing, previous - gap);
-      previous = gap; departureGap = gap;
-      assert.ok(points(survivor.animation.contactPoints).every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
+    if (!contact) continue;
+    const actual = contact.round, frame = arenaRecoveryTargets(actual, elapsed, contact.center);
+    const survivor = actors.get(planned.victim), thrower = actors.get(originalThrower);
+    const gap = distance(scene.sim.bodies.get(planned.victim), scene.sim.bodies.get(originalThrower));
+    if (frame?.active) {
+      if (frame.airborne) airborne = true;
+      if (frame.stage === 'lift' && !frame.kind && capturedWords().get(originalThrower) === '던지기!') called = true;
+      if (frame.stage === 'land') landedGap = gap;
+      if (frame.stage === 'separate' || frame.stage === 'release') {
+        assert.equal(survivor.gripTarget, undefined); assert.equal(thrower.gripTarget, undefined);
+        if (survivor.pose === 'run') running = true;
+        if (previous) maxClosing = Math.max(maxClosing, previous - gap);
+        previous = gap; departureGap = gap;
+        assert.ok(points(survivor.animation.contactPoints).every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
+        assert.equal(scene.sim.exits.has(planned.victim), false, 'a successful landing is not an elimination');
+        assert.equal(capturedRanks()[planned.victim], undefined);
+      }
+    }
+    if (contact.recoveryFinished) {
+      finished = true;
+      assert.equal(actual.aggressor, planned.aggressor, 'the later deciding fighter is a different actual survivor');
+      assert.notEqual(actual.aggressor, originalThrower);
+      for (const mini of scene.sim.minis.values()) assert.ok(!isOldPair(mini), 'the original thrower and survivor cannot immediately remake the same background duel');
+      for (const other of scene.sim.contacts.values()) if (other.started && elapsed < other.round.resolve && (!other.round.recovery || elapsed >= other.round.recovery.end)) assert.ok(!isOldPair(other.round), 'an own bout cannot restore the original thrower after the landing');
+      deciding ||= !!contact.metAt || !!contact.committed;
+      if (capturedRanks()[planned.victim] !== undefined) {
+        assert.equal(capturedRanks()[planned.victim], fixture.order.indexOf(planned.victim) + 1);
+        rankResolved = true; break;
+      }
     }
   }
-  assert.ok(airborne && running);
-  assert.ok(departureGap > landedGap + 12, `${departureGap}/${landedGap}: a recovered fighter visibly leaves the old opponent`);
+  assert.ok(airborne && running && finished && deciding && rankResolved, JSON.stringify({ airborne, running, finished, deciding, rankResolved }));
+  if (!fixture.kind) assert.ok(called, 'the actual lifted body is accompanied by the early thrower call');
+  assert.ok(departureGap > landedGap + 12, `${departureGap}/${landedGap}: a recovered fighter visibly leaves the original opponent`);
   assert.ok(maxClosing < 1, 'landing and departure cannot snap back into another grip');
+});
+
+for (const fixture of fixtures) for (const mirrored of [false, true]) test(`a landed ${fixture.kind ?? 'somersault'} keeps its painted arms connected when departure begins (${mirrored ? 'mirror' : 'ordinary'})`, () => {
+  for (const frameDelta of [16, 50]) {
+    const planned = arenaRounds(fixture.order, duration, rushRoll, fixture.seed).find(round => round.recovery?.kind === fixture.kind && round.recovery && !round.final);
+    assert.ok(planned);
+    const scene = game(fixture.seed, false, mirrored, order, fixture.order, frameDelta);
+    let previous, boundarySeen = false;
+    const armPoints = rig => [...rig.shoulders, ...rig.elbows, ...rig.hands];
+    for (let elapsed = 0; elapsed <= planned.recovery.end; elapsed += frameDelta) {
+      const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
+      if (!contact) continue;
+      const frame = arenaRecoveryTargets(contact.round, elapsed, contact.center);
+      if (!frame?.active) continue;
+      const survivor = actors.get(planned.victim), rig = survivor.animation.contactPoints;
+      if (previous?.stage === 'land' && frame.stage === 'separate') {
+        boundarySeen = true;
+        const cap = 10 + frameDelta * .55;
+        armPoints(rig).forEach((point, index) => {
+          const gap = distance(point, armPoints(previous.rig)[index]);
+          assert.ok(gap < cap, `${fixture.kind ?? 'somersault'}/${mirrored}/${frameDelta}ms/${elapsed}: a grounded departure cannot mirror an arm endpoint by ${gap.toFixed(2)}px`);
+        });
+        assert.equal(scene.sim.exits.has(planned.victim), false);
+        assert.equal(capturedRanks()[planned.victim], undefined);
+        break;
+      }
+      previous = { stage: frame.stage, rig: structuredClone(rig) };
+    }
+    assert.ok(boundarySeen, 'the actual first departure frame follows a visible grounded landing');
+  }
 });

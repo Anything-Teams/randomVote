@@ -91,3 +91,35 @@ test('the jump inherits the planted load and settles both feet before changing t
     landed.feet.forEach((foot, leg) => assert.ok(distance(foot, beforeLanding.feet[leg]) < 1, 'the floor-aware landing stays within one pixel of the same two returning soles'));
   }
 });
+
+test('the short Superman runway enters a complete 180ms two-foot plant without restarting the running rig', () => {
+  for (const facing of [-1, 1]) {
+    const actor = fighter({ facing, pose: 'run', supermanRun: true, supermanProgress: undefined, phase: 0, y: 416, depthY: 416, velocityX: facing * 180, motionImmediate: false });
+    for (let frame = 0; frame <= 30; frame++) {
+      actor.x += actor.velocityX * .016; actor.gaitDistance += 180 * .016;
+      paint(actor, 1000 + frame * 16);
+    }
+    const running = structuredClone(actor.animation.contactPoints);
+    actor.pose = 'guard'; actor.velocityX = 0; actor.supermanRun = false; actor.supermanLoad = 0;
+    const entering = paint(actor, 1480).contacts;
+    [entering.head, entering.waist, ...entering.hands, ...entering.feet].forEach((point, index) => assert.ok(distance(point, [running.head, running.waist, ...running.hands, ...running.feet][index]) < .001, 'the preparation starts in the last actual running pose'));
+    let prior = entering;
+    for (let frame = 1; frame <= 12; frame++) {
+      const p = frame / 12; actor.supermanLoad = p * p * (3 - 2 * p);
+      const saved = structuredClone(actor.animation), predicted = sampleArenaFighterContacts(actor, 1480 + frame * 15);
+      assert.deepEqual(actor.animation, saved);
+      const result = paint(actor, 1480 + frame * 15);
+      assert.deepEqual(result.contacts, predicted);
+      result.contacts.feet.forEach((foot, leg) => assert.ok(distance(foot, prior.feet[leg]) < 4, 'each running foot lowers continuously into the load'));
+      for (let leg = 0; leg < 2; leg++) assert.ok(distance(result.skeleton.hips[leg], result.skeleton.knees[leg]) <= 11.001 && distance(result.skeleton.knees[leg], result.skeleton.feet[leg]) <= 11.001, 'the planted loading silhouette cannot lengthen a leg');
+      prior = result.contacts;
+    }
+    assert.ok(actor.animation.feet.every(foot => foot.lift === 0 && !foot.swinging), 'both feet fully plant within the 180ms preparation');
+    prior.feet.forEach(foot => assert.ok(Math.abs(foot.y - (actor.y - 2 * actor.scale)) < .001));
+    actor.pose = 'superman'; actor.supermanProgress = 0; actor.supermanLoad = undefined;
+    const jumping = paint(actor, 1660);
+    jumping.contacts.feet.forEach((foot, leg) => assert.ok(distance(foot, prior.feet[leg]) < .001, 'takeoff keeps the exact two loaded soles'));
+    assert.ok(distance(jumping.contacts.waist, prior.waist) < .001, 'the loaded pelvis remains continuous at takeoff');
+    assertBones(actor, jumping);
+  }
+});

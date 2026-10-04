@@ -130,7 +130,7 @@ test('shared throw release starts at all actual supported palms then lowers both
       actor.carrierRelease = { hands, elbows: supported.contacts.elbows, shoulders: supported.contacts.shoulders, progress, direction: side }; actor.carrierDrive = .86 + .14 * settled;
       const result = paint(actor, 1000 + frame * 10);
       if (frame === 0) hands.forEach((hand, arm) => assert.ok(distance(result.contacts.hands[arm], hand) < .001, 'dropping the support targets must preserve every actual palm on the release frame'));
-      bones(actor, result, 14 - 3 * settled, 14 - 3.5 * settled);
+      bones(actor, result);
       result.contacts.hands.forEach((hand, arm) => assert.ok(distance(hand, previous.hands[arm]) < 9, 'a supported palm cannot jump to a default overhead hand on release'));
       result.contacts.elbows.forEach((elbow, arm) => assert.ok(distance(elbow, previous.elbows[arm]) < 12, 'the two forearms unfold continuously after releasing their shoulder/ankle holds'));
       previous = structuredClone(result.contacts);

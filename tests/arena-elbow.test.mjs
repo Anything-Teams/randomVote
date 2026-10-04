@@ -7,7 +7,8 @@ async function source(path) {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
 const { arenaTechniqueTargets, arenaTechniqueExit, arenaFloorExitTiming, isArenaFloorDrag } = await source('src/arenaTechniques.ts');
-const { arenaAction, arenaRanks, arenaRounds } = await source('src/arenaLogic.ts');
+const { arenaAction, arenaRanks, arenaRounds, arenaSoloFinalTactics } = await source('src/arenaLogic.ts');
+const { arenaEscapeRoll } = await source('src/arenaEscape.ts');
 const { createArenaFighterAnimation, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const round = { id: 'elbow-test', index: 0, tactic: 'elbow', aggressor: 'counter', victim: 'lifter', start: 0, impact: 6300, resolve: 10400, end: 11000, final: false };
 const fighter = (id, index, overrides) => ({ candidate: { id, name: id, color: '#ed9166' }, index, scale: 2.04, angle: 0, alpha: 1, facing: 1, pose: 'guard', velocityX: 0, velocityY: 0, gaitDistance: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...overrides });
@@ -123,15 +124,21 @@ test('the elbow counter is a rare cosmetic branch and preserves every supplied r
   }
   assert.ok(order, 'there is a lifting finish eligible for an elbow counter');
   const original = [...order], samples = 2048;
-  let counters = 0;
+  let counters = 0, eligible = 0;
   for (let seed = 0; seed < samples; seed++) {
     const rounds = arenaRounds(order, 44000, 7, seed), final = rounds.at(-1);
-    if (final.tactic === 'elbow') counters++;
+    const baseTactic = arenaSoloFinalTactics[arenaEscapeRoll(seed, final.index + 1717) % arenaSoloFinalTactics.length];
+    const available = ['lift', 'suplex', 'final'].includes(baseTactic) && !final.supermanPunch && !final.slideTrip && !final.tripCounter && !final.kickCatch && !final.wrestlingMove;
+    if (available) {
+      eligible++;
+      assert.equal(final.tactic === 'elbow', arenaEscapeRoll(seed, final.index + 39) % 100 < 8);
+      if (final.tactic === 'elbow') counters++;
+    }
     assert.equal(final.aggressor, order[0]);
     assert.equal(final.victim, order[1]);
     assert.deepEqual(arenaRanks(order, 44000, 44000, 7, seed), { [order[0]]: 1, [order[1]]: 2 }, 'the cosmetic counter never redraws the ranking');
   }
-  assert.ok(counters / samples > .05 && counters / samples < .11, `${counters}/${samples}: elbow is close to eight percent of eligible lifts`);
+  assert.ok(counters / eligible > .05 && counters / eligible < .11, `${counters}/${eligible}: elbow is close to eight percent of eligible lifts`);
   for (let count = 3; count <= 10; count++) for (let seed = 0; seed < 20; seed++) {
     const field = Array.from({ length: count }, (_, index) => `elbow-field-${seed}-${index}`), saved = [...field];
     arenaRounds(field, 44000, seed % 10, seed);

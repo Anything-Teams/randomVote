@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Candidate } from './election';
 import type { SportsStageProps } from './sports';
 import { arenaAction, arenaActionWords, arenaApproachSpeed, arenaCatchTargets, arenaChargeFall, arenaChargeTargets, arenaContactRound, arenaDoubleShoveTargets, arenaEliminatedIds, arenaFaceOpponent, arenaInsidePoint, arenaLocalContact, arenaEdgeFall, arenaEdgeTargets, arenaExitDirection, arenaGuardTarget, arenaMiniExchanges, arenaMove as move, arenaNarration, arenaNearbyResponse, arenaPodium, arenaRamTargets, arenaReleaseTarget, arenaRoamingTarget, arenaRounds, arenaShoveTargets, arenaSpinTargets, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
-import { arenaCarryHolderPoint, arenaDrawOrder, arenaReleaseSnapshot, arenaSpinGripPair, arenaSpinSnapshot, arenaWristGripPoint, createArenaFighterAnimation, drawArenaFighter, drawArenaName, sampleArenaFighterContacts, type ArenaActor, type ArenaFighterAnimation, type ArenaPose, type ArenaSpinSnapshot } from './game/ArenaFighter';
+import { arenaCarryHolderPoint, arenaDrawOrder, arenaReleaseSnapshot, arenaSpinGripPair, arenaSpinSnapshot, arenaWristGripPoint, createArenaFighterAnimation, drawArenaFighter as paintArenaFighter, drawArenaName, sampleArenaFighterContacts, type ArenaActor, type ArenaFighterAnimation, type ArenaPose, type ArenaSpinSnapshot } from './game/ArenaFighter';
 import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
 import { arenaTechniqueTargets, arenaTechniqueExit, arenaTechniqueReactionAt, arenaFloorExitTiming, isArenaFloorDrag, isArenaFinalTechnique } from './arenaTechniques';
@@ -20,16 +20,24 @@ import { arenaSupermanPunchTargets, type ArenaSupermanPunchOrigins } from './are
 import { ARENA_KICK_CATCH_TIMING, arenaKickCatchTargets, type ArenaKickCatchOrigins } from './arenaKickCatch';
 import { arenaWrestlingMoveTargets, type ArenaWrestlingMoveOrigins } from './arenaWrestlingMoves';
 import { createArenaCamera, sampleArenaCamera, type ArenaCamera } from './arenaCamera';
+import { presentArenaCanvasFrame } from './arenaCanvasFrame';
 import './arena.css';
 
-type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number; motorX?: number; motorY?: number; restUntil?: number; animation?: ArenaFighterAnimation; roam?: { key: string; origin: ArenaPoint; target: ArenaPoint; neighborId?: string } };
+type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number; motorX?: number; motorY?: number; restUntil?: number; separatedFrom?: string; animation?: ArenaFighterAnimation; roam?: { key: string; origin: ArenaPoint; target: ArenaPoint; neighborId?: string } };
 type Contact = { center: ArenaPoint; side: number; round: ArenaRound; started?: boolean; metAt?: number; committed?: boolean; chargerOrigin?: ArenaPoint; pairDodgeOrigins?: ArenaPairDodgeOrigins; supermanPunchOrigins?: ArenaSupermanPunchOrigins; kickCatchOrigins?: ArenaKickCatchOrigins; wrestlingMoveOrigins?: ArenaWrestlingMoveOrigins; wrestlingHeadOffset?: ArenaPoint; slideTripOrigins?: ArenaSlideTripOrigins; linkedRushOrigins?: ArenaLinkedRushOrigins; pairCarryOrigins?: ArenaPairCarryOrigins; linkedRelease?: { at: number; hands: [ArenaPoint, ArenaPoint]; roots: [ArenaPoint, ArenaPoint]; arms: [0 | 1, 0 | 1]; facings: [number, number] }; pairArmRelease?: Map<string, { hands: [ArenaPoint, ArenaPoint]; elbows: [ArenaPoint, ArenaPoint]; shoulders: [ArenaPoint, ArenaPoint]; root: ArenaPoint; facing: number }>; pairDodgeFinished?: boolean; passingTripOrigins?: ArenaPassingTripOrigins; passingTripDeclined?: boolean; escapeFinished?: boolean; recoveryFinished?: boolean; rimFinished?: boolean; rimOrigins?: { aggressor: ArenaPoint; victim: ArenaPoint }; rimChargeOrigins?: ArenaRimChargeOrigins; rimChargeFinished?: boolean; sidekickLaunched?: boolean; elbowFall?: ArenaPoint; elbowApproachOrigin?: ArenaPoint; releases?: Map<string, ArenaPoint> };
 type Exit = { round: ArenaRound; origin: ArenaPoint; landing: ArenaPoint; side: number; bench: ArenaPoint; lift: number; angle: number; velocity: number; heldFacing?: number; launchedAt?: number; dodgeFall?: { center: ArenaPoint; origins: ArenaPairDodgeOrigins }; dragOffset?: ArenaPoint; driverStop?: ArenaPoint; spinSnapshot?: ArenaSpinSnapshot };
 type Simulation = { key: string; elapsed: number; epoch: number; camera: ArenaCamera; bodies: Map<string, Body>; contacts: Map<string, Contact>; exits: Map<string, Exit>; minis: Map<string, ArenaRound> };
-type ChoreographedActor = ArenaActor;
+type ChoreographedActor = ArenaActor & { rearExitCutoff?: number };
 const W = 1000, H = 620;
 const clamp = (p: number, low = 0, high = 1) => Math.max(low, Math.min(high, p));
 const ease = (p: number) => { const n = clamp(p); return n * n * (3 - 2 * n); };
+
+/** A rear rim fall disappears behind the sand ledge, rather than falling onto it. */
+function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ChoreographedActor, clock: number) {
+  if (actor.rearExitCutoff === undefined) { paintArenaFighter(ctx, actor, clock); return; }
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, actor.rearExitCutoff); ctx.clip();
+  paintArenaFighter(ctx, actor, clock); ctx.restore();
+}
 
 function validOrder(candidates: Candidate[], supplied: string[]) {
   const ids = new Set(candidates.map(candidate => candidate.id));
@@ -42,10 +50,11 @@ function sceneSignature(props: SportsStageProps) {
 }
 
 function sceneParticipants(round: ArenaRound, elapsed = -Infinity) {
+  if (round.recovery && elapsed < round.recovery.end) return [round.recovery.throwerId ?? round.aggressor, round.victim];
   return [round.aggressor, round.victim, round.helper, round.pairDodge && elapsed < round.pairDodge.end ? round.pairDodge.partnerId : undefined, round.passingTrip?.joined ? round.passingTrip.passerId : undefined].filter((id): id is string => !!id);
 }
 
-const sceneTimed = (round: ArenaRound) => round.rushOutcome === 'counter-throw' || !!round.pairDodge || !!round.passingTrip || !!round.slideTrip || !!round.supermanPunch || !!round.kickCatch || !!round.wrestlingMove || !!round.rimPush;
+const sceneTimed = (round: ArenaRound) => !!round.rushOutcome || !!round.pairDodge || !!round.passingTrip || !!round.slideTrip || !!round.supermanPunch || !!round.kickCatch || !!round.wrestlingMove || !!round.rimPush || round.tactic === 'catch' && round.chargeSetup?.contactAt !== undefined;
 
 /** Later planned eliminations cannot pass an unfinished physical encounter. */
 function resolvedRounds(rounds: ArenaRound[], elapsed: number): ArenaRound[] {
@@ -106,44 +115,6 @@ function podium(ctx: CanvasRenderingContext2D, places: ArenaPodiumPlace[], alpha
   ctx.restore();
 }
 
-function relationship(ctx: CanvasRenderingContext2D, round: ArenaRound, elapsed: number, actors: Map<string, ChoreographedActor>, labels = false, bodies?: Map<string, Body>) {
-  if (round.tactic !== 'team' && round.tactic !== 'betrayal' || elapsed >= round.resolve || elapsed - round.impact > 420) return;
-  const action = arenaAction(round, elapsed), tone = action.betrayed ? '#fa8c7a' : '#84ded1';
-  const ground = (id: string) => bodies?.get(id) ?? actors.get(id);
-  ctx.save();
-  if (!labels) {
-    for (const part of action.actors) {
-      const point = ground(part.id);
-      if (!point) continue;
-      ctx.strokeStyle = part.id === action.targetId ? '#fff0b2' : tone; ctx.lineWidth = 2; ctx.globalAlpha = .8;
-      ctx.beginPath(); ctx.ellipse(point.x, point.y + 3, 31, 8, 0, 0, Math.PI * 2); ctx.stroke();
-    }
-    const link = (fromId: string, toId: string, broken = false) => {
-      const from = ground(fromId), to = ground(toId);
-      if (!from || !to || Math.hypot(from.x - to.x, from.y - to.y) > (broken ? 185 : 125)) return;
-      const midX = (from.x + to.x) / 2, midY = (from.y + to.y) / 2 + 6;
-      ctx.globalAlpha = .9; ctx.strokeStyle = tone; ctx.lineWidth = 3; ctx.setLineDash(broken ? [7, 10] : []);
-      ctx.beginPath(); ctx.moveTo(from.x, from.y + 6); ctx.lineTo(to.x, to.y + 6); ctx.stroke(); ctx.setLineDash([]);
-      if (broken) { ctx.beginPath(); ctx.moveTo(midX - 6, midY - 7); ctx.lineTo(midX + 6, midY + 7); ctx.moveTo(midX + 6, midY - 7); ctx.lineTo(midX - 6, midY + 7); ctx.stroke(); }
-      else if (action.stage === 'joint-attack' || action.stage === 'counter') { const direction = Math.sign(to.x - from.x); ctx.beginPath(); ctx.moveTo(midX - direction * 6, midY - 5); ctx.lineTo(midX, midY); ctx.lineTo(midX - direction * 6, midY + 5); ctx.stroke(); }
-    };
-    if (action.betrayed && round.helper) link(round.helper, round.victim, true);
-    action.attackers.forEach(id => link(id, action.targetId));
-  } else {
-    action.actors.forEach(part => {
-      const actor = actors.get(part.id);
-      if (!actor) return;
-      const x = actor.x, y = actor.y - 143 - (part.id === action.targetId ? 32 : 0), value = String(actor.index + 1) + ' · ' + part.badge;
-      ctx.font = '800 13px "Malgun Gothic", sans-serif';
-      const width = Math.max(69, ctx.measureText(value).width + 14);
-      ctx.globalAlpha = .94; ctx.fillStyle = '#172b32'; ctx.fillRect(x - width / 2, y, width, 23);
-      ctx.strokeStyle = part.id === action.targetId ? '#fff0b2' : tone; ctx.lineWidth = 1; ctx.strokeRect(x - width / 2, y, width, 23);
-      text(ctx, value, x, y + 4, 13, part.id === action.targetId ? '#fff0b2' : tone, width - 8);
-    });
-  }
-  ctx.restore();
-}
-
 function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed: number, clock: number, sim: Simulation, delta: number, reduced: boolean) {
   const order = validOrder(props.candidates, props.order);
   const signature = sceneSignature(props);
@@ -163,7 +134,14 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       if (resolve > round.resolve) contact.round = { ...round, resolve, end: Math.max(round.end, resolve) };
       continue;
     }
-    if (round.rushOutcome !== 'counter-throw' || round.linkedRush || round.rushLaunchAt !== null || elapsed < round.start || sim.exits.has(round.victim)) continue;
+    if (round.tactic === 'catch' && round.chargeSetup?.contactAt === null && elapsed >= round.start && !sim.exits.has(round.victim)) {
+      const load = round.chargeSetup.loadDuration ?? 180;
+      const turn = round.chargeSetup.turnDuration ?? 300;
+      const resolve = Math.max(round.resolve, elapsed + load + turn + 1100 * (round.timeScale ?? props.duration / 44_000));
+      if (resolve > round.resolve) contact.round = { ...round, resolve, end: Math.max(round.end, resolve) };
+      continue;
+    }
+    if (!round.rushOutcome || round.linkedRush || round.rushLaunchAt !== null || elapsed < round.start || sim.exits.has(round.victim)) continue;
     // The original finish is only a plan. Until the pair has actually taken
     // hold, reserve the complete post-contact throw instead of launching or
     // removing the waiting runner at that nominal deadline.
@@ -263,7 +241,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     sim.minis.delete(id); if (!round.prepares) sim.contacts.delete(id);
   }
   const miniParticipants = new Set([...sim.minis.values()].flatMap(round => [round.aggressor, round.victim]));
-  if (!props.preview && !won) for (const round of arenaMiniExchanges(ambient.filter(id => !releasedIds.has(id) && !miniParticipants.has(id) && elapsed >= (sim.bodies.get(id)!.restUntil ?? 0)).map(id => ({ id, x: sim.bodies.get(id)!.x, y: sim.bodies.get(id)!.y })), elapsed, props.duration, rounds)) {
+  if (!props.preview && !won) for (const round of arenaMiniExchanges(ambient.filter(id => !releasedIds.has(id) && !miniParticipants.has(id) && elapsed >= (sim.bodies.get(id)!.restUntil ?? 0)).map(id => ({ id, x: sim.bodies.get(id)!.x, y: sim.bodies.get(id)!.y })), elapsed, props.duration, rounds).filter(round => sim.bodies.get(round.aggressor)?.separatedFrom !== round.victim && sim.bodies.get(round.victim)?.separatedFrom !== round.aggressor)) {
     sim.minis.set(round.id, round); miniParticipants.add(round.aggressor); miniParticipants.add(round.victim);
   }
   for (const id of miniParticipants) preparing.delete(id);
@@ -273,10 +251,10 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     const cycle = (elapsed / unit + index * 673) % 5600;
     const roaming = ambient.includes(id) && !miniParticipants.has(id) && !preparing.has(id), available = roaming ? ambient.filter(other => other !== id && !miniParticipants.has(other) && !preparing.has(other)) : [];
     if (miniParticipants.has(id)) body.roam = undefined;
-    const nextBout = rounds.find(round => round.end > elapsed && sceneParticipants(round).includes(id));
+    const nextBout = rounds.find(round => round.end > elapsed && sceneParticipants(round, elapsed).includes(id));
     const opponentId = nextBout && !nextBout.helper ? nextBout.aggressor === id ? nextBout.victim : nextBout.aggressor : undefined;
-    const partnerBout = opponentId ? rounds.find(round => round.end > elapsed && sceneParticipants(round).includes(opponentId)) : undefined;
-    const neighborId = !releasedIds.has(id) && opponentId && !releasedIds.has(opponentId) && partnerBout?.id === nextBout?.id && available.includes(opponentId) ? opponentId : undefined;
+    const partnerBout = opponentId ? rounds.find(round => round.end > elapsed && sceneParticipants(round, elapsed).includes(opponentId)) : undefined;
+    const neighborId = !releasedIds.has(id) && opponentId && body.separatedFrom !== opponentId && sim.bodies.get(opponentId)?.separatedFrom !== id && !releasedIds.has(opponentId) && partnerBout?.id === nextBout?.id && available.includes(opponentId) ? opponentId : undefined;
     const neighbor = neighborId ? sim.bodies.get(neighborId) : undefined;
     const freelyReleased = releasedIds.has(id);
     const aware = roaming && !freelyReleased && !neighbor && !props.preview ? arenaNearbyResponse(body, active.filter(other => other !== id && (engaged.has(other) || miniParticipants.has(other))).map(other => sim.bodies.get(other)!), index) : undefined;
@@ -305,7 +283,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     const prepared = [...sim.contacts.values()].find(contact => contact.round.prepares === round.id);
     const continuation = round.prepares ? sim.contacts.get(round.prepares) : undefined;
     const center = prepared?.center ?? continuation?.center ?? arenaLocalContact(origin, [...sim.contacts].filter(([otherId]) => otherId !== round.id && liveContactIds.has(otherId)).map(([, contact]) => contact.center));
-    const aggressor = sim.bodies.get(round.aggressor), victim = sim.bodies.get(round.victim);
+    const aggressor = sim.bodies.get(round.recovery && elapsed < round.recovery.end ? round.recovery.throwerId ?? round.aggressor : round.aggressor), victim = sim.bodies.get(round.victim);
     let actual = arenaContactRound(round, center, aggressor && victim ? { aggressor, victim } : undefined);
     if (actual.rushOutcome && actual.helper) {
       const first = sim.bodies.get(actual.rushOutcome === 'counter-throw' ? actual.aggressor : actual.victim), second = sim.bodies.get(actual.helper);
@@ -320,6 +298,10 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     return { center, chargerOrigin: charger ? { x: charger.x, y: charger.y } : undefined, metAt: prepared?.metAt ?? continuation?.metAt, side: round.index % 2 ? 1 : -1, round: actual };
   };
   const encounterOrigin = (round: ArenaRound, aggressor: ArenaPoint, victim: ArenaPoint) => {
+    if (round.recovery && elapsed < round.recovery.end) {
+      const thrower = sim.bodies.get(round.recovery.throwerId ?? round.aggressor);
+      if (thrower) return { x: (thrower.x + victim.x) / 2, y: (thrower.y + victim.y) / 2 };
+    }
     if (round.pairDodge) {
       const partner = sim.bodies.get(round.pairDodge.partnerId);
       if (partner) return { x: (aggressor.x + partner.x) / 2, y: (aggressor.y + partner.y) / 2 };
@@ -358,8 +340,9 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           move(body, { x: contact.center.x + (first ? 1 : -1) * side * 22, y: contact.center.y + (first ? 6 : -6) }, seconds, 165);
           const other = sim.bodies.get(first ? upcoming.pairDodge.partnerId : upcoming.aggressor)!;
           arenaFaceOpponent(body, other); actor.x = body.x; actor.y = body.y; actor.facing = body.facing;
-          actor.pose = Math.hypot(body.x - other.x, body.y - other.y) < 70 ? 'grapple' : 'walk';
-          actor.gripTarget = { x: other.x, y: other.y - 46 }; actor.gripStrength = .9;
+          const touching = Math.hypot(body.x - other.x, body.y - other.y) < 70 && Math.abs(body.y - other.y) < 24;
+          actor.pose = touching ? 'grapple' : 'walk';
+          actor.gripTarget = touching ? { x: other.x, y: other.y - 46 } : undefined; actor.gripStrength = touching ? .9 : 0;
           return;
         }
         if (upcoming.rimCharge) {
@@ -388,7 +371,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         const opponent = sim.bodies.get(plan?.gripId ?? (id === upcoming.victim ? upcoming.aggressor : upcoming.victim));
         if (opponent) arenaFaceOpponent(body, opponent);
         actor.x = body.x; actor.y = body.y; actor.facing = body.facing;
-        const touching = opponent && Math.hypot(opponent.x - body.x, opponent.y - body.y) < 88 && !charge && !caught && !ram;
+        const touching = opponent && Math.hypot(opponent.x - body.x, opponent.y - body.y) < 88 && Math.abs(opponent.y - body.y) < 24 && !charge && !caught && !ram;
         actor.pose = touching ? id === upcoming.victim ? 'brace' : 'grapple' : Math.hypot(target.x - body.x, target.y - body.y) > 8 ? 'walk' : 'guard';
         actor.gripTarget = touching ? { x: opponent.x - body.facing * 17, y: opponent.y - 44 } : undefined;
         if (touching && contact.metAt === undefined) contact.metAt = elapsed;
@@ -398,7 +381,6 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   const encounters = [...(exchange ? [exchange] : []), ...sim.minis.values()];
   for (let exchange of encounters) {
     const a = sim.bodies.get(exchange.aggressor), v = sim.bodies.get(exchange.victim);
-    const mini = exchange.id.startsWith('mini-');
     if (a && v && !sim.contacts.has(exchange.id)) sim.contacts.set(exchange.id, contactPoint(exchange, encounterOrigin(exchange, a, v)));
     const contact = sim.contacts.get(exchange.id);
     if (contact) {
@@ -447,29 +429,37 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             contact.wrestlingMoveOrigins.launchDriver = { ...frame.driver }; contact.wrestlingMoveOrigins.launchVictim = { ...frame.victim };
             update({ launchAt: elapsed });
           }
+          if (frame.canGrabAnkle && !contact.wrestlingMoveOrigins.pickupDriver) {
+            contact.wrestlingMoveOrigins.pickupDriver = { x: a.x, y: a.y };
+            contact.wrestlingMoveOrigins.floorVictim = { ...frame.victim };
+            update({});
+          }
           const apply = () => {
             for (const [actor, body, point, pose, phase, height, angle, suspension, slam, tuck, velocity] of [
               [driver, a, frame.driver, frame.driverPose, frame.driverPhase, frame.driverHeight, frame.driverAngle, frame.driverSuspension, frame.driverSlam, frame.driverJumpTuck, frame.driverVelocity],
               [victim, v, frame.victim, frame.victimPose, frame.victimPhase, frame.victimHeight, frame.victimAngle, frame.victimSuspension, frame.victimSlam, frame.victimJumpTuck, frame.victimVelocity],
             ] as const) {
               if (!actor || actor === victim && sim.exits.has(exchange.victim)) continue;
-              const offset = actor === driver && window.kind === 'bulldog' && frame.gripStrength === 0 ? contact.wrestlingHeadOffset : undefined;
+              const offset = actor === driver && window.kind === 'bulldog' && frame.gripStrength === 0 && !contact.wrestlingMoveOrigins!.pickupDriver ? contact.wrestlingHeadOffset : undefined;
               body.x = point.x + (offset?.x ?? 0); body.y = point.y + (offset?.y ?? 0); body.facing = actor === driver ? frame.driverFacing : frame.victimFacing;
               body.motorX = velocity.x; body.motorY = velocity.y;
               actor.x = body.x; actor.y = body.y - height; actor.depthY = body.y; actor.facing = body.facing;
               actor.pose = pose; actor.phase = phase; actor.angle = angle; actor.suspension = suspension; actor.slamProgress = slam; actor.jumpTuck = tuck;
               if (actor === victim) {
-                actor.carryStretch = frame.victimCarryStretch; actor.carrySupport = window.kind === 'scoopslam' ? 'shoulder' : undefined;
-                actor.bulldogProgress = window.kind === 'bulldog' ? frame.bulldogProgress : undefined;
+                actor.carryStretch = frame.victimCarryStretch; actor.carrySupport = frame.victimCarryStretch !== undefined ? 'shoulder' : undefined;
+                actor.carryEntry = window.kind === 'scoopslam' && frame.gripMode !== 'ankle';
+                actor.bulldogProgress = (window.kind === 'bulldog' || window.kind === 'clothesline') && frame.gripMode !== 'ankle' ? frame.bulldogProgress : undefined;
+                actor.slamEntry = slam !== undefined && frame.gripMode !== 'ankle';
               }
               actor.gripTarget = undefined; actor.secondaryGripTarget = undefined; actor.gripStrength = 0;
               prepareContactActor(actor);
             }
-            driver.clotheslineArm = window.kind === 'clothesline' ? 1 : undefined;
+            driver.clotheslineArm = window.kind === 'clothesline' && frame.clotheslineStrength > .001 ? 1 : undefined;
             driver.clotheslineTarget = frame.clotheslineTarget; driver.clotheslineStrength = frame.clotheslineStrength;
             driver.dropkickProgress = frame.dropkickProgress; driver.footTargets = frame.footTargets; driver.feetStrength = frame.feetStrength;
             driver.bulldogProgress = frame.bulldogProgress; driver.backBodyProgress = frame.backBodyProgress;
             driver.spinebusterProgress = frame.spinebusterProgress; driver.scoopSlamProgress = frame.scoopSlamProgress;
+            driver.ankleThrowProgress = frame.ankleThrowProgress;
             driver.frontKick = frame.frontKick; driver.footTarget = frame.driverFootTarget; driver.footStrength = frame.footStrength; driver.kickLeg = 1;
             if (frame.gripTargets && victim && !sim.exits.has(exchange.victim)) {
               const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock);
@@ -484,7 +474,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
                   goal = arenaCarryHolderPoint(predicted, [targets[1], targets[0]], reduced ? 0 : clock, goal);
                 }
                 const distance = Math.hypot(goal.x - prior.x, goal.y - prior.y), step = reset ? 1 : Math.min(1, (frame.gripMode === 'head' ? 240 : 165) * seconds / Math.max(.001, distance));
-                a.x = prior.x + (goal.x - prior.x) * step; a.y = prior.y + (goal.y - prior.y) * step;
+                const inside = arenaInsidePoint({ x: prior.x + (goal.x - prior.x) * step, y: prior.y + (goal.y - prior.y) * step }, 12);
+                a.x = inside.x; a.y = inside.y;
                 a.motorX = seconds ? (a.x - prior.x) / seconds : 0; a.motorY = seconds ? (a.y - prior.y) / seconds : 0;
                 driver.x = a.x; driver.y = a.y; driver.depthY = a.y;
                 if (frame.gripMode === 'head') contact.wrestlingHeadOffset = { x: a.x - frame.driver.x, y: a.y - frame.driver.y };
@@ -505,7 +496,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               contact.wrestlingMoveOrigins.ankles = [rig.feet[0], rig.feet[1]];
               const pickup = arenaAnklePickup({ x: v.x, y: v.y }, rig.feet, frame.side);
               const predicted = { ...driver, ...pickup.holder, pose: 'drag' as const, facing: -frame.side, gripMode: 'ankle' as const, gripTarget: rig.feet[1], secondaryGripTarget: rig.feet[0], gripStrength: 1, gripLocked: true, animation: undefined, motionImmediate: true };
-              contact.wrestlingMoveOrigins.ankleDriver = arenaCarryHolderPoint(predicted, [rig.feet[1], rig.feet[0]], reduced ? 0 : clock, pickup.holder);
+              contact.wrestlingMoveOrigins.ankleDriver = arenaInsidePoint(arenaCarryHolderPoint(predicted, [rig.feet[1], rig.feet[0]], reduced ? 0 : clock, pickup.holder), 12);
             }
             update({}); apply();
             const attacking = sampleArenaFighterContacts(driver, reduced ? 0 : clock);
@@ -537,7 +528,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           }
           if (frame.canRelease && victim && !sim.exits.has(exchange.victim)) {
             update({ releaseAt: elapsed }); apply();
-            const side = window.kind === 'backbodydrop' ? -frame.side : frame.side;
+            const side = frame.gripMode === 'ankle' ? victim.x >= driver.x ? 1 : -1 : window.kind === 'backbodydrop' ? -frame.side : frame.side;
             const lift = Math.max(0, (victim.depthY ?? v.y) - victim.y);
             const exit = makeExit(exchange, { x: victim.x, y: victim.y + lift }, lift, victim.angle, 0, side);
             exit.spinSnapshot = arenaReleaseSnapshot(victim, reduced ? 0 : clock);
@@ -545,10 +536,10 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             const resolve = Math.max(elapsed + 1100 * unit, frame.requiredEndAt);
             contact.round = { ...exchange, wrestlingMove: { ...window, end: resolve }, impact: elapsed, resolve, end: resolve }; exchange = contact.round;
           }
-          if ((window.kind === 'bulldog' && frame.recovered || frame.missed) && !sim.exits.has(exchange.victim)) fallback();
+          if (frame.missed && !sim.exits.has(exchange.victim)) fallback();
           else if (frame.recovered && window.contactAt === null && !sim.exits.has(exchange.victim)) fallback();
           arenaActionWords(exchange, elapsed).forEach(word => words.set(word.id, word.word));
-          if (window.kind === 'bulldog' && window.contactAt != null) words.set(exchange.victim, '그로기!');
+          if (frame.stage === 'groggy' || frame.stage === 'ankle-approach') words.set(exchange.victim, '그로기!');
           continue;
         }
       }
@@ -658,19 +649,23 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           contact.round = { ...exchange, contactSide: side, supermanPunch: { ...window, plannedLaunchAt: initial.plannedLaunchAt } }; exchange = contact.round;
         }
         let window = exchange.supermanPunch!, frame = arenaSupermanPunchTargets(window, elapsed, contact.center, contact.supermanPunchOrigins, exchange.contactSide);
-        if (window.launchAt === null && frame.canLaunch) {
+        const plantedForPunch = a.animation?.pose === 'guard' && a.animation.feet?.every(foot => foot.lift < .12 && !foot.swinging)
+          && a.animation.contactPoints?.feet.every(foot => Math.abs(foot.y - (a.y - 2 * driver.scale)) < .5);
+        if (window.launchAt === null && frame.canLaunch && (reset || plantedForPunch)) {
           contact.supermanPunchOrigins.launchOrigin = { ...frame.driver };
           window = { ...window, launchAt: elapsed };
           contact.round = { ...exchange, supermanPunch: window }; exchange = contact.round;
           frame = arenaSupermanPunchTargets(window, elapsed, contact.center, contact.supermanPunchOrigins, exchange.contactSide);
         }
-        a.x = frame.driver.x; a.y = frame.driver.y; a.facing = frame.driverFacing;
+        a.x = frame.driver.x; a.y = frame.driver.y; a.facing = frame.driverFacing; a.motorX = frame.driverVelocity.x; a.motorY = frame.driverVelocity.y;
         driver.x = a.x; driver.y = a.y - frame.height; driver.depthY = a.y; driver.facing = a.facing;
         driver.pose = frame.driverPose; driver.phase = frame.stage === 'land' ? frame.landProgress : frame.driverPhase; driver.angle = 0; driver.yaw = 0;
+        driver.supermanRun = frame.stage === 'approach'; driver.supermanLoad = frame.stage === 'load' ? frame.loadProgress : undefined;
         driver.supermanProgress = frame.driverPhase; driver.punchTarget = frame.punchTarget; driver.punchStrength = frame.punchStrength;
         driver.suspension = frame.suspension; driver.chargePreparation = frame.loadProgress * .4;
         driver.gripTarget = undefined; driver.secondaryGripTarget = undefined; driver.gripStrength = 0;
         prepareContactActor(driver);
+        driver.velocityX = frame.driverVelocity.x; driver.velocityY = frame.driverVelocity.y;
         if (victim && !sim.exits.has(exchange.victim)) {
           victim.x = frame.victim.x; victim.y = frame.victim.y; victim.depthY = frame.victim.y;
           victim.pose = 'guard'; victim.facing = -frame.side; victim.angle = 0;
@@ -787,6 +782,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             }
           }
         }
+        else if (frame.stage === 'rise') contact.slideTripOrigins.kickTarget = sampleArenaFighterContacts(victim, reduced ? 0 : clock).waist;
         words.set(exchange.aggressor, frame.stage === 'approach' ? '달려간다!' : frame.stage === 'slide' || frame.stage === 'hook' ? '슬라이딩!' : frame.stage === 'rise' ? '일어난다!' : frame.stage === 'kick' ? '발차기!' : '발걸기!');
         if (!reduced && frame.driverPose === 'slide') effects.push(() => dust(ctx, driver.x - frame.side * 20, driver.y, (elapsed - (window.launchAt ?? elapsed)) % 420, .5));
         continue;
@@ -855,7 +851,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             contact.round = { ...exchange, contactSide: side, linkedRush: { ...window, contactAt: elapsed, end: impact }, rushLaunchAt: window.launchAt, rushContactAt: elapsed, impact, resolve: impact + 1100 * unit, end: impact + 1100 * unit }; exchange = contact.round;
             if (!reduced) effects.push(() => clash(ctx, neck, 0, 1.2));
           } else {
-            for (const id of pairIds) words.set(id, window.launchAt == null ? '팔 뻗기!' : '더블 클로스라인!');
+            for (const id of pairIds) words.set(id, window.launchAt == null ? '팔 뻗기!' : '돌진!');
             continue;
           }
         }
@@ -976,8 +972,9 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             const body = sim.bodies.get(id)!, actor = actors.get(id)!, other = index ? a : partner;
             move(body, { x: contact.center.x + (index ? -1 : 1) * side * 22, y: contact.center.y + (index ? -6 : 6) }, seconds, 165);
             arenaFaceOpponent(body, other); actor.x = body.x; actor.y = body.y; actor.facing = body.facing;
-            actor.pose = Math.hypot(body.x - other.x, body.y - other.y) < 70 ? 'grapple' : 'walk';
-            actor.gripTarget = { x: other.x, y: other.y - 46 }; actor.secondaryGripTarget = { x: other.x - body.facing * 6, y: other.y - 43 }; actor.gripStrength = 1; actor.gripMode = 'waist';
+            const meeting = Math.hypot(body.x - other.x, body.y - other.y) < 70 && Math.abs(body.y - other.y) < 24;
+            actor.pose = meeting ? 'grapple' : 'walk';
+            actor.gripTarget = meeting ? { x: other.x, y: other.y - 46 } : undefined; actor.secondaryGripTarget = meeting ? { x: other.x - body.facing * 6, y: other.y - 43 } : undefined; actor.gripStrength = meeting ? 1 : 0; actor.gripMode = 'waist';
           }
           const charger = actors.get(exchange.victim)!;
           charger.pose = 'brace'; charger.chargePreparation = .9; charger.facing = contact.center.x >= v.x ? 1 : -1;
@@ -1092,9 +1089,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           const chargerId = exchange.rushOutcome === 'counter-throw' ? exchange.victim : exchange.aggressor, charger = sim.bodies.get(chargerId)!;
           contact.chargerOrigin = { x: charger.x, y: charger.y };
           const rush = arenaPairRushTargets(contact.round, elapsed, contact.center, contact.chargerOrigin);
-          contact.round = exchange.rushOutcome === 'counter-throw'
-            ? { ...contact.round, rushContactAt: rush.contactAt, impact: rush.requiredImpactAt, resolve: rush.requiredImpactAt + 1100 * unit, end: rush.requiredImpactAt + 1100 * unit }
-            : { ...contact.round, rushContactAt: rush.contactAt };
+          const impact = exchange.rushOutcome === 'counter-throw' ? rush.requiredImpactAt : Math.max(exchange.impact, rush.requiredImpactAt);
+          contact.round = { ...contact.round, rushContactAt: rush.contactAt, impact, resolve: impact + 1100 * unit, end: impact + 1100 * unit };
           exchange = contact.round;
         }
       }
@@ -1152,23 +1148,25 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       if (exchange.recovery) {
         const recovery = arenaRecoveryTargets(exchange, elapsed, contact.center)!;
         if (recovery.active) {
-          const target = actors.get(exchange.victim)!, thrower = actors.get(exchange.aggressor)!;
+          const throwerId = exchange.recovery.throwerId ?? exchange.aggressor;
+          const throwerBody = sim.bodies.get(throwerId)!;
+          const target = actors.get(exchange.victim)!, thrower = actors.get(throwerId)!;
           const overheadEscape = recovery.kind === 'overhead-escape';
-          const connected = Math.hypot(a!.x - v!.x, a!.y - v!.y) < 86;
-          for (const [body, actor, point] of [[a!, thrower, recovery.thrower], [v!, target, recovery.receiver]] as const) {
+          const connected = Math.hypot(throwerBody.x - v!.x, throwerBody.y - v!.y) < 86;
+          for (const [body, actor, point] of [[throwerBody, thrower, recovery.thrower], [v!, target, recovery.receiver]] as const) {
             if (reset && elapsed > 300 * unit || actor === target && recovery.airborne) { body.x = point.x; body.y = point.y; body.motorX = 0; body.motorY = 0; }
             else move(body, point, seconds, arenaApproachSpeed(Math.hypot(point.x - body.x, point.y - body.y)));
             actor.x = body.x; actor.y = body.y; actor.phase = recovery.phase;
             body.facing = actor === thrower ? recovery.side : -recovery.side; actor.facing = body.facing;
             actor.gripTarget = undefined; actor.secondaryGripTarget = undefined; actor.gripStrength = 0;
             actor.pose = recovery.stage === 'approach' ? Math.hypot(point.x - body.x, point.y - body.y) > 8 ? 'walk' : 'guard' : recovery.stage === 'hold' ? actor === thrower ? 'grapple' : 'brace' : actor === thrower ? recovery.grip ? 'lift' : recovery.throwPhase < 1 ? 'throw' : 'guard' : recovery.airborne ? 'airborne' : recovery.stage === 'land' ? 'land' : 'guard';
-            if (!overheadEscape && (recovery.stage === 'separate' || recovery.stage === 'release')) {
+            if (recovery.stage === 'separate' || recovery.stage === 'release') {
               const moving = Math.hypot(body.x - (before.get(actor.candidate.id)?.x ?? body.x), body.y - (before.get(actor.candidate.id)?.y ?? body.y)) > .2;
               actor.pose = moving ? actor === target ? 'run' : 'walk' : 'guard';
               body.facing = actor === target ? recovery.receiver.x >= recovery.thrower.x ? 1 : -1 : recovery.receiver.x >= body.x ? 1 : -1;
               actor.facing = body.facing;
             }
-            if (overheadEscape && recovery.stage !== 'approach') {
+            if (overheadEscape && !['approach', 'separate', 'release'].includes(recovery.stage)) {
               actor.pose = actor === thrower ? recovery.throwerPose as ArenaPose : recovery.receiverPose as ArenaPose;
               if (actor === thrower) { actor.overheadRaise = recovery.overheadRaise; actor.grappleEffort = recovery.throwerEffort; actor.grappleLiftPreparation = recovery.liftPreparation; actor.angle = -recovery.side * .12 * (recovery.throwerBalance ?? 0); }
               else { actor.slamProgress = recovery.receiverSlam; actor.jumpTuck = recovery.jumpTuck; actor.suspension = recovery.suspension; actor.grappleEffort = recovery.receiverEffort; }
@@ -1184,10 +1182,16 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           if (recovery.airborne) words.set(exchange.victim, overheadEscape ? '점프 탈출!' : '공중 한 바퀴!');
           else if (recovery.stage === 'land' || recovery.stage === 'release') words.set(exchange.victim, '착지! 살았다!');
           else if (recovery.stage === 'separate') words.set(exchange.victim, '거리 벌리기!');
-          if (!overheadEscape && (recovery.airborne || recovery.stage === 'land')) words.set(exchange.aggressor, '던지기!');
+          if (!overheadEscape && ['hold', 'lift', 'somersault', 'land'].includes(recovery.stage)) words.set(throwerId, '던지기!');
           continue;
         }
         if (!contact.recoveryFinished && elapsed >= exchange.recovery.end) {
+          const oldThrower = exchange.recovery.throwerId;
+          if (oldThrower && oldThrower !== exchange.aggressor) {
+            v!.separatedFrom = oldThrower; v!.roam = undefined;
+            const former = sim.bodies.get(oldThrower);
+            if (former) { former.separatedFrom = exchange.victim; former.roam = undefined; former.restUntil = elapsed + 800 * unit; }
+          }
           contact.recoveryFinished = true; contact.center = arenaLocalContact({ x: (a!.x + v!.x) / 2, y: (a!.y + v!.y) / 2 }, []);
           contact.round = arenaContactRound(contact.round, contact.center, { aggressor: a!, victim: v! }); exchange = contact.round; contact.metAt = undefined; contact.committed = false;
         }
@@ -1256,7 +1260,17 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           exchange = { ...exchange, suplexGripAt: elapsed }; contact.round = exchange;
         }
       }
-      const center = contact.center, action = arenaAction(exchange, elapsed);
+      if (exchange.tactic === 'catch' && exchange.chargeSetup?.contactAt === undefined && exchange.chargeSetup) {
+        const span = Math.max(1, exchange.impact - exchange.start);
+        const contactAt = reset && elapsed >= exchange.start + span * .55 ? exchange.start + span * .55 : null;
+        contact.round = { ...exchange, chargeSetup: { ...exchange.chargeSetup, contactAt, loadDuration: Math.max(180, span * .12), turnDuration: Math.max(300, span * .28) } };
+        exchange = contact.round;
+      }
+      const center = contact.center;
+      const waitingForCatch = exchange.tactic === 'catch' && exchange.chargeSetup?.contactAt === null;
+      // A slow frame can arrive after the planned finish while the incoming
+      // fighter is still approaching. Keep receiving the real body first.
+      const action = arenaAction(exchange, waitingForCatch ? Math.min(elapsed, exchange.impact - .001) : elapsed);
       const charge = exchange.tactic === 'bait' ? arenaChargeTargets(exchange, elapsed, center) : undefined;
       const edge = exchange.tactic === 'edge' ? arenaEdgeTargets(exchange, elapsed, center) : undefined;
       const caught = exchange.tactic === 'catch' ? arenaCatchTargets(exchange, elapsed, center) : undefined;
@@ -1356,6 +1370,11 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         actor.chargeStrength = ram && part.id === exchange.aggressor && (ram.stage === 'charge' || ram.stage === 'contact') ? 1 : part.id === exchange.victim && (charge && charge.stage !== 'prepare' || caught?.stage === 'charge') ? 1 : 0;
         actor.gripTarget = undefined; actor.secondaryGripTarget = undefined; actor.gripLocked = false;
         actor.gripMode = technique?.grip ?? (spin ? 'waist' : undefined);
+        if (caught) {
+          actor.angle = part.id === exchange.victim ? caught.chargerAngle : caught.receiverAngle;
+          if (part.id === exchange.aggressor) { actor.pose = caught.gripStrength > 0 ? caught.turn > 0 ? 'lift' : 'grapple' : 'brace'; actor.grappleEffort = caught.load * .65; actor.grappleLiftPreparation = caught.load * (1 - caught.turn); actor.gripMode = 'waist'; }
+          else if (part.id === exchange.victim && caught.gripStrength > 0) { actor.pose = 'held'; actor.suspension = 1; }
+        }
         if (technique) {
           actor.grappleEffort = part.id === exchange.victim ? technique.victimEffort : technique.aggressorEffort;
           actor.grappleLiftPreparation = part.id === exchange.aggressor ? technique.aggressorLiftPreparation : undefined;
@@ -1467,17 +1486,21 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         }
         return Math.hypot(body.x - targetBody.x, body.y - targetBody.y) < (rush?.grip === 'arms-legs' ? 160 : ram ? 50 : 86);
       }) : false;
-      const heldLift = lifted && connections ? action.lift : 0;
+      const heldLift = lifted && connections ? caught ? caught.height : action.lift : 0;
       if (lifted && action.liftedId && !sim.exits.has(action.liftedId)) {
         lifted.y -= heldLift;
-        lifted.angle = reduced ? 0 : rush ? rush.victimAngle : technique ? technique.victimAngle : ram ? ram.side * .36 * ram.impact : -.22 * clamp(heldLift / 52);
+        lifted.angle = reduced ? 0 : caught ? caught.chargerAngle : rush ? rush.victimAngle : technique ? technique.victimAngle : ram ? ram.side * .36 * ram.impact : -.22 * clamp(heldLift / 52);
         if (rush?.outcome === 'counter-throw') lifted.pose = 'carried';
         else if (technique?.victimPose) lifted.pose = technique.victimPose;
         else if (heldLift > 5) lifted.pose = spin && action.liftedId === exchange.victim || technique && exchange.tactic === 'armspin' ? 'held' : 'airborne';
       }
       action.actors.forEach(part => {
         const actor = actors.get(part.id), other = part.gripId ? actors.get(part.gripId) : undefined;
-        if (!actor || !other || actor.pose === 'walk' || actor.pose === 'run' || Math.hypot(other.x - actor.x, other.y - actor.y) > 100) return;
+        if (!actor || !other || actor.pose === 'walk' || actor.pose === 'run') return;
+        const groundGap = Math.hypot(other.x - actor.x, (other.depthY ?? other.y) - (actor.depthY ?? actor.y));
+        const groundDepth = Math.abs((other.depthY ?? other.y) - (actor.depthY ?? actor.y));
+        if (!technique && !spin && (groundGap > 82 || groundDepth > 18)) return;
+        if (groundGap > 100) return;
         const nearSide = other.x > actor.x ? -1 : 1;
         actor.gripStrength = ease((88 - Math.hypot(other.x - actor.x, other.y - actor.y)) / 26);
         actor.gripTarget = { x: other.x + nearSide * 17, y: other.y - 44 };
@@ -1505,6 +1528,25 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           actor.secondaryGripTarget = { x: actor.gripTarget.x - actor.facing * 6, y: actor.gripTarget.y + 3 }; actor.gripLocked = true;
         }
       });
+      if (caught && a && v && (waitingForCatch || elapsed < exchange.impact)) {
+        const receiver = actors.get(exchange.aggressor)!, charger = actors.get(exchange.victim)!;
+        const gap = Math.hypot(a.x - v.x, a.y - v.y), depth = Math.abs(a.y - v.y);
+        if (gap < 60 && depth < 18) {
+          prepareContactActor(charger); prepareContactActor(receiver);
+          const waist = sampleArenaFighterContacts(charger, reduced ? 0 : clock).waist;
+          receiver.gripTarget = waist; receiver.secondaryGripTarget = { x: waist.x - receiver.facing * 6, y: waist.y + 3 };
+          receiver.gripStrength = caught.gripStrength || ease((60 - gap) / 18); receiver.gripLocked = true; receiver.gripMode = 'waist';
+          if (exchange.chargeSetup?.contactAt === null) {
+            const hands = sampleArenaFighterContacts(receiver, reduced ? 0 : clock).hands;
+            if (hands.every((hand, arm) => Math.hypot(hand.x - (arm ? waist.x : receiver.secondaryGripTarget!.x), hand.y - (arm ? waist.y : receiver.secondaryGripTarget!.y)) < 7)) {
+              const span = Math.max(1, exchange.impact - exchange.start), loadDuration = Math.max(180, span * .12), turnDuration = Math.max(300, span * .28);
+              const impact = elapsed + loadDuration + turnDuration;
+              contact.round = { ...exchange, chargeSetup: { ...exchange.chargeSetup, contactAt: elapsed, contactCharger: { x: v.x, y: v.y }, contactReceiver: { x: a.x, y: a.y }, loadDuration, turnDuration }, impact, resolve: impact + 1100 * unit, end: impact + 1100 * unit };
+              exchange = contact.round;
+            }
+          }
+        }
+      }
       if (technique && exchange.tactic === 'elbow' && technique.elbowContact > 0) {
         const striker = actors.get(exchange.aggressor)!, target = actors.get(exchange.victim)!;
         prepareContactActor(target); striker.elbowTarget = sampleArenaFighterContacts(target, reduced ? 0 : clock).head;
@@ -1609,6 +1651,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         if (elapsed < exchange.start + (exchange.impact - exchange.start) * contactPhase) contact.round = { ...contact.round, start: (elapsed - contactPhase * exchange.impact) / (1 - contactPhase) };
       }
       if (!exchange.exchange && !['trip', 'sidekick'].includes(exchange.tactic) && elapsed >= exchange.impact
+        && !waitingForCatch
         && (!rush || rush.outcome !== 'counter-throw' || !rush.waitingForGrip && elapsed >= rush.requiredImpactAt)) arenaEliminatedIds(exchange).forEach(id => {
         if (sim.exits.has(id)) return;
         const body = sim.bodies.get(id), victim = actors.get(id), exitRound = id === exchange.victim ? exchange : { ...exchange, victim: id, secondaryVictim: undefined };
@@ -1625,7 +1668,6 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           sim.exits.set(id, exit);
         }
       });
-      if (!mini) effects.push(() => relationship(ctx, exchange, elapsed, actors, false, sim.bodies));
       if (rush && !rush.waitingForGrip && rush.pairIds.every(id => actors.has(id)) && actors.has(rush.chargerId) && elapsed >= rush.contactAt && elapsed - rush.contactAt < 320 * unit) {
         const charger = actors.get(rush.chargerId)!, pair = rush.pairIds.map(id => actors.get(id)!);
         const shoulder = sampleArenaFighterContacts(charger, reduced ? 0 : clock).shoulders[1];
@@ -1684,7 +1726,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     const doubleRush = exit.round.rushOutcome === 'double-out';
     const stagger = doubleRush && id === exit.round.helper ? 70 * unit : 0;
     const age = Math.max(0, elapsed - launchedAt - stagger) + (exit.round.tactic === 'sidekick' && !exit.round.kickCatch && !exit.round.wrestlingMove ? 40 * unit : 0);
-    const pairFlight = exit.round.rushOutcome === 'counter-throw' || exit.round.passingTrip ? arenaPairRushFlight(age, exit.origin, exit.landing, exit.side, unit, { lift: exit.lift, angle: exit.angle }) : undefined;
+    const pairFlight = exit.round.rushOutcome === 'counter-throw' || exit.round.passingTrip ? arenaPairRushFlight(age, exit.origin, exit.landing, exit.side, unit, { lift: exit.lift, angle: exit.angle, relax: exit.round.rushOutcome === 'counter-throw' }) : undefined;
     const dodge = exit.dodgeFall && exit.round.pairDodge ? arenaPairDodgeTargets(exit.round.pairDodge, elapsed, exit.dodgeFall.center, exit.dodgeFall.origins, unit) : undefined;
     const dodgeAge = dodge ? elapsed - dodge.requiredEndAt : 0;
     const dodgeFlight = dodge ? { x: dodge.charger.x, y: dodge.charger.y - dodge.chargerHeight, groundX: dodge.charger.x, groundY: dodge.charger.y, height: dodge.chargerHeight, angle: dodge.chargerAngle * (1 - ease(dodgeAge / (500 * unit))), phase: clamp(age / (650 * unit)), stage: dodgeAge < 0 ? 'fall' as const : dodgeAge < 220 * unit ? 'land' as const : dodgeAge < 720 * unit ? 'recover' as const : 'walk' as const } : undefined;
@@ -1705,10 +1747,18 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       }
     }
     else { body.x = flight.x; body.y = reduced && flight.stage === 'flight' ? flight.groundY - flight.height * .28 : flight.y; }
-    const actor: ArenaActor = { candidate: props.candidates[index], index, x: body.x, y: body.y, depthY: flight.stage === 'walk' ? body.y : flight.groundY, scale: 2.04, facing: body.facing, pose, angle: reduced ? 0 : flight.stage === 'walk' ? 0 : flight.angle, yaw: reduced ? 0 : 'yaw' in flight ? flight.yaw : 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: body.gait, phase: flight.phase, chargePreparation: exit.round.tactic === 'bait' && flight.stage === 'overrun' ? 1 : 0, chargeStrength: exit.round.tactic === 'bait' && flight.stage === 'overrun' ? 1 : 0 };
+    const actor: ChoreographedActor = { candidate: props.candidates[index], index, x: body.x, y: body.y, depthY: flight.stage === 'walk' ? body.y : flight.groundY, scale: 2.04, facing: body.facing, pose, angle: reduced ? 0 : flight.stage === 'walk' ? 0 : flight.angle, yaw: reduced ? 0 : 'yaw' in flight ? flight.yaw : 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: body.gait, phase: flight.phase, chargePreparation: exit.round.tactic === 'bait' && flight.stage === 'overrun' ? 1 : 0, chargeStrength: exit.round.tactic === 'bait' && flight.stage === 'overrun' ? 1 : 0 };
+    if (dodge?.rearExit && flight.stage !== 'walk') {
+      actor.rearExitCutoff = dodge.exitRim!.y + 3;
+      actor.scale *= 1 - .16 * dodge.exitProgress * (1 - ease(dodgeAge / (720 * unit)));
+      if (dodgeAge < 0) effects.push(() => {
+        dust(ctx, dodge.exitRim!.x, dodge.exitRim!.y, age / unit, .7);
+        text(ctx, '장외!', dodge.exitRim!.x, dodge.exitRim!.y - 30, 17, '#ffe2a2', 90);
+      });
+    }
     if (pairFlight && flight.stage !== 'walk') {
       actor.pose = pairFlight.pose; actor.suspension = pairFlight.suspension; actor.facing = exit.heldFacing ?? pairFlight.facing; actor.carryStretch = pairFlight.carryStretch;
-      if (exit.round.rushOutcome === 'counter-throw') actor.carrySupport = 'shoulder';
+      if (exit.round.rushOutcome === 'counter-throw') { actor.carrySupport = 'shoulder'; actor.carryFlight = flight.stage === 'flight' ? pairFlight.phase : flight.stage === 'land' ? 1 : undefined; }
     }
     if (exit.round.tactic === 'suplex' && (flight.stage === 'stunned' || flight.stage === 'drag')) actor.slamProgress = { tuck: 1, slump: 1 };
     if (exit.spinSnapshot) actor.spinRelease = { snapshot: exit.spinSnapshot, weight: flight.stage === 'hold' ? 1 : flight.stage === 'flight' ? 1 - ease(flight.phase) : 0 };
@@ -1788,7 +1838,6 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     body.animation ??= createArenaFighterAnimation();
     actor.animation = body.animation;
   }
-  const finalRound = rounds.at(-1);
   for (const id of elbowKnockouts) {
     const victim = actors.get(id);
     if (!victim || victim.pose !== 'stunned') continue;
@@ -1801,7 +1850,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       }
     });
   }
-  const camera = sampleArenaCamera(sim.camera, { elapsed, final: !props.preview && !!finalRound && elapsed >= finalRound.start && elapsed < finalRound.resolve, fighters: order.slice(0, 2).map(id => actors.get(id)!).filter(Boolean), width: W, height: H, delta: props.paused ? 0 : delta, immediate: reset || reduced });
+  const camera = sampleArenaCamera(sim.camera, { elapsed, final: !props.preview && !!exchange?.final && elapsed >= exchange.start && elapsed < exchange.resolve, fighters: order.slice(0, 2).map(id => actors.get(id)!).filter(Boolean), width: W, height: H, delta: props.paused ? 0 : delta, immediate: reset || reduced });
   ctx.save(); ctx.translate(W / 2 + collisionShake, H / 2 + collisionShake * .35); ctx.scale(camera.zoom, camera.zoom); ctx.translate(-camera.x, -camera.y);
   drawArenaScenery(ctx, clock, { intensity: exchange?.tactic === 'team' || exchange?.tactic === 'betrayal' ? .8 : .35, reduced });
   effects.forEach(draw => draw());
@@ -1831,7 +1880,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   const wordBoxes: { x: number; y: number; width: number }[] = [];
   if (!won) for (const [id, word] of words) {
     const actor = actors.get(id), head = actor?.animation?.contactPoints?.head;
-    if (!actor || actor.pose === 'walk' || sim.exits.has(id) && !(word === '구르기!' && actor.pose === 'roll')) continue;
+    const callingAlly = ['이리 와!', '도와줘!', '갈게!', '같이 하자!', '좋아!'].includes(word);
+    if (!actor || actor.pose === 'walk' && !callingAlly || sim.exits.has(id) && !(word === '구르기!' && actor.pose === 'roll')) continue;
     const x = head?.x ?? actor.x, top = (head?.y ?? actor.y - 120) - 22;
     ctx.save(); ctx.font = '800 14px "Malgun Gothic", sans-serif';
     const width = ctx.measureText(word).width + 8; let y = top;
@@ -1850,23 +1900,33 @@ export default function ArenaShow(props: SportsStageProps) {
   const [sceneFrame, setSceneFrame] = useState<{ key: string; round?: ArenaRound; rounds: ArenaRound[] }>();
   useEffect(() => { sampledAt.current = performance.now(); }, [props.elapsed, props.paused, props.preview]);
   useEffect(() => {
-    const element = canvas.current, ctx = element?.getContext('2d');
-    if (!element || !ctx) return;
+    const element = canvas.current;
+    if (!element) return;
+    const buffer = document.createElement('canvas');
     const sim: Simulation = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() };
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let request = 0, previous = 0, clock = 0, narrationKey = '';
+    let request = 0, previous = 0, clock = 0, narrationKey = '', lastFrameError = '';
     const draw = (now: number) => {
       const state = latest.current, delta = previous ? Math.min(50, Math.max(0, now - previous)) : 16;
       previous = now; if (!state.paused && !media.matches) clock += delta;
       const box = element.getBoundingClientRect(), ratio = Math.min(2, window.devicePixelRatio || 1);
       const width = Math.max(1, Math.round(box.width * ratio)), height = Math.max(1, Math.round(box.height * ratio));
-      if (element.width !== width || element.height !== height) { element.width = width; element.height = height; }
-      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#172b34'; ctx.fillRect(0, 0, width, height);
       const scale = Math.min(width / W, height / H);
-      ctx.setTransform(scale, 0, 0, scale, (width - W * scale) / 2, (height - H * scale) / 2); ctx.imageSmoothingEnabled = false;
       const elapsed = clamp(state.elapsed + (state.paused || state.preview ? 0 : Math.min(80, Math.max(0, now - sampledAt.current))), 0, state.duration);
-      const frameRound = render(ctx, state, elapsed, clock, sim, state.paused ? 0 : delta, media.matches);
-      const frameKey = [sim.key, sim.epoch, ...(frameRound ? [frameRound.id, frameRound.tactic, frameRound.aggressor, frameRound.victim, frameRound.helper, frameRound.rushOutcome, frameRound.rushLaunchAt, frameRound.rushContactAt, frameRound.pushContactAt, frameRound.sidekickLaunchAt, frameRound.suplexGripAt, frameRound.wrestlingMove?.kind, frameRound.wrestlingMove?.launchAt, frameRound.wrestlingMove?.contactAt, frameRound.wrestlingMove?.releaseAt, frameRound.wrestlingMove?.kickAt, frameRound.wrestlingMove?.ankleGripAt, frameRound.kickCatch?.launchAt, frameRound.kickCatch?.catchAt, frameRound.rimPush, frameRound.supermanPunch?.launchAt, frameRound.supermanPunch?.hitAt, frameRound.slideTrip?.launchAt, frameRound.slideTrip?.hookAt, frameRound.slideTrip?.kickAt, frameRound.slideTrip?.jumpAt, frameRound.slideTrip?.passAt, frameRound.slideTrip?.evade, frameRound.slideTrip?.plannedLaunchAt, frameRound.linkedRush?.launchAt, frameRound.linkedRush?.contactAt, frameRound.pairDodge?.launchAt, frameRound.pairDodge?.contactAt, frameRound.pairDodge?.outcome, frameRound.pairDodge?.end, frameRound.passingTrip?.start, frameRound.passingTrip?.hookAt, frameRound.passingTrip?.launchAt, frameRound.passingTrip?.joined, frameRound.passingTrip?.end, frameRound.rim?.contactAt, frameRound.rim?.outcome, frameRound.rim?.start, frameRound.rim?.end, frameRound.rimCharge?.outcome, frameRound.rimCharge?.start, frameRound.rimCharge?.end, frameRound.start, frameRound.impact, frameRound.resolve, state.arenaEscapeSeed, frameRound.escape?.ungripped] : [])].join(':');
+      const frame = presentArenaCanvasFrame(element, buffer, width, height, ctx => {
+        ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.fillStyle = '#172b34'; ctx.fillRect(0, 0, width, height);
+        ctx.setTransform(scale, 0, 0, scale, (width - W * scale) / 2, (height - H * scale) / 2); ctx.imageSmoothingEnabled = false;
+        return render(ctx, state, elapsed, clock, sim, state.paused ? 0 : delta, media.matches);
+      });
+      if (!frame.ok) {
+        const message = frame.error instanceof Error ? frame.error.message : String(frame.error);
+        if (message !== lastFrameError) console.error('Arena frame could not be painted', frame.error);
+        lastFrameError = message; sim.key = '';
+        request = requestAnimationFrame(draw); return;
+      }
+      lastFrameError = '';
+      const frameRound = frame.value;
+      const frameKey = [sim.key, sim.epoch, ...(frameRound ? [frameRound.id, frameRound.tactic, frameRound.aggressor, frameRound.victim, frameRound.helper, frameRound.rushOutcome, frameRound.rushLaunchAt, frameRound.rushContactAt, frameRound.pushContactAt, frameRound.sidekickLaunchAt, frameRound.suplexGripAt, frameRound.chargeSetup?.contactAt, frameRound.wrestlingMove?.kind, frameRound.wrestlingMove?.launchAt, frameRound.wrestlingMove?.contactAt, frameRound.wrestlingMove?.releaseAt, frameRound.wrestlingMove?.kickAt, frameRound.wrestlingMove?.ankleGripAt, frameRound.kickCatch?.launchAt, frameRound.kickCatch?.catchAt, frameRound.rimPush, frameRound.supermanPunch?.launchAt, frameRound.supermanPunch?.hitAt, frameRound.slideTrip?.launchAt, frameRound.slideTrip?.hookAt, frameRound.slideTrip?.kickAt, frameRound.slideTrip?.jumpAt, frameRound.slideTrip?.passAt, frameRound.slideTrip?.evade, frameRound.slideTrip?.plannedLaunchAt, frameRound.linkedRush?.launchAt, frameRound.linkedRush?.contactAt, frameRound.pairDodge?.launchAt, frameRound.pairDodge?.contactAt, frameRound.pairDodge?.outcome, frameRound.pairDodge?.end, frameRound.passingTrip?.start, frameRound.passingTrip?.hookAt, frameRound.passingTrip?.launchAt, frameRound.passingTrip?.joined, frameRound.passingTrip?.end, frameRound.rim?.contactAt, frameRound.rim?.outcome, frameRound.rim?.start, frameRound.rim?.end, frameRound.rimCharge?.outcome, frameRound.rimCharge?.start, frameRound.rimCharge?.end, frameRound.start, frameRound.impact, frameRound.resolve, state.arenaEscapeSeed, frameRound.escape?.ungripped] : [])].join(':');
       if (frameKey !== narrationKey) {
         narrationKey = frameKey;
         setSceneFrame({ key: sim.key, round: frameRound, rounds: [...sim.contacts.values()].filter(contact => sceneTimed(contact.round) || contact.slideTripOrigins || contact.kickCatchOrigins || contact.wrestlingMoveOrigins || contact.supermanPunchOrigins).map(contact => contact.round) });

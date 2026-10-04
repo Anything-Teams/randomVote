@@ -25,6 +25,7 @@ const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1]
 const project = (matrix, point) => ({ x: matrix[0] * point.x + matrix[2] * point.y + matrix[4], y: matrix[1] * point.x + matrix[3] * point.y + matrix[5] });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const order = ['1', '2', '3', '4', '5'];
+const rareOrder = ['1', '3', '2', '4', '5'];
 const duration = 44000, rushRoll = 7;
 
 function context() {
@@ -79,9 +80,9 @@ const points = contacts => [contacts.origin, contacts.head, contacts.waist, ...c
 const intersectsViewport = values => Math.max(...values.map(point => point.x)) > 0 && Math.min(...values.map(point => point.x)) < 1000 && Math.max(...values.map(point => point.y)) > 0 && Math.min(...values.map(point => point.y)) < 620;
 
 for (const frameDelta of [16, 50]) for (const mirrored of [false, true]) test(`a rare kick catch makes ankle contact, completes one full turn and preserves the drawn loser (${mirrored ? 'mirrored' : 'ordinary'}, ${frameDelta}ms frames)`, () => {
-  const seed = 17, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.kickCatch);
+  const seed = 17, planned = arenaRounds(rareOrder, duration, rushRoll, seed).find(round => round.kickCatch);
   assert.ok(planned);
-  const scene = game(seed, false, mirrored, ['4', '1', '2', '5', '3'], order, frameDelta);
+  const scene = game(seed, false, mirrored, ['4', '1', '2', '5', '3'], rareOrder, frameDelta);
   let jumped = false, caught = false, spun = false, released = false, resolved = false, maxTurn = 0, priorTurn = 0;
   let caughtAt, priorKicker, releaseSnapshot;
   for (let elapsed = 0; elapsed < 14000; elapsed += frameDelta) {
@@ -126,7 +127,7 @@ for (const frameDelta of [16, 50]) for (const mirrored of [false, true]) test(`a
 });
 
 test('a geometry-ineligible kick catch resumes a complete ordinary deciding bout', () => {
-  const scene = game(17), planned = arenaRounds(order, duration, rushRoll, 17).find(round => round.kickCatch);
+  const scene = game(17, false, false, undefined, rareOrder), planned = arenaRounds(rareOrder, duration, rushRoll, 17).find(round => round.kickCatch);
   scene.step(0);
   assert.equal(scene.sim.contacts.get(planned.id).round.kickCatch, undefined, 'a distant diagonal layout cannot invent foot contact');
   for (let elapsed = 16; elapsed < planned.resolve + 3000; elapsed += 16) scene.step(elapsed);
@@ -134,8 +135,8 @@ test('a geometry-ineligible kick catch resumes a complete ordinary deciding bout
 });
 
 test('a two-fighter final kick catch finishes with the catcher inside and the drawn winner on the podium', () => {
-  const finalOrder = ['2', '1'], scene = game(17, false, false, ['1', '2'], finalOrder);
-  const planned = arenaRounds(finalOrder, duration, rushRoll, 17).at(-1);
+  const finalOrder = ['2', '1'], seed = 1611, scene = game(seed, false, false, ['1', '2'], finalOrder);
+  const planned = arenaRounds(finalOrder, duration, rushRoll, seed).at(-1);
   assert.ok(planned.kickCatch);
   let caught = false, exit;
   for (let elapsed = 0; elapsed <= 12000; elapsed += 16) {

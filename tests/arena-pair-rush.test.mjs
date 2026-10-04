@@ -154,7 +154,7 @@ test('both holders keep both painted shoulder and toe endpoints attached from th
           const upper = distance(shoulder, elbow), lower = distance(hand, elbow);
           const cosine = ((shoulder.x - elbow.x) * (hand.x - elbow.x) + (shoulder.y - elbow.y) * (hand.y - elbow.y)) / (upper * lower);
           assert.ok(Math.acos(Math.max(-1, Math.min(1, cosine))) > 145 * Math.PI / 180, `${side}/${bodyIndex}/${id}/${arm}: a raised carrier cannot fold one arm across their head`);
-          assert.ok(Math.abs(upper / 2.04 - 14) < .001 && Math.abs(lower / 2.04 - 14) < .001, 'contact does not stretch either upper arm or forearm');
+          assert.ok(Math.abs(upper / 2.04 - 11) < .001 && Math.abs(lower / 2.04 - 10.5) < .001, 'contact does not stretch either upper arm or forearm');
         }
       }
     }

@@ -13,6 +13,7 @@ export type ArenaPairDodgeFrame = {
   chargerFacing: 1 | -1; chargeDirection: ArenaPoint;
   launchAt: number | null; runAt: number; contactAt: number; requiredEndAt: number; outAt?: number;
   chargerHeight: number; chargerAngle: number; chargePreparation: number; chargeStrength: number;
+  rearExit: boolean; exitRim?: ArenaPoint; exitProgress: number;
 };
 
 export const ARENA_PAIR_DODGE_SPEED = 162;
@@ -129,9 +130,12 @@ export function arenaPairDodgeTargets(window: ArenaPairDodgeWindow, elapsed: num
   const pairAngle = jumpPhases.map((p, index) => p === 0 || p === 1 ? 0 : (index === 0 ? -.12 : .12) * Math.sin(Math.PI * p)) as [number, number];
   const postAge = Math.max(0, elapsed - contactAt);
   let charger = !started ? { ...initial.charger } : elapsed < contactAt ? advance(initial.charger, direction, runTravel(elapsed - runAt)) : advance(contactPoint, direction, window.outcome === 'out' ? postTravel(postAge) : stopTravel(postAge));
-  let chargerHeight = 0, chargerAngle = 0;
+  let chargerHeight = 0, chargerAngle = 0, exitProgress = 0;
+  const exitRim = outAt !== undefined ? advance(contactPoint, direction, forwardToRim) : undefined;
+  const rearExit = outAt !== undefined && direction.y < -.4;
   if (outAt !== undefined && elapsed >= outAt && started) {
     const fall = clamp((elapsed - outAt) / (650 * timeUnit));
+    exitProgress = fall;
     const rim = advance(contactPoint, direction, forwardToRim);
     // Carry the incoming velocity beyond the same rim point before settling outside.
     const carried = postTravel(outAt - contactAt + Math.min(elapsed - outAt, 650 * timeUnit)) - forwardToRim;
@@ -146,5 +150,6 @@ export function arenaPairDodgeTargets(window: ArenaPairDodgeWindow, elapsed: num
   return { stage, active: elapsed >= window.start && !released, released, charger, pair, jumpHeight, jumpTuck, pairAngle,
     chargerFacing: (Math.abs(direction.x) > .001 ? direction.x > 0 ? 1 : -1 : direction.y >= 0 ? 1 : -1), chargeDirection: direction,
     launchAt, runAt, contactAt, requiredEndAt, outAt, chargerHeight, chargerAngle,
-    chargePreparation: preparation, chargeStrength: started && elapsed >= runAt && elapsed < contactAt && distance > 1 ? ease((elapsed - runAt) / Math.max(1, runRamp)) : 0 };
+    chargePreparation: preparation, chargeStrength: started && elapsed >= runAt && elapsed < contactAt && distance > 1 ? ease((elapsed - runAt) / Math.max(1, runRamp)) : 0,
+    rearExit, exitRim, exitProgress };
 }

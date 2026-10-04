@@ -185,8 +185,8 @@ test('sampled holder placement keeps both shoulders and both ankles supported th
       for (let arm = 0; arm < 2; arm++) {
         assert.ok(distance(contacts.hands[arm], endpoints[1 - arm]) < .001, `${side}/${index}/${raise}/${gripMode}/${arm}: both actual hands stay on the supported shoulders or ankles`);
         const shoulder = local(contacts.shoulders[arm]), elbow = local(contacts.elbows[arm]), hand = local(contacts.hands[arm]);
-        assert.ok(Math.abs(distance(shoulder, elbow) - (11 + raise * 3)) < .001);
-        assert.ok(Math.abs(distance(elbow, hand) - (10.5 + raise * 3.5)) < .001);
+        assert.ok(Math.abs(distance(shoulder, elbow) - 11) < .001);
+        assert.ok(Math.abs(distance(elbow, hand) - 10.5) < .001);
         if (raise === 1) {
           const ux = shoulder.x - elbow.x, uy = shoulder.y - elbow.y, vx = hand.x - elbow.x, vy = hand.y - elbow.y;
           assert.ok(Math.acos((ux * vx + uy * vy) / (distance(shoulder, elbow) * distance(elbow, hand))) > 145 * Math.PI / 180);
@@ -212,7 +212,7 @@ test('a nearby preferred ground stays within normal step speed while the synchro
         if (previous[end]) assert.ok(distance(ground, previous[end]) / .016 < 165, `${side}/${index}/${age}/${end}: anatomical grip preservation cannot force a faster than normal ground step`);
         Object.assign(holder, ground, { gripTarget: endpoints[0], secondaryGripTarget: endpoints[1], gripStrength: 1, gripLocked: true });
         const actual = sampleArenaFighterContacts(holder, age);
-        actual.hands.forEach((hand, arm) => assert.ok(distance(hand, endpoints[1 - arm]) < .001));
+        actual.hands.forEach((hand, arm) => assert.ok(distance(hand, endpoints[1 - arm]) < .001, `${side}/${index}/${age}/${end}/${arm}: actual anatomical hand gap ${distance(hand, endpoints[1 - arm])}`));
         previous[end] = ground;
       }
     }

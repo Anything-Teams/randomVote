@@ -102,7 +102,7 @@ for (const reversed of [false, true]) test(`the live overhead joint throw inheri
       }
       const age = elapsed - (exit.launchedAt ?? exit.round.impact);
       if (age < 880 * actualRound.timeScale) {
-        assert.equal(now.pose, 'carried'); assert.ok(Math.abs(now.angle - exit.angle) < 1e-8);
+        assert.equal(now.pose, 'carried'); assert.ok(Math.abs(now.angle - exit.angle) <= .121, 'the released torso relaxes through one small tilt, without a full spin');
         assert.ok(Math.abs(now.height - (exit.lift + 220 * (age / (880 * actualRound.timeScale)) - (exit.lift + 220) * (age / (880 * actualRound.timeScale)) ** 2)) < .001, 'the actual Scene uses the preserved height on one constant-gravity arc');
         if (lastClock !== undefined && lastHeight !== undefined) {
           if (now.height > lastHeight + .01) { assert.equal(falling, false, 'the released victim cannot bounce upward again'); rising = true; }
@@ -156,7 +156,7 @@ for (const reversed of [false, true]) test(`the live pair counter stops at the n
           assert.equal(actors.get(id).gripMode, id === frame.armsHolderId ? 'shoulder' : 'ankle');
           const hands = actors.get(id).animation.contactPoints.hands;
           endpoints.forEach(endpoint => assert.ok(Math.min(...hands.map(hand => distance(hand, endpoint))) < 4, `both helpers keep their actual shoulder/ankle holds throughout the supported lift: ${detail}/${id}`));
-          if (frame.stage === 'overhead') assert.ok(victim.animation.contactPoints.waist.y < actors.get(id).animation.contactPoints.head.y, `the shoulder-supported body clears both carrier heads at the peak: ${detail}/${id}`);
+          if (frame.stage === 'overhead') assert.ok(victim.animation.contactPoints.waist.y < actors.get(id).animation.contactPoints.head.y, `the shoulder-supported body clears both carrier heads at the peak: ${detail}/${id}: waist ${victim.animation.contactPoints.waist.y}, head ${actors.get(id).animation.contactPoints.head.y}`);
         }
       }
     }

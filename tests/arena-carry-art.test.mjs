@@ -63,7 +63,7 @@ test('the two overhead helpers lift with extended supported arms instead of fold
         const angle = Math.acos(Math.max(-1, Math.min(1, (a.x * b.x + a.y * b.y) / (Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y))))) * 180 / Math.PI;
         assert.ok(angle > 145, `the supported elbow stays nearly extended instead of overfolding: ${gripMode}, ${index}, ${angle}`);
         assert.ok(distance(hand, ends[1 - arm]) < .001, 'straightening an arm cannot detach its actual limb hold');
-        assert.ok(Math.abs(distance(shoulder, elbow) - 14 * body.scale) < .001 && Math.abs(distance(elbow, hand) - 14 * body.scale) < .001, 'the extended arm remains two complete connected sections');
+        assert.ok(Math.abs(distance(shoulder, elbow) - 11 * body.scale) < .001 && Math.abs(distance(elbow, hand) - 10.5 * body.scale) < .001, 'the extended arm retains its ordinary anatomical lengths');
       }
       assert.ok(body.animation.feet.every(foot => foot.lift === 0), 'body load remains on the support soles while both arms lift');
     }
@@ -138,6 +138,84 @@ test('the thrown carry body keeps its thickness when flight yaw crosses an edge-
       assert.deepEqual(flight.animation.contactPoints, original, 'airborne yaw cannot add a second squeeze to the carry projection');
       assert.equal(scales[0][0], 1, 'the torso retains its full width inside the single carry transform');
       assert.ok(Math.hypot(matrices[0][0], matrices[0][1]) >= source.scale * .5 - .000001, 'the held and flying body never collapses below its intended half-depth thickness');
+    }
+  }
+});
+
+test('a released shared body relaxes both arms and knees without changing the release pose or bone lengths', () => {
+  for (const side of [-1, 1]) {
+    const body = fighter({ facing: -side, angle: side * Math.PI / 2, carryStretch: 1, carrySupport: 'shoulder', suspension: 1 });
+    const held = sampleArenaFighterContacts(body, 2000);
+    assert.deepEqual(sampleArenaFighterContacts({ ...body, carryFlight: 0 }, 2000), held, 'free flight starts at the exact supported pose');
+    assert.deepEqual(sampleArenaFighterContacts({ ...body, carryFlight: .06 }, 2000), held, 'the helpers clear the released body before its limbs relax');
+    const animation = createArenaFighterAnimation();
+    let previous, middle;
+    for (let frame = 0; frame <= 60; frame++) {
+      const free = { ...body, animation, carryFlight: frame / 60 };
+      drawArenaFighter(ctx, free, 2000 + frame * 16);
+      const { rig, skeleton, contactPoints } = animation;
+      rig.hands.forEach((hand, arm) => {
+        assert.ok(Math.abs(distance(rig.shoulders[arm], rig.elbows[arm]) - 11) < .001);
+        assert.ok(Math.abs(distance(rig.elbows[arm], hand) - 10.5) < .001);
+      });
+      skeleton.feet.forEach((foot, leg) => {
+        assert.ok(Math.abs(distance(skeleton.hips[leg], skeleton.knees[leg]) - 11) < .001);
+        assert.ok(Math.abs(distance(skeleton.knees[leg], foot) - 11) < .001);
+      });
+      if (previous) parts(contactPoints).forEach((point, index) => assert.ok(distance(point, parts(previous)[index]) < 4, 'released limbs move continuously through the arc'));
+      if (frame === 30) middle = structuredClone(contactPoints);
+      previous = structuredClone(contactPoints);
+    }
+    assert.ok(distance(middle.hands[0], held.hands[0]) > 4 && distance(middle.feet[0], held.feet[0]) > 4, 'the free body visibly bends an arm and knee instead of staying rigid');
+  }
+});
+
+test('the soccer slide enters from the running rig then reclines deeply over a bent support leg', () => {
+  for (const facing of [-1, 1]) {
+    const animation = createArenaFighterAnimation();
+    const body = fighter({ facing, pose: 'run', angle: 0, animation, motionImmediate: false, velocityX: facing * 145, carryStretch: undefined });
+    for (let frame = 0; frame <= 30; frame++) { body.gaitDistance = frame * 145 * .016; drawArenaFighter(ctx, body, 1000 + frame * 16); }
+    const running = structuredClone(animation.contactPoints);
+    body.pose = 'slide'; body.slideProgress = 0;
+    drawArenaFighter(ctx, body, 1480);
+    parts(running).forEach((point, index) => assert.ok(distance(point, parts(animation.contactPoints)[index]) < .001, 'the first sliding frame retains the actual running body'));
+    for (let frame = 1; frame <= 60; frame++) { body.slideProgress = frame / 60; drawArenaFighter(ctx, body, 1480 + frame * 16); }
+    assert.ok(animation.motion.lean < -50 && animation.motion.crouch > 14, 'the torso lies back close to the sand');
+    const { hips, knees, feet } = animation.skeleton;
+    assert.ok(feet[1].x - hips[1].x > 18, 'the leading foot drives deep into the tackle');
+    assert.ok(distance(hips[0], feet[0]) < 10, 'the other leg stays folded as floor support');
+    feet.forEach((foot, leg) => {
+      assert.ok(Math.abs(distance(hips[leg], knees[leg]) - 11) < .001);
+      assert.ok(Math.abs(distance(knees[leg], foot) - 11) < .001);
+    });
+  }
+});
+
+test('a grounded departure turns the landing arms smoothly at normal bone lengths and full body width', () => {
+  for (const facing of [-1, 1]) {
+    const animation = createArenaFighterAnimation(), matrices = [];
+    const body = fighter({ facing, pose: 'land', angle: 0, phase: 1, carryStretch: undefined, suspension: 0, animation, motionImmediate: false });
+    const canvas = { ...ctx, transform: (...matrix) => matrices.push(matrix) };
+    drawArenaFighter(canvas, body, 2000);
+    let prior = structuredClone(animation.contactPoints);
+    body.pose = 'run'; body.facing = -facing; body.velocityX = -facing * 145;
+    for (let frame = 1; frame <= 20; frame++) {
+      body.x += body.velocityX * .016; body.gaitDistance += 145 * .016;
+      const saved = structuredClone(animation), predicted = sampleArenaFighterContacts(body, 2000 + frame * 16);
+      assert.deepEqual(animation, saved, 'sampling the landing handoff cannot advance its captured angle history');
+      drawArenaFighter(canvas, body, 2000 + frame * 16);
+      assert.deepEqual(animation.contactPoints, predicted);
+      const joints = animation.contactPoints;
+      [...joints.shoulders, ...joints.elbows, ...joints.hands].forEach((point, index) => assert.ok(distance(point, [...prior.shoulders, ...prior.elbows, ...prior.hands][index]) < 18.8, 'turning and lowering the hands stays continuous through the complete departure'));
+      joints.hands.forEach((hand, arm) => {
+        if (animation.landingArms) {
+          assert.ok(Math.abs(distance(joints.shoulders[arm], joints.elbows[arm]) - 11 * body.scale) < .001);
+          assert.ok(Math.abs(distance(joints.elbows[arm], hand) - 10.5 * body.scale) < .001);
+        }
+      });
+      const matrix = matrices.at(-1);
+      assert.ok(Math.abs(Math.abs(matrix[0] * matrix[3] - matrix[1] * matrix[2]) - body.scale ** 2) < .001, 'the turn preserves full torso thickness');
+      prior = structuredClone(joints);
     }
   }
 });

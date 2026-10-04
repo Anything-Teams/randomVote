@@ -24,7 +24,8 @@ const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
 const project = (matrix, point) => ({ x: matrix[0] * point.x + matrix[2] * point.y + matrix[4], y: matrix[1] * point.x + matrix[3] * point.y + matrix[5] });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-const order = ['1', '2', '3', '4', '5'];
+// This natural draw leaves the opening bout eligible for a solo rare move.
+const order = ['1', '3', '2', '4', '5'], spawnOrder = ['1', '2', '3', '4', '5'];
 const duration = 44000, rushRoll = 7;
 
 function context() {
@@ -48,12 +49,12 @@ function context() {
   };
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
-function game(seed, reversed = false, mirrored = false, candidateOrder) {
-  const props = { candidates: (candidateOrder ?? (reversed ? [...order].reverse() : order)).map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
+function game(seed, reversed = false, mirrored = false, candidateOrder, frameDelta = 16) {
+  const props = { candidates: (candidateOrder ?? (reversed ? [...spawnOrder].reverse() : spawnOrder)).map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
   return { sim, ctx, step(elapsed, paused = false) {
     ctx.records.clear();
-    render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : 16, false);
+    render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : frameDelta, false);
     // The rare punch has a deterministic ordinary layout. Reflect its real
     // initialized bodies once to exercise the other physical heading as well.
     if (mirrored && elapsed === 0) {
@@ -134,4 +135,51 @@ test('an initial close layout resumes the ordinary exchange instead of waiting f
   assert.equal(contact.round.tactic, 'counter', 'the existing close-range contact rule selects the ordinary counter');
   for (let elapsed = 16; elapsed <= planned.resolve + 16; elapsed += 16) scene.step(elapsed);
   assert.equal(capturedRanks()[planned.victim], order.indexOf(planned.victim) + 1, 'the ordinary encounter still completes its drawn elimination');
+});
+
+for (const frameDelta of [16, 50]) for (const mirrored of [false, true]) test(`the actual Superman entry runs on compact steps, plants, and inherits both feet at takeoff (${mirrored ? 'mirror' : 'ordinary'}, ${frameDelta}ms)`, () => {
+  const scene = game(1119, false, mirrored, undefined, frameDelta), planned = arenaRounds(order, duration, rushRoll, 1119).find(round => round.supermanPunch);
+  let prior, finalLoad, launched = false, hit = false, landed = false, ranked = false;
+  const swings = [0, 0], anchors = [undefined, undefined];
+  let runningFrames = 0, largestReach = 0;
+  for (let elapsed = 0; elapsed <= planned.resolve + 2000; elapsed += frameDelta) {
+    const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
+    if (!contact?.supermanPunchOrigins || !contact.round.supermanPunch) continue;
+    const actual = contact.round, frame = arenaSupermanPunchTargets(actual.supermanPunch, elapsed, contact.center, contact.supermanPunchOrigins, actual.contactSide);
+    if (mirrored && elapsed === 0) continue; // Reflection occurs after that initialization frame was painted.
+    const driver = actors.get(actual.aggressor), rig = driver.animation.skeleton, joints = driver.animation.contactPoints;
+    assert.ok([...rig.hips, ...rig.knees, ...rig.feet].every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
+    for (let leg = 0; leg < 2; leg++) {
+      assert.ok(distance(rig.hips[leg], rig.knees[leg]) <= 11.001 && distance(rig.knees[leg], rig.feet[leg]) <= 11.001, `running or loading cannot stretch either leg bone at ${elapsed}ms`);
+      if (frame.stage === 'approach') {
+        largestReach = Math.max(largestReach, Math.abs(rig.feet[leg].x - rig.hips[leg].x));
+        const memory = driver.animation.feet[leg];
+        if (memory.swinging && !prior?.swinging[leg]) swings[leg]++;
+        if (!memory.swinging && !memory.replant && prior?.stage === 'approach' && !prior.swinging[leg] && anchors[leg]) assert.ok(distance(memory.ground, anchors[leg]) < .001, 'a supporting foot stays planted while the root passes over it');
+        anchors[leg] = memory.swinging ? undefined : { ...memory.ground };
+      }
+    }
+    if (frame.stage === 'approach' && Math.hypot(driver.velocityX, driver.velocityY) > 35) { runningFrames++; assert.equal(driver.pose, 'run'); assert.equal(driver.animation.airborne, false); }
+    if (frame.stage === 'load') {
+      finalLoad = { contacts: structuredClone(joints), memory: structuredClone(driver.animation.feet), root: { x: driver.x, y: driver.y } };
+      assert.equal(driver.animation.airborne, false);
+    }
+    if (actual.supermanPunch.launchAt === elapsed) {
+      assert.ok(finalLoad, 'a real grounded plant precedes the leap');
+      assert.ok(finalLoad.memory.every(foot => foot.lift < .15 && !foot.swinging), 'both feet settle within the 180ms load instead of continuing the ordinary 275ms foot adjustment');
+      assert.ok(finalLoad.contacts.feet.every(foot => Math.abs(foot.y - (finalLoad.root.y - 2 * driver.scale)) < .5), 'both soles support the loaded body on the sand before takeoff');
+      joints.feet.forEach((foot, leg) => assert.ok(distance(foot, finalLoad.contacts.feet[leg]) < 1, 'the first leap inherits the actual planted footprints'));
+      launched = true;
+    }
+    if (actual.supermanPunch.hitAt === elapsed) {
+      const victim = actors.get(actual.victim), target = { ...victim.animation.contactPoints.head, y: victim.animation.contactPoints.head.y + victim.scale * 10 };
+      assert.ok(launched && distance(joints.hands[1], target) < 8, 'the compact runway still ends in a real airborne fist contact'); hit = true;
+    }
+    if (frame.stage === 'land') { assert.equal(frame.height, 0); landed = true; }
+    if (elapsed >= actual.resolve) { assert.equal(capturedRanks()[actual.victim], order.indexOf(actual.victim) + 1); ranked = true; break; }
+    prior = { stage: frame.stage, swinging: driver.animation.feet.map(foot => foot.swinging) };
+  }
+  assert.ok(runningFrames > 10 && swings.every(count => count >= 2), `both feet take repeated steps rather than stretching from their initial anchors: ${swings}`);
+  assert.ok(largestReach < 18, `the running ankle remains in a compact stride silhouette: ${largestReach}`);
+  assert.ok(launched && hit && landed && ranked, 'the unchanged physical punch and selected elimination complete');
 });

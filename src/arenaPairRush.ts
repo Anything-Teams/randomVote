@@ -230,13 +230,13 @@ export type ArenaPairRushFlightFrame = ArenaPoint & {
 };
 
 /** Release the held rig with upward velocity, then let constant gravity carry it down. */
-export function arenaPairRushFlight(age: number, origin: ArenaPoint, landing: ArenaPoint, direction = 1, unit = 1, held = { lift: 142, angle: direction * Math.PI / 2 }): ArenaPairRushFlightFrame {
+export function arenaPairRushFlight(age: number, origin: ArenaPoint, landing: ArenaPoint, direction = 1, unit = 1, held: { lift: number; angle: number; relax?: boolean } = { lift: 142, angle: direction * Math.PI / 2 }): ArenaPairRushFlightFrame {
   const ms = Math.max(0, age / Math.max(.001, unit));
   if (ms < 880) {
     const phase = clamp(ms / 880), groundX = mix(origin.x, landing.x, phase), groundY = mix(origin.y, landing.y, phase);
     const upward = 220;
     const height = held.lift + upward * phase - (held.lift + upward) * phase ** 2;
-    return { x: groundX, y: groundY - height, groundX, groundY, height, angle: held.angle, phase, stage: 'flight', pose: 'carried', carryStretch: 1, suspension: 1 - ease((phase - .70) / .30), facing: -direction };
+    return { x: groundX, y: groundY - height, groundX, groundY, height, angle: held.angle + (held.relax ? direction * .12 * Math.sin(phase * Math.PI) * ease((phase - .06) / .20) : 0), phase, stage: 'flight', pose: 'carried', carryStretch: 1, suspension: 1 - ease((phase - .70) / .30), facing: -direction };
   }
   if (ms < 1100) {
     const phase = clamp((ms - 880) / 220);

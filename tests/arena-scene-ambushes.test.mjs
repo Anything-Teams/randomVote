@@ -15,16 +15,21 @@ source = source.replaceAll('drawArenaScenery(ctx, clock,', 'surpriseTestScenery(
   .replace(rankRead, `${rankRead} surpriseTestRanks = ranks;`)
   .replace(draw, 'surpriseTestActors = actors; arenaDrawOrder([...actors.values()]).forEach(actor => { ctx.surpriseStart(actor); drawArenaFighter(ctx, actor, reduced ? 0 : clock); ctx.surpriseEnd(); });');
 source += '\nlet surpriseTestActors, surpriseTestRanks; const surpriseTestScenery = () => {}; export const capturedActors = () => surpriseTestActors; export const capturedRanks = () => surpriseTestRanks; export { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaSlideTripTargets, arenaLinkedRushTargets, arenaPairRushTargets };';
+const initAnchor = 'const ambient = won ? [] : active.filter';
+assert.ok(source.includes(initAnchor));
+source = source.replace(initAnchor, 'ambushTestInitialize(sim, props, elapsed, reset); ' + initAnchor);
+source += '\nlet ambushTestInitialize = () => {}; export const setInitialize = fn => { ambushTestInitialize = fn; };';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaSlideTripTargets, arenaLinkedRushTargets, arenaPairRushTargets, capturedActors, capturedRanks } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaSlideTripTargets, arenaLinkedRushTargets, arenaPairRushTargets, capturedActors, capturedRanks, setInitialize } = module.exports;
 const noop = () => {};
 const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
 const project = (matrix, point) => ({ x: matrix[0] * point.x + matrix[2] * point.y + matrix[4], y: matrix[1] * point.x + matrix[3] * point.y + matrix[5] });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const order = ['1', '2', '3', '4', '5'];
+const rareOrder = ['1', '3', '2', '4', '5'];
 const duration = 44000, rushRoll = 7;
 
 function context() {
@@ -48,9 +53,12 @@ function context() {
   };
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
-function game(seed, reversed = false, mirrored = false, candidateOrder) {
-  const props = { candidates: (candidateOrder ?? (reversed ? [...order].reverse() : order)).map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
+function game(seed, reversed = false, mirrored = false, candidateOrder, initialRoots, suppliedOrder = order) {
+  const props = { candidates: (candidateOrder ?? (reversed ? [...order].reverse() : order)).map(id => ({ id, name: id, color: '#ffad72' })), order: suppliedOrder, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
+  setInitialize((sim, props, elapsed, reset) => {
+    if (initialRoots && reset && elapsed === 0) for (const [id, point] of Object.entries(initialRoots)) Object.assign(sim.bodies.get(id), point, { motorX: 0, motorY: 0, roam: undefined });
+  });
   return { sim, ctx, step(elapsed, paused = false) {
     ctx.records.clear();
     render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : 16, false);
@@ -80,9 +88,9 @@ const points = contacts => [contacts.origin, contacts.head, contacts.waist, ...c
 const intersectsViewport = values => Math.max(...values.map(point => point.x)) > 0 && Math.min(...values.map(point => point.x)) < 1000 && Math.max(...values.map(point => point.y)) > 0 && Math.min(...values.map(point => point.y)) < 620;
 
 for (const mirrored of [false, true]) test(`a live feet-first slide hooks the real ankle, stands, and kicks one opponent out (${mirrored ? 'mirrored' : 'ordinary'})`, () => {
-  const seed = 46, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.slideTrip);
+  const seed = 46, planned = arenaRounds(rareOrder, duration, rushRoll, seed).find(round => round.slideTrip);
   assert.ok(planned, 'the production independent roll selects the sliding attack');
-  const scene = game(seed, false, mirrored), stages = new Set();
+  const scene = game(seed, false, mirrored, undefined, undefined, rareOrder), stages = new Set();
   let hooked = false, kicked = false, rolled = false, resolved = false, previousDriver;
   for (let elapsed = 0; elapsed <= planned.resolve + 1500; elapsed += 16) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
@@ -121,10 +129,10 @@ for (const mirrored of [false, true]) test(`a live feet-first slide hooks the re
 });
 
 test('a close opponent uses the ordinary trip instead of backing up to invent a running slide', () => {
-  const seed = 25, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.slideTrip);
-  const scene = game(seed);
+  const seed = 46, planned = arenaRounds(rareOrder, duration, rushRoll, seed).find(round => round.slideTrip);
+  const scene = game(seed, false, false, undefined, { '4': { x: 480, y: 416 }, '5': { x: 520, y: 416 } }, rareOrder);
   let declined = false, resolved = false;
-  for (let elapsed = 0; elapsed <= planned.resolve + 100; elapsed += 16) {
+  for (let elapsed = 0; elapsed <= planned.resolve + 8000; elapsed += 16) {
     scene.step(elapsed);
     const contact = scene.sim.contacts.get(planned.id);
     if (contact && elapsed >= planned.start && !contact.round.slideTrip) {
@@ -135,12 +143,12 @@ test('a close opponent uses the ordinary trip instead of backing up to invent a 
       }
     }
   }
-  assert.ok(declined && resolved, 'the nearby ordinary exchange still completes the chosen elimination');
+  assert.ok(declined && resolved, `the nearby ordinary exchange still completes the chosen elimination: ${JSON.stringify({ declined, resolved, planned, actual: scene.sim.contacts.get(planned.id)?.round, ranks: capturedRanks(), exits: [...scene.sim.exits.keys()] })}`);
 });
 
 test('a paused initial seek applies the same minimum slide distance as live play', () => {
-  const seed = 46, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.slideTrip);
-  const scene = game(seed, false, false, ['4', '1', '2', '3', '5']), actors = scene.step(planned.start, true), contact = scene.sim.contacts.get(planned.id);
+  const seed = 46, planned = arenaRounds(rareOrder, duration, rushRoll, seed).find(round => round.slideTrip);
+  const scene = game(seed, false, false, ['4', '1', '2', '3', '5'], undefined, rareOrder), actors = scene.step(planned.start, true), contact = scene.sim.contacts.get(planned.id);
   assert.ok(distance(scene.sim.bodies.get(planned.aggressor), scene.sim.bodies.get(planned.victim)) < 130);
   assert.equal(contact.round.slideTrip, undefined, 'reset and paused seeks cannot allow a close slide');
   assert.equal(contact.slideTripOrigins, undefined);
@@ -148,9 +156,9 @@ test('a paused initial seek applies the same minimum slide distance as live play
 });
 
 for (const mirrored of [false, true]) test(`a rare live two-foot hop avoids the slide, lands inside and resumes the same deciding bout (${mirrored ? 'mirrored' : 'ordinary'})`, () => {
-  const seed = 1566, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.slideTrip?.evade);
+  const seed = 1566, planned = arenaRounds(rareOrder, duration, rushRoll, seed).find(round => round.slideTrip?.evade);
   assert.ok(planned, 'the production independent rare branch selects a two-foot dodge');
-  const scene = game(seed, false, mirrored), stages = new Set();
+  const scene = game(seed, false, mirrored, undefined, undefined, rareOrder), stages = new Set();
   let jumped = false, passed = false, recovered = false, resolved = false, fallback;
   for (let elapsed = 0; elapsed <= planned.resolve + 4000; elapsed += 16) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
@@ -196,9 +204,9 @@ for (const mirrored of [false, true]) test(`a rare live two-foot hop avoids the 
 });
 
 for (const mirrored of [false, true]) test(`two live allies independently clothesline the neck and chest before the exact shared throw (${mirrored ? 'mirrored' : 'ordinary'})`, () => {
-  const seed = 865, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.linkedRush);
+  const seed = 865, planned = arenaRounds(rareOrder, duration, rushRoll, seed).find(round => round.linkedRush);
   assert.ok(planned, 'the production extremely rare roll selects the linked attack');
-  const scene = game(seed, false, mirrored), previous = new Map();
+  const scene = game(seed, false, mirrored, undefined, undefined, rareOrder), previous = new Map();
   let extended = false, hit = false, held = false, thrown = false, resolved = false, previousVictim;
   for (let elapsed = 0; elapsed <= planned.resolve + 1500; elapsed += 16) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);

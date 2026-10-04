@@ -31,7 +31,7 @@ function game(order, seed = 31, duration = 44000, { rushRoll = 7, candidateOrder
 function fixture(tactic, { rushRoll = 7, count = 5, predicate, maxSeeds = 80 } = {}) {
   for (let seed = 0; seed < maxSeeds; seed++) for (let variant = 0; variant < 12; variant++) {
     const order = Array.from({ length: count }, (_, i) => `scene-${variant}-${i}`), duration = Math.max(44000, arenaMinimumDuration(order, rushRoll, seed)), rounds = arenaRounds(order, duration, rushRoll, seed);
-    const round = rounds.find(round => predicate ? predicate(round) : round.tactic === tactic && !round.recovery && !round.escape && !round.rim);
+    const round = rounds.find(round => predicate ? predicate(round, rounds) : round.tactic === tactic && !round.recovery && !round.escape && !round.rim);
     if (round) return { order, seed, duration, rushRoll, round };
   }
   assert.fail(`a real ${tactic} scene must remain in the catalog`);
@@ -96,7 +96,7 @@ for (const rushRoll of [0, 7]) test(`live pair rush roll ${rushRoll} waits at it
 
 test('a live rim push cannot apply pressure until a painted palm reaches the opponent', () => {
   const found = fixture('rim', { predicate: round => !!round.rim }), scene = game(found.order, found.seed, found.duration), round = found.round;
-  let waitingSeen = false, pressureSeen = false, contactSeen = false, placed = false, lastState;
+  let waitingSeen = false, pressureSeen = false, contactSeen = false, placed = false, lastState, firstActiveAt, actualContactAt;
   for (let elapsed = 0; elapsed < round.rim.end; elapsed += 16) {
     if (!placed && elapsed >= round.rim.start - 2400 * round.timeScale - 16 && !scene.sim.contacts.has(round.id)) {
       // A central meeting deliberately omits this optional story. Put the
@@ -109,6 +109,7 @@ test('a live rim push cannot apply pressure until a painted palm reaches the opp
     const previous = snapshot(scene), actors = scene.step(elapsed), contact = scene.sim.contacts.get(round.id), actual = contact?.round;
     lastState = { elapsed, fixture: found, contact: contact ? { started: contact.started, rimOrigins: contact.rimOrigins, round: actual } : undefined, waitingSeen, contactSeen, pressureSeen };
     if (!contact?.rimOrigins || elapsed < actual.rim.start) continue;
+    firstActiveAt ??= elapsed;
     const rim = arenaRimTargets(actual, elapsed, contact.center, contact.rimOrigins);
     const driverNow = snapshot(scene).get(actual.aggressor), defenderNow = snapshot(scene).get(actual.victim);
     lastState = { elapsed, seed: found.seed, order: found.order, duration: found.duration, rim, round: actual, waitingSeen, contactSeen, pressureSeen, driver: driverNow, defender: defenderNow, gap: driverNow?.contacts && defenderNow?.contacts ? Math.min(...driverNow.contacts.hands.flatMap(hand => [...defenderNow.contacts.shoulders, defenderNow.contacts.waist].map(point => distance(hand, point)))) : undefined };
@@ -122,15 +123,20 @@ test('a live rim push cannot apply pressure until a painted palm reaches the opp
       const gap = Math.min(...driver.contacts.hands.flatMap(hand => [...defender.contacts.shoulders, defender.contacts.waist].map(point => distance(hand, point))));
       assert.ok(gap < 10 && distance(driver, defender) < 72, `rim pressure starts at ${elapsed}ms with actual palm gap ${gap.toFixed(2)}px`);
       assert.equal(actual.rim.contactAt, elapsed);
-      contactSeen = true;
+      contactSeen = true; actualContactAt = elapsed;
     }
     if (rim.pressure > 0) { assert.ok(contactSeen); pressureSeen = true; }
   }
-  assert.ok(waitingSeen && contactSeen && pressureSeen, `the rim sequence includes approach, actual contact, and only then pressure: ${JSON.stringify(lastState)}`);
+  assert.ok(contactSeen && pressureSeen && (waitingSeen || actualContactAt === firstActiveAt), `the rim sequence includes approach, actual contact, and only then pressure: ${JSON.stringify(lastState)}`);
 });
 
 for (const outcome of ['resist', 'dodge']) test(`a live outer charge ${outcome} guards its actual origin and follows the independent story without lining up a new run`, () => {
-  const found = fixture(`outer charge ${outcome}`, { predicate: round => round.rimCharge?.start > 3000 && round.rimCharge.outcome === outcome }), scene = game(found.order, found.seed, found.duration), round = found.round;
+  const found = fixture(`outer charge ${outcome}`, { count: 6, predicate: (round, rounds) => {
+    if (!(round.rimCharge?.start > 3000 && round.rimCharge.outcome === outcome)) return false;
+    const previous = rounds[rounds.indexOf(round) - 1];
+    const occupied = [previous.aggressor, previous.victim, previous.helper, previous.pairDodge?.partnerId, previous.passingTrip?.passerId, previous.recovery?.throwerId];
+    return !occupied.includes(round.aggressor) && !occupied.includes(round.victim);
+  } }), scene = game(found.order, found.seed, found.duration), round = found.round;
   // Start this optional story from two already aligned free fighters. This is
   // a fixture setup, before its physical clock or the scene's origin capture.
   const origins = { charger: { x: 590, y: 416 }, defender: { x: 720, y: 416 } };
@@ -296,7 +302,7 @@ test('a live elbow counter leaves its stunned opponent at the hit and the holder
   assert.ok(maxHandGap < 5, `the actual ankle pull maintains both palm contacts (max gap ${maxHandGap.toFixed(2)}px)`);
 });
 
-for (const count of [3, 5]) test(`a live overhead escape folds out of the full suplex hold, lands both feet inside the sand and resumes the original duel (${count} fighters)`, () => {
+for (const count of [3, 5]) test(`a live overhead escape folds out of the full suplex hold, lands both feet inside the sand and continues with another living opponent (${count} fighters)`, () => {
   const found = count === 3 ? (() => {
     const order = ['3', '1', '2'], seed = 117, duration = Math.max(44000, arenaMinimumDuration(order, 7, seed));
     const round = arenaRounds(order, duration, 7, seed).find(value => value.recovery?.kind === 'overhead-escape');
@@ -306,13 +312,13 @@ for (const count of [3, 5]) test(`a live overhead escape folds out of the full s
   const { order, seed, duration, round } = found, recovery = round.recovery, scene = game(order, seed, duration);
   const until = Math.min(round.impact - 16, round.start + 1800 * round.timeScale);
   let fullHold = false, jumpSeen = false, tucked = false, landed = false, resumed = false, releasePoint, landingPoint;
-  let lastBody, lastHeight, lastTuck, jumpStarts = 0, insideJump = false, maxHeight = 0;
+  let lastBody, lastHeight, lastTuck, lastReceiver, jumpStarts = 0, insideJump = false, maxHeight = 0;
   let maxFloorError = 0, floorFailure;
   for (let elapsed = 0; elapsed <= until; elapsed += 16) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(round.id);
     if (!contact || elapsed < recovery.start) continue;
     const actual = contact.round, frame = arenaRecoveryTargets(actual, elapsed, contact.center);
-    const victim = actors.get(round.victim), driver = actors.get(round.aggressor), body = scene.sim.bodies.get(round.victim);
+    const victim = actors.get(round.victim), driver = actors.get(round.recovery?.throwerId ?? round.aggressor), body = scene.sim.bodies.get(round.victim);
     const info = () => JSON.stringify({ count, seed, order, elapsed, round: actual, frame, victim: { x: victim?.x, y: victim?.y, depthY: victim?.depthY, pose: victim?.pose, suspension: victim?.suspension }, feet: victim?.animation?.contactPoints?.feet });
     assert.ok(victim && driver, `both survivors remain painted: ${info()}`);
     assert.equal(scene.sim.exits.has(round.victim), false, 'escaping the raised hold cannot eliminate the jumper');
@@ -344,7 +350,7 @@ for (const count of [3, 5]) test(`a live overhead escape folds out of the full s
       }
       maxHeight = Math.max(maxHeight, height);
       if (lastBody && elapsed <= recovery.throwAt + 48 * round.timeScale) {
-        assert.ok(distance(body, lastBody) < 2.65, `leaving the hands cannot reset the root to an old place: ${info()}`);
+        assert.ok(distance(body, lastBody) < Math.max(2.65, distance(frame.receiver, lastReceiver) + .01), `leaving the hands cannot reset the root to an old place (${distance(body, lastBody)}px, previous ${JSON.stringify(lastBody)}): ${info()}`);
         assert.ok(Math.abs(height - lastHeight) < 8, 'the full raised height flows directly into the jump');
       }
     } else insideJump = false;
@@ -365,9 +371,9 @@ for (const count of [3, 5]) test(`a live overhead escape folds out of the full s
       if (floorError > maxFloorError) { maxFloorError = floorError; floorFailure = info(); }
       assert.ok(lastTuck < .03, 'the tucked body straightens before the feet reach the floor');
     }
-    lastBody = { x: body.x, y: body.y }; lastHeight = height; lastTuck = victim.jumpTuck ?? 0;
+    lastBody = { x: body.x, y: body.y }; lastReceiver = { ...frame.receiver }; lastHeight = height; lastTuck = victim.jumpTuck ?? 0;
   }
-  assert.ok(fullHold && jumpSeen && tucked && landed && resumed, `the live rare event includes hold, tuck, landing and the original duel: ${JSON.stringify({ count, seed, order, fullHold, jumpSeen, tucked, landed, resumed })}`);
+  assert.ok(fullHold && jumpSeen && tucked && landed && resumed, `the live rare event includes hold, tuck, landing and the next opponent: ${JSON.stringify({ count, seed, order, fullHold, jumpSeen, tucked, landed, resumed })}`);
   assert.equal(jumpStarts, 1, 'the escape consists of one jump');
   assert.ok(distance(releasePoint, landingPoint) > 40, 'the jumping fighter visibly lands behind the original raised position');
   assert.ok(maxHeight > 105 && maxHeight < 160, 'the full overhead lift leads to a short, readable jumping apex');

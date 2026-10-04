@@ -154,7 +154,7 @@ test('alliances increase only slightly, preserve previous eligible stories and r
     if (oldAlliance) assert.equal(alliances.length, 1, 'previous rare alliance stories remain available');
     assert.ok(alliances.length <= 1);
     assert.deepEqual(arenaRanks(order, 44000), Object.fromEntries(order.map((id, i) => [id, i + 1])));
-    const small = arenaRounds(order.slice(0, 6));
+    const small = arenaRounds(order.slice(0, 4));
     assert.ok(small.every(bout => !['team', 'betrayal'].includes(bout.tactic)));
   }
   const added = (after - before) / eligible;

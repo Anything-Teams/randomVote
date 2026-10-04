@@ -15,8 +15,10 @@ const actor = animation => ({ candidate: { id: 'fighter', name: '선수', color:
 
 test('edge pushing keeps both feet grounded at contact, reaches the rim and drops only the drawn loser', () => {
   const order = ['1', '2', '3-4'];
+  const seed = Array.from({ length: 1024 }, (_, seed) => seed).find(seed => arenaRounds(order, 44000, 7, seed).at(-1).tactic === 'edge');
+  assert.notEqual(seed, undefined);
   for (const duration of [40_000, 44_000, 62_000]) {
-    const round = arenaRounds(order, duration, 7, 0).at(-1), span = round.impact - round.start;
+    const round = arenaRounds(order, duration, 7, seed).at(-1), span = round.impact - round.start;
     assert.equal(round.tactic, 'edge');
     for (const center of [{ x: 325, y: 350 }, { x: 675, y: 350 }, { x: 325, y: 490 }, { x: 675, y: 490 }]) {
       const bodies = arenaEdgeTargets(round, round.start, center);
@@ -47,7 +49,7 @@ test('edge pushing keeps both feet grounded at contact, reaches the rim and drop
       assert.ok(radius(arenaEdgeFall(100, end.victim, landing, end.side)) > 1, 'the failed back step crosses the rim first');
     }
     assert.match(arenaStoryState(round, round.impact + 100).action, /뒷발.*경계/);
-    const ranks = arenaRanks(order, round.resolve, duration, 7, 0);
+    const ranks = arenaRanks(order, round.resolve, duration, 7, seed);
     assert.equal(ranks['1'], 1); assert.equal(ranks['2'], 2); assert.equal(ranks[order[2]], 3);
   }
 });

@@ -110,7 +110,7 @@ test('close and outside encounters decline the counter without moving or suspend
 
 test('only eligible solo sidekicks receive the counter and every drawn loser keeps their supplied placement', () => {
   let selected = 0, finalSelected = 0;
-  for (const order of [['2', '1'], ['1', '2', '3', '4', '5'], Array.from({ length: 10 }, (_, i) => String(i + 1))]) for (let seed = 0; seed < 2048; seed++) {
+  for (const order of [['2', '1'], ['1', '3', '2', '4', '5'], Array.from({ length: 10 }, (_, i) => String(i + 1))]) for (let seed = 0; seed < 2048; seed++) {
     const original = [...order], rounds = arenaRounds(order, 44000, 7, seed);
     assert.deepEqual(rounds.flatMap(arenaEliminatedIds), [...order].reverse().slice(0, -1));
     for (const [index, round] of rounds.entries()) {

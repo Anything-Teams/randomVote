@@ -32,7 +32,8 @@ test('new solo stories preserve every drawn elimination and reserve their own mu
       const entry = round.linkedRush?.start ?? round.slideTrip?.start ?? round.pairDodge?.start ?? round.passingTrip?.start ?? round.rimCharge?.start ?? round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start;
       assert.equal(entry, previousEnd); previousEnd = round.resolve;
       if (round.linkedRush || round.slideTrip) {
-        assert.ok(!round.final && !round.exchange);
+        assert.ok(!round.exchange);
+        if (round.linkedRush) assert.equal(round.final, false, 'a two-person final cannot recruit a third attacker');
         assert.ok(!round.pairDodge && !round.passingTrip && !round.tripCounter && !round.escape && !round.recovery && !round.rim && !round.rimCharge);
         assert.equal(round.victim, [...living].at(-1));
         assert.equal(round.secondaryVictim, undefined);
@@ -65,7 +66,7 @@ test('new solo stories preserve every drawn elimination and reserve their own mu
 });
 
 test('slide story and visible head words wait for the actual slide, ankle hook and kick clocks', () => {
-  const order = ['1', '2', '3', '4', '5'], planned = arenaRounds(order, 44000, 7, 25).find(round => round.slideTrip);
+  const order = ['1', '2', '3', '4', '5'], planned = Array.from({ length: 256 }, (_, seed) => arenaRounds(order, 44000, 7, seed).find(round => round.slideTrip && !round.slideTrip.evade)).find(Boolean);
   assert.ok(planned);
   const candidates = order.map(id => ({ id, name: id, color: '#ffad72' }));
   const start = 1000, launchAt = 1800, hookAt = 2500;
@@ -92,7 +93,8 @@ test('slide story and visible head words wait for the actual slide, ankle hook a
 });
 
 test('rare slide dodge explanations follow the recorded hop and landing without claiming an ankle hook or exit', () => {
-  const order = ['1', '2', '3', '4', '5'], planned = arenaRounds(order, 44000, 7, 1566).find(round => round.slideTrip?.evade);
+  const order = ['1', '2', '3', '4', '5'], planned = Array.from({ length: 4096 }, (_, seed) => arenaRounds(order, 44000, 7, seed).find(round => round.slideTrip?.evade)).find(Boolean);
+  assert.ok(planned, 'the rare jump evade comes from a selected normal-probability window');
   const round = { ...planned, start: 1000, impact: 7000, resolve: 8100, end: 8100,
     slideTrip: { start: 1000, end: 7000, evade: true, plannedLaunchAt: 1800, plannedPassAt: 2200, launchAt: 1800, jumpAt: 2000, passAt: 2200, hookAt: null, kickAt: null } };
   const candidates = order.map(id => ({ id, name: id, color: '#ffad72' }));
@@ -115,7 +117,7 @@ test('linked story never turns the attacked player into the charger and reads th
   const round = { ...planned, start, impact, resolve: impact + 1100, end: impact + 1100, timeScale: 1, rushLaunchAt: launchAt, rushContactAt: contactAt,
     linkedRush: { start, end: impact, launchAt, contactAt } };
   const candidates = order.map(id => ({ id, name: id, color: '#ffad72' }));
-  for (const [clock, step, word] of [[start, 0, '팔 뻗기!'], [launchAt, 1, '더블 클로스라인!'], [contactAt, 2, '목 · 가슴 가격!'], [contactAt + 450, 3, '그로기!'], [contactAt + 720, 4, '어깨 잡기!'], [contactAt + 900, 5, '함께 들기!'], [impact - 100, 6, '함께 던지기!']]) {
+  for (const [clock, step, word] of [[start, 0, '팔 뻗기!'], [launchAt, 1, '돌진!'], [contactAt, 2, '목 · 가슴 가격!'], [contactAt + 450, 3, '그로기!'], [contactAt + 720, 4, '어깨 잡기!'], [contactAt + 900, 5, '함께 들기!'], [impact - 100, 6, '함께 던지기!']]) {
     const story = arenaStoryState(round, clock), words = arenaActionWords(round, clock);
     assert.equal(story.kind, 'linked-rush'); assert.equal(story.step, step);
     assert.deepEqual(story.left, [round.aggressor, round.helper]); assert.deepEqual(story.right, [round.victim]);

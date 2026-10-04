@@ -8,7 +8,7 @@ async function source(path) {
 }
 const { arenaRecoveryTargets, ARENA_RECOVERY_EXIT_DURATION } = await source('src/arenaRecovery.ts');
 const { arenaTechniqueTargets } = await source('src/arenaTechniques.ts');
-const { arenaAction, arenaActionWords, arenaNarration, arenaRanks, arenaRounds, arenaMinimumDuration } = await source('src/arenaLogic.ts');
+const { arenaAction, arenaActionWords, arenaNarration, arenaRanks, arenaRounds, arenaMinimumDuration, arenaSoloFinalTactics } = await source('src/arenaLogic.ts');
 const { arenaEscapeRoll } = await source('src/arenaEscape.ts');
 const { arenaStoryState } = await source('src/arenaStoryLogic.ts');
 const { sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
@@ -25,7 +25,8 @@ test('overhead escape is an independent two percent suplex surprise and preserve
     const rounds = arenaRounds(fixtureOrder, 44000, 7, seed), final = rounds.at(-1);
     // Later cosmetic moves may replace a failed suplex trial. Count the
     // original eligibility before those moves, including their failures.
-    const originallySuplex = arenaEscapeRoll(seed, final.index + 39) % 100 >= 8;
+    const baseTactic = arenaSoloFinalTactics[arenaEscapeRoll(seed, final.index + 1717) % arenaSoloFinalTactics.length];
+    const originallySuplex = baseTactic === 'suplex' && !final.supermanPunch && !final.slideTrip && !final.tripCounter && !final.kickCatch && arenaEscapeRoll(seed, final.index + 39) % 100 >= 8;
     if (originallySuplex) eligible++;
     assert.equal(final.recovery?.kind === 'overhead-escape', originallySuplex && arenaEscapeRoll(seed, final.index + 307) % 100 < 2);
     if (final.recovery?.kind !== 'overhead-escape') continue;
@@ -35,7 +36,7 @@ test('overhead escape is an independent two percent suplex surprise and preserve
     assert.equal(rounds.filter(round => round.recovery).length, 1);
     assert.deepEqual(arenaRanks(fixtureOrder, 44000, 44000, 7, seed), { [fixtureOrder[0]]: 1, [fixtureOrder[1]]: 2 });
   }
-  assert.ok(eligible > 7000);
+  assert.ok(eligible > 400);
   assert.ok(escapes / eligible > .015 && escapes / eligible < .026, `${escapes}/${eligible}: the extra escape remains close to two percent`);
 });
 
@@ -75,12 +76,15 @@ test('both directions retain the actual overhead suplex rig, then jump free inst
   }
 });
 
-test('every body type plants both feet inside the arena and settles on the same landing spot', () => {
+test('every body type plants both feet inside the arena, then runs farther from the lifter', () => {
   for (const side of [-1, 1]) for (const center of [{ x: 500, y: 416 }, { x: 320, y: 390 }, { x: 680, y: 445 }]) {
     const round = { ...base, contactSide: side }, landed = arenaRecoveryTargets(round, 5880, center), settled = arenaRecoveryTargets(round, 6100, center);
-    assert.equal(landed.stage, 'land'); assert.equal(settled.stage, 'release');
+    assert.equal(landed.stage, 'land'); assert.equal(settled.stage, 'separate');
     assert.deepEqual(landed.receiver, settled.receiver, 'a survivor does not move back to a predetermined home');
     assert.equal(settled.height, 0); assert.equal(settled.grip, false);
+    const escaped = arenaRecoveryTargets(round, 7350, center);
+    assert.ok(distance(escaped.receiver, escaped.thrower) > distance(settled.receiver, settled.thrower) + 30, 'the landing continues into a real departure');
+    assert.ok(distance(escaped.receiver, landed.receiver) > 30 && sandRadius(escaped.receiver) < 1);
     for (let index = 0; index < 10; index++) for (const frame of [landed, settled]) {
       const body = bodyAt(frame, index), contacts = sampleArenaFighterContacts(body, 6000);
       assert.ok(contacts.feet.every(foot => Math.abs(foot.y - (frame.receiver.y - 2 * body.scale)) < .05), `${side}/${index}: both painted foot endpoints land together`);
@@ -95,7 +99,7 @@ test('every body type plants both feet inside the arena and settles on the same 
 });
 
 test('jump narration follows each actual phase and only the following bout awards the drawn rank', () => {
-  const order = [...fixtureOrder], seed = 44, duration = arenaMinimumDuration(order, 7, seed), round = arenaRounds(order, duration, 7, seed).at(-1);
+  const order = [...fixtureOrder], seed = Array.from({ length: 8192 }, (_, seed) => seed).find(seed => arenaRounds(order, 44000, 7, seed).at(-1).recovery?.kind === 'overhead-escape'), duration = arenaMinimumDuration(order, 7, seed), round = arenaRounds(order, duration, 7, seed).at(-1);
   assert.equal(round.recovery.kind, 'overhead-escape');
   assert.equal(round.recovery.end, round.start);
   assert.equal(round.recovery.end - round.recovery.throwAt, ARENA_RECOVERY_EXIT_DURATION * round.timeScale);

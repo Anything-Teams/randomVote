@@ -229,7 +229,7 @@ test('alliances physically attack together before resistance, betrayal and a fro
   assert.equal(resisting.actors.find(actor => actor.id === 'helper').gripId, 'attacker');
   const released = arenaAction(betrayal, 4250);
   assert.equal(released.stage, 'betrayal');
-  assert.equal(released.actors.find(actor => actor.id === 'helper').gripId, undefined);
+  assert.equal(released.actors.find(actor => actor.id === 'helper'), undefined, 'the released helper remains outside the attacking and lifted poses');
   assert.equal(released.lift, 0, 'letting go alone is not an automatic rear throw');
   const broken = arenaStoryState(betrayal, 4250);
   assert.equal(broken.relation, '×');
@@ -290,8 +290,12 @@ test('focus reserves physical approach and uses living actors without changing t
       if (elapsed < round.start) assert.equal(arenaAction(round, elapsed).lift, 0, 'early arrival waits in an active guard instead of attacking ahead of time');
     }
     assert.ok(rounds.filter(round => round.tactic === 'team' || round.tactic === 'betrayal').length <= 1);
-    if (size < 7) assert.ok(rounds.every(round => round.tactic !== 'team' && round.tactic !== 'betrayal'));
-    assert.ok(!['team', 'betrayal'].includes(arenaExchange(order, 1000, duration)?.tactic));
+    if (size < 5) assert.ok(rounds.every(round => round.tactic !== 'team' && round.tactic !== 'betrayal'));
+    const opening = arenaExchange(order, 1000, duration);
+    if (['team', 'betrayal'].includes(opening?.tactic)) {
+      const ranks = arenaRanks(order, 1000, duration);
+      assert.ok(order.filter(id => !ranks[id]).length >= 5, 'an opening alliance still needs at least five living fighters');
+    }
     assert.deepEqual(arenaRanks(order, duration, duration), Object.fromEntries(order.map((id, index) => [id, index + 1])));
     assert.deepEqual(order, original);
   }
@@ -303,7 +307,7 @@ test('alliance attacks are a sparse surprise and are never invented by backgroun
     const order = Array.from({ length: size }, (_, index) => `field-${variation}-${index}`);
     const rounds = arenaRounds(order), alliances = rounds.filter(round => ['team', 'betrayal'].includes(round.tactic));
     assert.ok(alliances.length <= 1, `repeated alliance in a ${size}-person match`);
-    if (size < 7) assert.equal(alliances.length, 0, 'small matches use individual tactics');
+    if (size < 5) assert.equal(alliances.length, 0, 'small matches use individual tactics');
     else { largeGames++; if (alliances.length) allianceGames++; }
     const available = order.map((id, index) => ({ id, ...arenaStartingPoint(index, size) }));
     for (const round of rounds) for (const mini of arenaMiniExchanges(available, round.start - 500 * round.timeScale, 44_000, rounds)) {

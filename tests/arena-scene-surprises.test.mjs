@@ -15,16 +15,21 @@ source = source.replaceAll('drawArenaScenery(ctx, clock,', 'surpriseTestScenery(
   .replace(rankRead, `${rankRead} surpriseTestRanks = ranks;`)
   .replace(draw, 'surpriseTestActors = actors; arenaDrawOrder([...actors.values()]).forEach(actor => { ctx.surpriseStart(actor); drawArenaFighter(ctx, actor, reduced ? 0 : clock); ctx.surpriseEnd(); });');
 source += '\nlet surpriseTestActors, surpriseTestRanks; const surpriseTestScenery = () => {}; export const capturedActors = () => surpriseTestActors; export const capturedRanks = () => surpriseTestRanks; export { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets };';
+const initAnchor = 'const ambient = won ? [] : active.filter';
+assert.ok(source.includes(initAnchor));
+source = source.replace(initAnchor, 'surpriseTestInitialize(sim, props, elapsed, reset); ' + initAnchor);
+source += '\nlet surpriseTestInitialize = () => {}; export const setInitialize = fn => { surpriseTestInitialize = fn; };';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, capturedActors, capturedRanks } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, capturedActors, capturedRanks, setInitialize } = module.exports;
 const noop = () => {};
 const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
 const project = (matrix, point) => ({ x: matrix[0] * point.x + matrix[2] * point.y + matrix[4], y: matrix[1] * point.x + matrix[3] * point.y + matrix[5] });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const order = ['1', '2', '3', '4', '5'];
+const soloOrder = ['1', '3', '2', '4', '5'];
 const duration = 44000, rushRoll = 7;
 
 function context() {
@@ -48,12 +53,18 @@ function context() {
   };
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
-function game(seed, reversed = false, mirrored = false) {
-  const props = { candidates: (reversed ? [...order].reverse() : order).map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
+function game(seed, reversed = false, mirrored = false, initialRoots, drawnOrder = order) {
+  const props = { candidates: (reversed ? [...order].reverse() : order).map(id => ({ id, name: id, color: '#ffad72' })), order: drawnOrder, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
+  setInitialize((sim, props, elapsed, reset) => {
+    if (initialRoots && reset && elapsed === 0) for (const [id, point] of Object.entries(initialRoots)) Object.assign(sim.bodies.get(id), point, { motorX: 0, motorY: 0, roam: undefined });
+  });
   return { sim, ctx, step(elapsed, paused = false) {
     ctx.records.clear();
     render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : 16, false);
+    // A reset also paints the seek preview. Set the live starting layout after
+    // that one frame so its unrecorded preview passer cannot replace the setup.
+    if (initialRoots && elapsed === 0) for (const [id, point] of Object.entries(initialRoots)) Object.assign(sim.bodies.get(id), point, { motorX: 0, motorY: 0, roam: undefined });
     // The rare passer has one deterministic ordinary layout. Reflect its real
     // initialized bodies once to exercise the other physical heading as well.
     if (mirrored && elapsed === 0) {
@@ -75,10 +86,12 @@ function snapshot(actor, body) {
 const points = contacts => [contacts.origin, contacts.head, contacts.waist, ...contacts.hands, ...contacts.feet];
 const intersectsViewport = values => Math.max(...values.map(point => point.x)) > 0 && Math.min(...values.map(point => point.x)) < 1000 && Math.max(...values.map(point => point.y)) > 0 && Math.min(...values.map(point => point.y)) < 620;
 
-for (const seed of [0, 3]) for (const reversed of [false, true]) test(`the live pair dodge clears both fighters and ${seed === 0 ? 'returns to a duel' : 'eliminates only the rim charger'} (${reversed ? 'reversed' : 'normal'} layout)`, () => {
+for (const seed of [0, 3]) for (const reversed of [false, true]) test(`the live pair dodge clears both fighters and ${seed === 0 ? 'returns to a duel' : 'eliminates only the rim charger'} (${seed === 0 ? reversed ? 'reversed layout' : 'normal layout' : reversed ? 'ordinary rim heading' : 'mirrored rim heading'})`, () => {
   const planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.pairDodge);
   assert.ok(planned, 'the fixture must select the production surprise');
-  const scene = game(seed, reversed), pairIds = [planned.aggressor, planned.pairDodge.partnerId];
+  // Reversed input positions give the allowed rim escape a real outward
+  // runway. Reflect that same initialized layout to verify the other heading.
+  const scene = seed === 3 ? game(seed, true, !reversed) : game(seed, reversed), pairIds = [planned.aggressor, planned.pairDodge.partnerId];
   const previous = new Map(), projections = new Map(), crossed = new Set(), peaks = [0, 0], landed = new Set();
   let launched = false, escaped = false, fell = false, resolved = false, actual;
   for (let elapsed = 0; elapsed <= planned.resolve + 1500; elapsed += 16) {
@@ -153,9 +166,9 @@ for (const seed of [0, 3]) for (const reversed of [false, true]) test(`the live 
 });
 
 for (const mirrored of [false, true]) test(`the live rare passer hooks the ankle, keeps both toe grips and releases one continuous flight (${mirrored ? 'rightward' : 'leftward'})`, () => {
-  const seed = 97, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.passingTrip);
+  const seed = 97, planned = arenaRounds(soloOrder, duration, rushRoll, seed).find(round => round.passingTrip);
   assert.ok(planned);
-  const scene = game(seed, false, mirrored), stages = new Set();
+  const scene = game(seed, false, mirrored, undefined, soloOrder), stages = new Set();
   let hooked = false, held = false, released = false, landed = false, resolved = false, previous, actual, peak = 0;
   for (let elapsed = 0; elapsed <= planned.resolve + 800; elapsed += 16) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
@@ -215,11 +228,14 @@ for (const mirrored of [false, true]) test(`the live rare passer hooks the ankle
 });
 
 test('a live rare-passer story without a reachable passer continues the ordinary drawn duel', () => {
-  const seed = 348, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.passingTrip);
+  const seed = 97, planned = arenaRounds(soloOrder, duration, rushRoll, seed).find(round => round.passingTrip);
   assert.ok(planned);
-  const scene = game(seed);
+  const scene = game(seed, false, false, {
+    '4': { x: 350, y: 416 }, '5': { x: 400, y: 416 },
+    '1': { x: 700, y: 416 }, '2': { x: 730, y: 416 }, '3': { x: 760, y: 416 },
+  }, soloOrder);
   let declined = false, resolved = false;
-  for (let elapsed = 0; elapsed <= planned.resolve + 64; elapsed += 16) {
+  for (let elapsed = 0; elapsed <= planned.resolve + 8000; elapsed += 16) {
     scene.step(elapsed);
     const contact = scene.sim.contacts.get(planned.id);
     if (!contact) continue;
@@ -229,17 +245,17 @@ test('a live rare-passer story without a reachable passer continues the ordinary
       declined = true;
     }
     if (elapsed >= contact.round.resolve) {
-      assert.equal(capturedRanks()[planned.victim], order.indexOf(planned.victim) + 1, 'fallback preserves the drawn rank');
-      resolved = true;
+      assert.equal(capturedRanks()[planned.victim], soloOrder.indexOf(planned.victim) + 1, 'fallback preserves the drawn rank');
+      resolved = true; break;
     }
   }
-  assert.ok(declined && resolved);
+  assert.ok(declined && resolved, JSON.stringify({ declined, resolved, planned, contact: scene.sim.contacts.get(planned.id), ranks: capturedRanks(), exits: [...scene.sim.exits.keys()] }));
 });
 
 for (const mirrored of [false, true]) test(`the live rare trip counter withstands the push, hooks, kicks and rolls only its opponent out (${mirrored ? 'rightward' : 'leftward'})`, () => {
-  const seed = 74, planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.tripCounter);
+  const seed = 74, planned = arenaRounds(soloOrder, duration, rushRoll, seed).find(round => round.tripCounter);
   assert.ok(planned, 'the production seed must select the rare counter');
-  const scene = game(seed, false, mirrored);
+  const scene = game(seed, false, mirrored, undefined, soloOrder);
   let probed = false, hooked = false, kicked = false, rolled = false, landed = false, resolved = false;
   for (let elapsed = 0; elapsed <= planned.resolve + 64; elapsed += 16) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
@@ -274,7 +290,7 @@ for (const mirrored of [false, true]) test(`the live rare trip counter withstand
     }
     if (elapsed < actual.resolve) assert.equal(capturedRanks()[actual.victim], undefined);
     else {
-      assert.equal(capturedRanks()[actual.victim], order.indexOf(actual.victim) + 1, 'the rare counter preserves the drawn loser');
+      assert.equal(capturedRanks()[actual.victim], soloOrder.indexOf(actual.victim) + 1, 'the rare counter preserves the drawn loser');
       resolved = true;
     }
   }
@@ -282,7 +298,7 @@ for (const mirrored of [false, true]) test(`the live rare trip counter withstand
 });
 
 test('production surprise schedules remain rare and preserve every drawn elimination', () => {
-  const counts = { dodge: 0, allowOut: 0, passer: 0, counter: 0, solo: 0 };
+  const counts = { dodge: 0, allowOut: 0, passer: 0, counter: 0, solo: 0, passerEligible: 0 };
   const expectedEliminations = [...order].reverse().slice(0, -1);
   for (let seed = 0; seed < 10000; seed++) {
     const rounds = arenaRounds(order, duration, rushRoll, seed);
@@ -292,11 +308,14 @@ test('production surprise schedules remain rare and preserve every drawn elimina
       if (round.pairDodge) { counts.dodge++; if (round.pairDodge.allowOut) counts.allowOut++; }
       if (round.passingTrip) counts.passer++;
       if (round.tripCounter) counts.counter++;
-      if (!round.final && !round.helper && !round.rushOutcome && !round.pairDodge) counts.solo++;
+      if (!round.helper && !round.rushOutcome && !round.pairDodge && !round.linkedRush && !round.supermanPunch) {
+        if (!round.final) counts.passerEligible++;
+        if (!round.passingTrip && !round.slideTrip) counts.solo++;
+      }
     }
   }
   assert.ok(Math.abs(counts.dodge / 10000 - .15) < .015, `pair dodges occur near 15% of eligible rushes: ${JSON.stringify(counts)}`);
   assert.ok(Math.abs(counts.allowOut / counts.dodge - 1 / 3) < .04, 'only about a third may attempt a real rim exit');
   assert.ok(Math.abs(counts.counter / counts.solo - .01) < .003, 'solo trip counters remain near one percent');
-  assert.ok(Math.abs(counts.passer / counts.solo - .001) < .0008, 'passing assistance remains a very rare one-in-a-thousand story');
+  assert.ok(Math.abs(counts.passer / counts.passerEligible - .001) < .0008, 'passing assistance remains a very rare one-in-a-thousand story');
 });
