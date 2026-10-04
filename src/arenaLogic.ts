@@ -238,11 +238,12 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
     const rush = arenaPairRushTargets(round, elapsed, { x: 500, y: 416 });
     const caught = rush.grip === 'arms-legs';
     const counter = rush.outcome === 'counter-throw';
-    action.stage = post ? 'throw' : caught ? rush.lift > 0 ? 'joint-attack' : 'link' : rush.stage === 'rebound' || rush.stage === 'groggy' ? 'resist' : rush.stage === 'push' ? 'joint-attack' : 'approach';
+    const rushPost = post && !rush.waitingForGrip && (!counter || elapsed >= rush.requiredImpactAt);
+    action.stage = rushPost ? 'throw' : caught ? rush.lift > 0 ? 'joint-attack' : 'link' : rush.stage === 'rebound' || rush.stage === 'groggy' ? 'resist' : rush.stage === 'push' ? 'joint-attack' : 'approach';
     action.attackers = counter ? [a, h] : [a]; action.allies = counter && caught ? [a, h] : [];
     action.targetId = v; action.lift = rush.lift; action.liftedId = rush.lift > 0 ? v : undefined;
     const point = (id: string) => id === a ? rush.aggressor : id === h ? rush.helper : rush.victim;
-    const pose = (id: string): ArenaActionPose => id === rush.chargerId ? rush.stage === 'charge' ? 'run' : !counter && rush.chargerPose === 'push' ? 'push' : counter && ['groggy', 'grip', 'lift', 'overhead', 'toss', 'release'].includes(rush.stage) ? 'stunned' : 'brace' : caught ? rush.lift > 0 ? 'overhead' : 'grapple' : post ? counter ? 'throw' : 'brace' : rush.grip === 'pair' ? 'grapple' : 'brace';
+    const pose = (id: string): ArenaActionPose => id === rush.chargerId ? rush.stage === 'charge' ? 'run' : !counter && rush.chargerPose === 'push' ? 'push' : counter && ['groggy', 'grip', 'lift', 'overhead', 'toss', 'release'].includes(rush.stage) ? 'stunned' : 'brace' : caught ? rush.lift > 0 ? 'overhead' : 'grapple' : rushPost ? counter ? 'throw' : 'brace' : rush.grip === 'pair' ? 'grapple' : 'brace';
     const grip = (id: string) => caught ? id === v ? undefined : v : rush.grip === 'pair' && rush.pairIds.includes(id) ? rush.pairIds.find(other => other !== id) : undefined;
     action.actors = [actor(a, 'aggressor', point(a).x - 500, point(a).y - 416, pose(a), !counter && rush.chargerPose === 'push' ? rush.pushStroke : rush.phase, grip(a), counter ? '팔을 잡는 선수' : '충돌로 밀어붙이는 선수'), actor(v, 'victim', point(v).x - 500, point(v).y - 416, pose(v), rush.phase, grip(v), counter ? '돌진 후 그로기' : '함께 밀리는 선수'), actor(h, 'helper', point(h).x - 500, point(h).y - 416, pose(h), rush.phase, grip(h), counter ? '다리를 잡는 선수' : '함께 밀리는 선수')];
     return action;
@@ -613,7 +614,7 @@ export function arenaRounds(order: string[], duration = 44_000, rushRoll = 7, es
     const overheadEscape = !specialStory && escapeSeed !== undefined && !escape && !round.helper && !round.rushOutcome && round.tactic === 'suplex' && recoveries < 1
       && arenaEscapeRoll(escapeSeed, round.index + 39) % 100 >= 8 && arenaEscapeRoll(escapeSeed, round.index + 307) % 100 < 2;
     const recovery: ArenaRecoveryWindow | undefined = overheadEscape ? { start: entry, throwAt: entry + recoveryThrowSpan, end: entry + recoveryThrowSpan + ARENA_RECOVERY_EXIT_DURATION, kind: 'overhead-escape' }
-      : !specialStory && escapeSeed !== undefined && !escape && !round.helper && !round.rushOutcome && ['lift', 'brace', 'counter', 'final', 'catch', 'spin', 'armspin', 'suplex', 'elbow'].includes(round.tactic) && recoveries < 1 && arenaEscapeRoll(escapeSeed, round.index + 67) % 100 < 4 ? { start: entry, throwAt: entry + recoveryThrowSpan, end: entry + recoveryThrowSpan + ARENA_RECOVERY_EXIT_DURATION } : undefined;
+      : !specialStory && escapeSeed !== undefined && !escape && !round.helper && !round.rushOutcome && ['lift', 'brace', 'counter', 'final', 'catch', 'spin', 'armspin', 'suplex', 'elbow'].includes(round.tactic) && recoveries < 1 && arenaEscapeRoll(escapeSeed, round.index + 67) % 100 < 5 ? { start: entry, throwAt: entry + recoveryThrowSpan, end: entry + recoveryThrowSpan + ARENA_RECOVERY_EXIT_DURATION } : undefined;
     if (recovery) recoveries++;
     // A separate cosmetic roll changes the story, never the drawn placement.
     if (!specialStory && !round.helper && ['lift', 'suplex', 'final'].includes(round.tactic) && arenaEscapeRoll(escapeSeed ?? seed, round.index + 39) % 100 < 8) round = { ...round, tactic: 'elbow' };

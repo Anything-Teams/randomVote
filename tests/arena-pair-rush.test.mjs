@@ -53,6 +53,22 @@ test('either story branch uses distinct living actors and consumes only the alre
   }
 });
 
+test('a delayed counter never shows a throw before its actual collision and release', () => {
+  const waiting = { ...round(7), rushLaunchAt: null, resolve: 15000, end: 15000 };
+  for (const elapsed of [waiting.impact, waiting.impact + 600, waiting.impact + 1800]) {
+    const frame = arenaPairRushTargets(waiting, elapsed, { x: 500, y: 416 });
+    const action = arenaAction(waiting, elapsed);
+    assert.equal(frame.stage, 'wrestle');
+    assert.equal(frame.grip, 'pair');
+    assert.equal(action.stage, 'approach');
+    assert.equal(action.lift, 0);
+    for (const id of frame.pairIds) assert.equal(action.actors.find(actor => actor.id === id).pose, 'grapple');
+  }
+  const delayed = { ...waiting, rushLaunchAt: 9000, rushContactAt: 10000, impact: 10000 + ARENA_PAIR_COUNTER_TIMING.release };
+  assert.equal(arenaAction(delayed, 10020).stage, 'resist', 'the recorded collision starts the rebound even after the planned impact');
+  assert.equal(arenaAction(delayed, 12300).stage, 'throw', 'the helpers release only after the complete actual lifting stroke');
+});
+
 test('a failed rush rebounds, pauses groggy, and is grabbed at both ends before the shared throw', () => {
   for (const side of [-1, 1]) {
     const actual = round(7, side), contact = frameAtBeat(actual, .44), rebound = frameAtBeat(actual, .52), groggy = frameAtBeat(actual, .58), grabbed = frameAtBeat(actual, .73), raised = frameAtBeat(actual, .93), tossed = frameAtBeat(actual, .98), release = frameAtBeat(actual, 1);

@@ -45,10 +45,16 @@ function sceneParticipants(round: ArenaRound, elapsed = -Infinity) {
 
 const sceneTimed = (round: ArenaRound) => round.rushOutcome === 'counter-throw' || !!round.pairDodge || !!round.passingTrip || !!round.slideTrip || !!round.supermanPunch;
 
+/** Later planned eliminations cannot pass an unfinished physical encounter. */
+function resolvedRounds(rounds: ArenaRound[], elapsed: number): ArenaRound[] {
+  const pending = rounds.findIndex(round => elapsed < round.resolve);
+  return pending < 0 ? rounds : rounds.slice(0, pending);
+}
+
 /** A contact-triggered throw also resolves the scene and roster at its actual time. */
 function resolvedRanks(order: string[], rounds: ArenaRound[], elapsed: number): Record<string, number> {
   const ranks: Record<string, number> = {};
-  for (const round of rounds) if (elapsed >= round.resolve) {
+  for (const round of resolvedRounds(rounds, elapsed)) {
     ranks[round.victim] = order.indexOf(round.victim) + 1;
     if (round.secondaryVictim) ranks[round.secondaryVictim] = order.indexOf(round.secondaryVictim) + 1;
     if (round.final) ranks[round.aggressor] = 1;
@@ -143,10 +149,19 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   const reset = sim.key !== signature || seek;
   if (reset) { sim.key = signature; sim.epoch++; sim.bodies.clear(); sim.contacts.clear(); sim.exits.clear(); sim.minis.clear(); }
   sim.elapsed = elapsed;
+  if (!reset && !props.preview) for (const contact of sim.contacts.values()) {
+    const round = contact.round;
+    if (round.rushOutcome !== 'counter-throw' || round.linkedRush || round.rushLaunchAt !== null || elapsed < round.start || sim.exits.has(round.victim)) continue;
+    // The original finish is only a plan. Until the pair has actually taken
+    // hold, reserve the complete post-contact throw instead of launching or
+    // removing the waiting runner at that nominal deadline.
+    const resolve = Math.max(round.resolve, elapsed + ARENA_PAIR_COUNTER_TIMING.release + 1100 * (round.timeScale ?? props.duration / 44_000));
+    if (resolve > round.resolve) contact.round = { ...round, resolve, end: Math.max(round.end, resolve) };
+  }
   const rounds = arenaRounds(order, props.duration, props.arenaRushRoll, props.arenaEscapeSeed).map(round => sceneTimed(round) ? sim.contacts.get(round.id)?.round ?? round : round);
   const unit = rounds[0]?.timeScale ?? props.duration / 44_000;
   const ranks = props.preview ? {} : resolvedRanks(order, rounds, elapsed);
-  const won = !props.preview && !!rounds.length && elapsed >= rounds.at(-1)!.resolve;
+  const won = !props.preview && !!rounds.length && resolvedRounds(rounds, elapsed).length === rounds.length;
   const podiumPlaces = arenaPodium(order, props.duration, props.arenaRushRoll, props.arenaEscapeSeed), podiumById = new Map(podiumPlaces.map(place => [place.id, place]));
   const releasedIds = new Set(rounds.filter(round => round.escape?.outcome === 'separate' && elapsed >= round.escape.end && elapsed < round.start).flatMap(round => [round.escape!.runnerId, round.escape!.chaserId! ]));
   const upcomingPlan = props.preview || won ? undefined : rounds.find(round => {
@@ -201,7 +216,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     return { round, origin, landing: { x: side < 0 ? 115 : 885, y: round.tactic === 'bait' || round.tactic === 'edge' || round.tactic === 'shove' || round.tactic === 'double-shove' ? Math.max(436, origin.y + 40) : 436 }, side, bench, lift, angle, velocity };
   };
   // A direct skip or paused fixture seek creates every eliminated actor as well.
-  if (!props.preview) rounds.filter(round => elapsed >= round.resolve).forEach(round => arenaEliminatedIds(round).forEach(id => {
+  if (!props.preview) resolvedRounds(rounds, elapsed).forEach(round => arenaEliminatedIds(round).forEach(id => {
     if (sim.exits.has(id)) return;
     const center = arenaLocalContact({ x: 500, y: 425 }, []), actual = arenaContactRound(round, center);
     const rush = actual.rushOutcome ? arenaPairRushTargets(actual, actual.impact, center) : undefined;
@@ -992,7 +1007,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         if (!body || !actor || sim.exits.has(part.id)) return;
         let target = technique ? part.id === exchange.victim ? technique.victim : technique.aggressor : charge ? part.id === exchange.victim ? charge.charger : charge.target : caught ? part.id === exchange.victim ? caught.charger : caught.receiver : spin ? part.id === exchange.victim ? spin.attacker : spin.defender : ram ? part.id === exchange.victim ? ram.victim : ram.driver : shove ? part.id === exchange.victim ? shove.victim : part.id === exchange.helper ? shove.helper : shove.aggressor : edge ? part.id === exchange.victim ? edge.victim : edge.aggressor : { x: center.x + part.offset.x, y: center.y + part.offset.y };
         if (rush?.grip === 'pair' && rush.pairIds.includes(part.id)) target = { ...target, y: center.y + (part.id === rush.pairIds[0] ? 6 : -6) };
-        if (rush?.outcome === 'counter-throw' && rush.pairIds.includes(part.id) && rush.grip !== 'arms-legs' && elapsed >= rush.contactAt && elapsed < exchange.impact) {
+        if (rush?.outcome === 'counter-throw' && !rush.waitingForGrip && rush.pairIds.includes(part.id) && rush.grip !== 'arms-legs' && elapsed >= rush.contactAt && elapsed < exchange.impact) {
           // Approach the actual grounded limbs before taking hold. The normal
           // motor still governs each planted step.
           const gripFrame = arenaPairRushTargets(exchange, rush.contactAt + ARENA_PAIR_COUNTER_TIMING.grip, center, contact.chargerOrigin, contact.pairCarryOrigins);
@@ -1291,7 +1306,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         contact.committed = true;
         if (elapsed < exchange.start + (exchange.impact - exchange.start) * contactPhase) contact.round = { ...contact.round, start: (elapsed - contactPhase * exchange.impact) / (1 - contactPhase) };
       }
-      if (!exchange.exchange && !['trip', 'sidekick'].includes(exchange.tactic) && elapsed >= exchange.impact) arenaEliminatedIds(exchange).forEach(id => {
+      if (!exchange.exchange && !['trip', 'sidekick'].includes(exchange.tactic) && elapsed >= exchange.impact
+        && (!rush || rush.outcome !== 'counter-throw' || !rush.waitingForGrip && elapsed >= rush.requiredImpactAt)) arenaEliminatedIds(exchange).forEach(id => {
         if (sim.exits.has(id)) return;
         const body = sim.bodies.get(id), victim = actors.get(id), exitRound = id === exchange.victim ? exchange : { ...exchange, victim: id, secondaryVictim: undefined };
         const jointThrow = rush?.outcome === 'counter-throw' && id === exchange.victim;
@@ -1547,7 +1563,7 @@ export default function ArenaShow(props: SportsStageProps) {
       ctx.setTransform(scale, 0, 0, scale, (width - W * scale) / 2, (height - H * scale) / 2); ctx.imageSmoothingEnabled = false;
       const elapsed = clamp(state.elapsed + (state.paused || state.preview ? 0 : Math.min(80, Math.max(0, now - sampledAt.current))), 0, state.duration);
       const frameRound = render(ctx, state, elapsed, clock, sim, state.paused ? 0 : delta, media.matches);
-      const frameKey = [sim.key, sim.epoch, ...(frameRound ? [frameRound.id, frameRound.tactic, frameRound.aggressor, frameRound.victim, frameRound.helper, frameRound.rushOutcome, frameRound.rushLaunchAt, frameRound.rushContactAt, frameRound.pushContactAt, frameRound.sidekickLaunchAt, frameRound.suplexGripAt, frameRound.supermanPunch?.launchAt, frameRound.supermanPunch?.hitAt, frameRound.slideTrip?.launchAt, frameRound.slideTrip?.hookAt, frameRound.slideTrip?.kickAt, frameRound.linkedRush?.launchAt, frameRound.linkedRush?.contactAt, frameRound.pairDodge?.launchAt, frameRound.pairDodge?.contactAt, frameRound.pairDodge?.outcome, frameRound.pairDodge?.end, frameRound.passingTrip?.start, frameRound.passingTrip?.hookAt, frameRound.passingTrip?.launchAt, frameRound.passingTrip?.joined, frameRound.passingTrip?.end, frameRound.rim?.contactAt, frameRound.rim?.outcome, frameRound.rim?.start, frameRound.rim?.end, frameRound.rimCharge?.outcome, frameRound.rimCharge?.start, frameRound.rimCharge?.end, frameRound.start, frameRound.impact, state.arenaEscapeSeed, frameRound.escape?.ungripped] : [])].join(':');
+      const frameKey = [sim.key, sim.epoch, ...(frameRound ? [frameRound.id, frameRound.tactic, frameRound.aggressor, frameRound.victim, frameRound.helper, frameRound.rushOutcome, frameRound.rushLaunchAt, frameRound.rushContactAt, frameRound.pushContactAt, frameRound.sidekickLaunchAt, frameRound.suplexGripAt, frameRound.supermanPunch?.launchAt, frameRound.supermanPunch?.hitAt, frameRound.slideTrip?.launchAt, frameRound.slideTrip?.hookAt, frameRound.slideTrip?.kickAt, frameRound.linkedRush?.launchAt, frameRound.linkedRush?.contactAt, frameRound.pairDodge?.launchAt, frameRound.pairDodge?.contactAt, frameRound.pairDodge?.outcome, frameRound.pairDodge?.end, frameRound.passingTrip?.start, frameRound.passingTrip?.hookAt, frameRound.passingTrip?.launchAt, frameRound.passingTrip?.joined, frameRound.passingTrip?.end, frameRound.rim?.contactAt, frameRound.rim?.outcome, frameRound.rim?.start, frameRound.rim?.end, frameRound.rimCharge?.outcome, frameRound.rimCharge?.start, frameRound.rimCharge?.end, frameRound.start, frameRound.impact, frameRound.resolve, state.arenaEscapeSeed, frameRound.escape?.ungripped] : [])].join(':');
       if (frameKey !== narrationKey) {
         narrationKey = frameKey;
         setSceneFrame({ key: sim.key, round: frameRound, rounds: [...sim.contacts.values()].filter(contact => sceneTimed(contact.round)).map(contact => contact.round) });
@@ -1562,7 +1578,7 @@ export default function ArenaShow(props: SportsStageProps) {
   const currentFrame = sceneFrame?.key === sceneSignature(props) ? sceneFrame : undefined;
   const actualRounds = rounds.map(round => currentFrame?.rounds.find(actual => actual.id === round.id) ?? round);
   const ranks = props.preview ? {} : resolvedRanks(order, actualRounds, props.elapsed);
-  const finished = !props.preview && !!rounds.length && props.elapsed >= rounds.at(-1)!.resolve;
+  const finished = !props.preview && !!actualRounds.length && resolvedRounds(actualRounds, props.elapsed).length === actualRounds.length;
   const plannedRound = finished ? actualRounds.at(-1) : actualRounds.find(round => props.elapsed < round.resolve);
   const round = currentFrame && currentFrame.round?.id === plannedRound?.id ? currentFrame.round : plannedRound;
   const narration = arenaNarration(props.preview ? undefined : round, props.candidates, order, props.elapsed, props.preview);

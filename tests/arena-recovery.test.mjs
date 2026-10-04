@@ -7,6 +7,7 @@ async function source(path) {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
 const { ARENA_RECOVERY_DURATION, ARENA_RECOVERY_THROW_SPAN, ARENA_RECOVERY_EXIT_DURATION, arenaRecoveryTargets } = await source('src/arenaRecovery.ts');
+const { arenaEscapeRoll } = await source('src/arenaEscape.ts');
 const { arenaAction, arenaBeat, arenaThrow, arenaFocusRound, arenaPlaybackEnd, arenaRanks, arenaRounds } = await source('src/arenaLogic.ts');
 const { sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -84,7 +85,7 @@ test('the survival branch uses the same full lift and release timing as an ordin
   }
 });
 
-test('the optional recovery prelude is close to four percent of eligible encounters and never redraws a final', () => {
+test('the optional somersault recovery selects five percent of eligible story rolls and never redraws a final', () => {
   let order;
   for (let variant = 0; variant < 100 && !order; variant++) {
     const candidate = [`recovery-${variant}-a`, `recovery-${variant}-v`], final = arenaRounds(candidate).at(-1);
@@ -92,15 +93,22 @@ test('the optional recovery prelude is close to four percent of eligible encount
   }
   assert.ok(order); assert.ok(arenaRounds(order).every(round => !round.recovery), 'omitting the cosmetic seed preserves a game without the optional prelude');
   assert.deepEqual(arenaRounds(order), arenaRounds(order, 44_000, 7, undefined));
-  let occurrences = 0;
+  let occurrences = 0, eligibleSamples = 0, addedBoundary = 0;
   const samples = 4096, original = [...order], expected = Object.fromEntries(order.map((id, index) => [id, index + 1]));
   for (let seed = 0; seed < samples; seed++) {
     const rounds = arenaRounds(order, 44_000, 7, seed), final = rounds.at(-1);
-    if (final.recovery && final.recovery.kind !== 'overhead-escape') occurrences++;
+    if (final.recovery?.kind !== 'overhead-escape') {
+      eligibleSamples++;
+      const roll = arenaEscapeRoll(seed, final.index + 67) % 100;
+      assert.equal(!!final.recovery, roll < 5, 'all existing rolls 0–3 survive; only roll 4 adds a new somersault');
+      if (final.recovery) occurrences++;
+      if (roll === 4) addedBoundary++;
+    }
     assert.equal(final.aggressor, order[0]); assert.equal(final.victim, order[1]); assert.equal(final.escape, undefined, 'the final pair cannot run away');
     assert.deepEqual(arenaRanks(order, 44_000, 44_000, 7, seed), expected);
   }
-  assert.ok(occurrences / samples > .027 && occurrences / samples < .053, `${occurrences}/${samples}: a recovery is a rare cosmetic surprise`);
+  assert.ok(addedBoundary > 0, 'the added one-percent band is exercised by deterministic cosmetic seeds');
+  assert.ok(occurrences / eligibleSamples > .037 && occurrences / eligibleSamples < .063, `${occurrences}/${eligibleSamples}: a somersault remains a rare cosmetic surprise`);
   assert.deepEqual(order, original);
 });
 
