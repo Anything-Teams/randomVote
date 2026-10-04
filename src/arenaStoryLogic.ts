@@ -8,6 +8,7 @@ import { arenaFloorExitTiming } from './arenaTechniques';
 import { arenaPairDodgeTargets } from './arenaPairDodge';
 import { ARENA_PASSING_TRIP_TIMING } from './arenaPassingTrip';
 import { arenaSlideTripTargets } from './arenaSlideTrip';
+import { arenaSupermanPunchTargets } from './arenaSupermanPunch';
 
 export type ArenaStoryState = {
   kind: string;
@@ -27,6 +28,23 @@ export type ArenaStoryState = {
 
 /** The same beat drives the bodies and the explanation of their relationship. */
 export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryState {
+  if (round.supermanPunch && elapsed >= round.supermanPunch.start && elapsed < round.resolve) {
+    const frame = arenaSupermanPunchTargets(round.supermanPunch, elapsed, { x: 500, y: 416 }, undefined, round.contactSide);
+    const hit = round.supermanPunch.hitAt != null && elapsed >= round.supermanPunch.hitAt;
+    const steps = ['속도 붙여 달리기', '발을 딛고 힘 모으기', '무릎 접어 도약', '한쪽 주먹 뻗기', '공격자 두 발 착지', hit ? '맞은 선수만 장외' : '다시 자세 고치기'];
+    const step = Math.max(0, ['approach', 'load', 'jump', 'punch', 'land', 'recover'].indexOf(frame.stage));
+    return { kind: 'superman-punch', label: step < 2 ? '달려들어 발을 딛는다' : step < 4 ? '도약 · 슈퍼맨 펀치!' : hit ? '공격자는 착지 · 상대만 장외' : '두 발로 착지해 중심을 잡는다',
+      action: [
+        '상대의 얼굴 앞을 보며 현재 위치에서 발을 박차 속도를 붙입니다.',
+        '앞발을 모래에 딛고 무릎을 굽힙니다. 한 손은 당기고 반대팔로 몸의 균형을 잡습니다.',
+        '모래를 박차고 뛰어올라 무릎을 접습니다. 상대를 보며 몸을 틀어 주먹을 준비합니다.',
+        hit ? '공중에서 뻗은 주먹이 상대의 턱 부근에 닿았습니다! 맞은 선수만 타격 방향으로 날아갑니다.' : '공중에서 한쪽 주먹을 상대의 얼굴 앞으로 뻗습니다. 반대팔은 접어 몸의 균형을 잡습니다.',
+        hit ? '공격한 선수는 발을 내밀어 모래판 안에 두 발로 착지합니다. 주먹을 맞은 상대만 바깥으로 날아갑니다.' : '공격한 선수는 발을 내려 모래판 안에 착지합니다. 무릎을 굽혀 착지의 힘을 받습니다.',
+        hit ? '주먹을 맞은 상대만 모래판 밖으로 나갑니다. 공격한 선수는 안쪽에서 주먹을 거두고 다음 상대를 봅니다.' : '착지한 자리에서 주먹을 거두고 중심을 바로잡습니다. 상대를 보며 다음 공방을 준비합니다.',
+      ][step], left: [round.aggressor], right: [round.victim], relation: step < 2 ? '→' : '↗',
+      relationLabel: step < 2 ? '달리기 · 발 딛기' : step < 4 ? hit ? '공중 펀치 적중' : '도약 · 한쪽 주먹 뻗기' : hit ? '공격자는 착지 · 맞은 상대 장외' : '모래판 안에 착지',
+      leftLabel: '도약해 주먹을 뻗는 선수', rightLabel: hit ? '주먹을 맞아 장외로 날아가는 선수' : '달려오는 상대를 보는 선수', steps, step };
+  }
   if (round.slideTrip && elapsed >= round.slideTrip.start && elapsed < round.resolve) {
     const frame = arenaSlideTripTargets(round.slideTrip, elapsed, { x: 500, y: 416 }, undefined, round.contactSide);
     const steps = ['달려들기', '모래 위 슬라이딩', '지지발 걸기', '뒤로 넘어졌다', '바로 일어서기', '몸통 발차기', '차인 선수 장외'];
