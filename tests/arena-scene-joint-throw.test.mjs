@@ -11,11 +11,11 @@ const draw = 'arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFig
 assert.ok(source.includes(draw));
 source = source.replaceAll('drawArenaScenery(ctx, clock,', 'jointTestScenery(ctx, clock,')
   .replace(draw, 'jointTestActors = actors; arenaDrawOrder([...actors.values()]).forEach(actor => { ctx.jointStart(actor); drawArenaFighter(ctx, actor, reduced ? 0 : clock); ctx.jointEnd(); });');
-source += '\nlet jointTestActors; const jointTestScenery = () => {}; export const capturedActors = () => jointTestActors; export { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks }; export { ARENA_PAIR_COUNTER_TIMING } from "./arenaPairRush";';
+source += '\nlet jointTestActors; const jointTestScenery = () => {}; export const capturedActors = () => jointTestActors; export { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks }; export { ARENA_PAIR_COUNTER_TIMING, ARENA_PAIR_THROW_UPWARD, ARENA_PAIR_THROW_FOLLOW_THROUGH } from "./arenaPairRush";';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks, capturedActors, ARENA_PAIR_COUNTER_TIMING } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks, capturedActors, ARENA_PAIR_COUNTER_TIMING, ARENA_PAIR_THROW_UPWARD, ARENA_PAIR_THROW_FOLLOW_THROUGH } = module.exports;
 const noop = () => {};
 const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
@@ -47,13 +47,13 @@ function context() {
   };
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
-function game(reversed = false) {
+function game(reversed = false, delta = 16) {
   const props = { candidates: order.map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
   return { sim, ctx, step(elapsed, paused = false) {
     ctx.records.clear();
-    render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : 16, false);
-    if (reversed && !paused && elapsed === planned.start - 2400) {
+    render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : delta, false);
+    if (reversed && !paused && elapsed >= planned.start - 2400 && elapsed < planned.start - 2400 + delta) {
       // Initialize the opposite field layout before this encounter's preparation
       // begins. Reserve its two wrestlers from incidental minis while they walk
       // into their real grips; no attached root is overridden later in the scene.
@@ -103,7 +103,7 @@ for (const reversed of [false, true]) test(`the live overhead joint throw inheri
       const age = elapsed - (exit.launchedAt ?? exit.round.impact);
       if (age < 880 * actualRound.timeScale) {
         assert.equal(now.pose, 'carried'); assert.ok(Math.abs(now.angle - exit.angle) <= .121, 'the released torso relaxes through one small tilt, without a full spin');
-        assert.ok(Math.abs(now.height - (exit.lift + 220 * (age / (880 * actualRound.timeScale)) - (exit.lift + 220) * (age / (880 * actualRound.timeScale)) ** 2)) < .001, 'the actual Scene uses the preserved height on one constant-gravity arc');
+        assert.ok(Math.abs(now.height - (exit.lift + ARENA_PAIR_THROW_UPWARD * (age / (880 * actualRound.timeScale)) - (exit.lift + ARENA_PAIR_THROW_UPWARD) * (age / (880 * actualRound.timeScale)) ** 2)) < .001, 'the actual Scene uses the preserved height on one constant-gravity arc');
         if (lastClock !== undefined && lastHeight !== undefined) {
           if (now.height > lastHeight + .01) { assert.equal(falling, false, 'the released victim cannot bounce upward again'); rising = true; }
           if (now.height < lastHeight - .01) falling = true;
@@ -120,7 +120,7 @@ for (const reversed of [false, true]) test(`the live overhead joint throw inheri
     previous = now;
   }
   assert.ok(released && rising && falling && landed, `the actual scene must include the full shared throw (${reversed})`);
-  assert.ok(peak > 172 && peak < 182, `the raised body has one readable, bounded apex (${peak})`);
+  assert.ok(peak > 232 && peak < 244, `the raised body has one readable, bounded apex (${peak})`);
 });
 
 test('the two live shared-throw layouts cover both directions', () => {
@@ -181,4 +181,51 @@ test('a paused direct seek reconstructs the overhead release height and its firs
     const repeat = scene.step(elapsed, true).get(planned.victim).animation.contactPoints;
     points(previous).forEach((point, index) => assert.ok(distance(point, points(repeat)[index]) < .001, 'repeated paused seeks cannot change the held body rig'));
   }
+});
+
+
+for (const reversed of [false, true]) for (const delta of [16, 50]) test(`the actual shared release follows upward then returns to guard without another throw (${reversed ? 'reversed' : 'normal'}/${delta}ms)`, () => {
+  const scene = game(reversed, delta);
+  let firstRelease, last, actual, recovered = false, complete = false;
+  const casters = [planned.aggressor, planned.helper];
+  const releaseFacings = new Map();
+  for (let elapsed = 0; elapsed <= planned.resolve + 300; elapsed += delta) {
+    const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
+    if (!contact || !actors.has(planned.aggressor)) continue;
+    actual = contact.round;
+    const age = elapsed - actual.impact;
+    if (age < -delta || age > 1250 * actual.timeScale) continue;
+    const now = new Map(casters.map(id => [id, { actor: actors.get(id), contacts: structuredClone(actors.get(id).animation.contactPoints) }]));
+    const exit = scene.sim.exits.get(planned.victim);
+    if (exit?.round.id === planned.id && age < 1100 * actual.timeScale) {
+      firstRelease ??= age;
+      for (const id of casters) {
+        const { actor, contacts } = now.get(id), detail = `${reversed}/${delta}/${age}/${id}`;
+        releaseFacings.set(id, releaseFacings.get(id) ?? actor.facing);
+        assert.equal(actor.facing, releaseFacings.get(id), `a caster cannot instantly turn back through its own release arms: ${detail}`);
+        assert.ok(actor.carrierRelease, `the support hands keep one continuous release clock: ${detail}`);
+        assert.equal(actor.gripTarget, undefined); assert.equal(actor.secondaryGripTarget, undefined); assert.equal(actor.gripStrength, 0);
+        assert.equal(actor.gripLocked, false, 'a released caster cannot reach after the flying body');
+        assert.ok(Math.hypot((actor.x - 500) / 303, (actor.y - 416) / 112) < 1, 'both carriers retain their planted roots inside the sand');
+        for (let arm = 0; arm < 2; arm++) {
+          assert.ok(Math.abs(distance(contacts.shoulders[arm], contacts.elbows[arm]) - 11 * actor.scale) < .001, `the release upper arm keeps its adult bone: ${detail}`);
+          assert.ok(Math.abs(distance(contacts.elbows[arm], contacts.hands[arm]) - 10.5 * actor.scale) < .001, `the release forearm cannot grow or shrink: ${detail}`);
+        }
+        if (age >= ARENA_PAIR_THROW_FOLLOW_THROUGH * actual.timeScale) {
+          assert.equal(actor.pose, 'guard', 'both helpers retract directly to a ready chest-height guard');
+          recovered = true;
+        } else assert.equal(actor.pose, 'overhead', 'the real supported arm stroke remains active through its follow-through');
+      }
+    }
+    if (firstRelease !== undefined && last && age >= 0) for (const id of casters) {
+      const before = last.get(id), after = now.get(id), rootDelta = { x: after.contacts.origin.x - before.contacts.origin.x, y: after.contacts.origin.y - before.contacts.origin.y };
+      for (const key of ['shoulders', 'elbows', 'hands']) after.contacts[key].forEach((point, arm) => {
+        const prior = before.contacts[key][arm];
+        assert.ok(distance(point, { x: prior.x + rootDelta.x, y: prior.y + rootDelta.y }) < (delta === 16 ? 19 : 49), `every release/guard arm moves continuously, including the old 350ms snap and return to ambient: ${reversed}/${delta}/${age}/${id}/${key}/${arm}`);
+      });
+    }
+    if (firstRelease !== undefined && age >= 1100 * actual.timeScale) complete = true;
+    last = now;
+  }
+  assert.ok(firstRelease !== undefined && recovered && complete, 'the natural live encounter exercises release, arm retraction and the complete outside landing');
 });

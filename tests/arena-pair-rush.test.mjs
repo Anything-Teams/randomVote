@@ -6,7 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { ARENA_PAIR_COUNTER_TIMING, ARENA_PAIR_CONTACT_RADIUS, arenaPairRushContact, arenaPairRushOutcome, arenaPairRushCast, arenaPairRushTargets, arenaPairRushFlight } = await source('src/arenaPairRush.ts');
+const { ARENA_PAIR_COUNTER_TIMING, ARENA_PAIR_CONTACT_RADIUS, ARENA_PAIR_THROW_UPWARD, arenaPairRushContact, arenaPairRushOutcome, arenaPairRushCast, arenaPairRushTargets, arenaPairRushFlight } = await source('src/arenaPairRush.ts');
 const { createArenaFighterAnimation, sampleArenaFighterContacts, arenaCarryHolderPoint } = await source('src/game/ArenaFighter.ts');
 const { arenaAction, arenaActionWords, arenaNarration } = await source('src/arenaLogic.ts');
 const { arenaStoryState } = await source('src/arenaStoryLogic.ts');
@@ -494,5 +494,26 @@ test('the overhead release rises once on a constant-gravity parabola and carries
     }
     assert.deepEqual({ x: at(1).groundX, y: at(1).groundY }, landing);
     assert.equal(at(1).height, 0);
+  }
+});
+
+
+test('the joint heave launches upward on one gravity arc without changing the outside landing or other throws', () => {
+  const held = { lift: 142, angle: Math.PI / 2, upward: ARENA_PAIR_THROW_UPWARD };
+  for (const unit of [.4, 1, 1.4]) for (const side of [-1, 1]) {
+    const origin = { x: 500, y: 416 }, landing = { x: side > 0 ? 885 : 115, y: 436 };
+    const at = phase => arenaPairRushFlight(phase * 880 * unit, origin, landing, side, unit, held);
+    assert.equal(at(0).height, held.lift, 'the upward heave preserves the actual height of both supports at release');
+    const apexPhase = ARENA_PAIR_THROW_UPWARD / (2 * (held.lift + ARENA_PAIR_THROW_UPWARD));
+    assert.ok(at(apexPhase).height > 232 && at(apexPhase).height < 244, 'the heave gains a readable upward arc above the carriers');
+    const samples = Array.from({ length: 11 }, (_, index) => at(index / 10));
+    const changes = samples.slice(1).map((sample, index) => sample.height - samples[index].height);
+    for (let index = 1; index < changes.length; index++) assert.ok(Math.abs((changes[index] - changes[index - 1]) + 2 * (held.lift + ARENA_PAIR_THROW_UPWARD) * .01) < 1e-8, 'one constant gravity acceleration carries the body down, without another upward bounce');
+    assert.ok(changes[0] > 0 && changes.at(-1) < 0);
+    const landed = at(1);
+    assert.equal(landed.stage, 'land'); assert.equal(landed.height, 0); assert.deepEqual({ x: landed.x, y: landed.y }, landing);
+    assert.equal(arenaPairRushFlight(1100 * unit, origin, landing, side, unit, held).stage, 'recover', 'the ranking and recovery clock stay unchanged');
+    const other = arenaPairRushFlight(880 * unit * 220 / (2 * 362), origin, landing, side, unit, { lift: 142, angle: side * Math.PI / 2 });
+    assert.ok(other.height > 172 && other.height < 182, 'the separate passing-trip throw retains its existing flight');
   }
 });

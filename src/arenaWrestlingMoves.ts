@@ -11,10 +11,11 @@ export type ArenaWrestlingMoveOrigins = {
   driver: ArenaPoint; victim: ArenaPoint; target?: ArenaPoint; contactTargets?: [ArenaPoint, ArenaPoint];
   launchDriver?: ArenaPoint; launchVictim?: ArenaPoint; contactDriver?: ArenaPoint; contactVictim?: ArenaPoint;
   ankles?: [ArenaPoint, ArenaPoint]; ankleDriver?: ArenaPoint; pickupDriver?: ArenaPoint; floorVictim?: ArenaPoint; kickTarget?: ArenaPoint; kickDriver?: ArenaPoint;
+  scoopWaist?: ArenaPoint; scoopFloorWaist?: ArenaPoint; scoopFloorVictim?: ArenaPoint;
 };
 type Slam = { tuck: number; slump: number };
 export type ArenaWrestlingMoveFrame = {
-  kind: ArenaWrestlingMoveKind; stage: 'approach' | 'load' | 'attack' | 'contact' | 'fall' | 'land' | 'recover' | 'groggy' | 'ankle-approach' | 'ankle-grip' | 'toss' | 'release';
+  kind: ArenaWrestlingMoveKind; stage: 'approach' | 'load' | 'attack' | 'contact' | 'lift' | 'turn' | 'fall' | 'land' | 'recover' | 'groggy' | 'ankle-approach' | 'ankle-grip' | 'toss' | 'release';
   active: boolean; side: 1 | -1; canPerform: boolean; missed: boolean; recovered: boolean;
   driver: ArenaPoint; victim: ArenaPoint; driverVelocity: ArenaPoint; victimVelocity: ArenaPoint;
   driverFacing: 1 | -1; victimFacing: 1 | -1;
@@ -25,10 +26,11 @@ export type ArenaWrestlingMoveFrame = {
   driverJumpTuck: number; victimJumpTuck: number; driverSlam?: Slam; victimSlam?: Slam;
   clotheslineTarget?: ArenaPoint; clotheslineStrength: number;
   footTargets?: [ArenaPoint, ArenaPoint]; feetStrength: number; dropkickProgress: number;
-  gripTargets?: [ArenaPoint, ArenaPoint]; gripStrength: number; gripMode?: 'head' | 'waist' | 'ankle'; bulldogProgress: number; backBodyProgress: number;
+  gripTargets?: [ArenaPoint, ArenaPoint]; gripStrength: number; gripMode?: 'head' | 'waist' | 'ankle' | 'cradle'; bulldogProgress: number; backBodyProgress: number;
   spinebusterProgress: number; scoopSlamProgress: number; victimCarryStretch?: number;
+  scoopLoad: number; scoopLift: number; scoopTurn: number; scoopDown: number; scoopSupport?: ArenaPoint;
   kickAt: number | null; ankleGripAt: number | null; canKick: boolean; canGrabAnkle: boolean;
-  frontKick?: number; ankleThrowProgress?: number; driverFootTarget?: ArenaPoint; footStrength: number;
+  frontKick?: number; ankleApproach?: number; ankleThrowProgress?: number; driverFootTarget?: ArenaPoint; footStrength: number;
   launchAt: number | null; contactAt: number | null; releaseAt: number | null;
   plannedLaunchAt: number; plannedContactAt: number; requiredReleaseAt: number; landingAt: number; floorAt: number; pickupReadyAt: number; requiredEndAt: number;
   canLaunch: boolean; canContact: boolean; canRelease: boolean;
@@ -37,12 +39,14 @@ export type ArenaWrestlingMoveFrame = {
 export const ARENA_WRESTLING_MOVE_CHANCE = .04;
 export const ARENA_WRESTLING_MOVE_TIMING = {
   load: 160, jump: 840, landing: 180, clotheslineFollow: 240, clotheslineFall: 420, groggy: 200,
-  bulldogFall: 340, bulldogRecover: 420, backFlip: 680, slamLift: 420, slamFall: 360, slamKick: 240, ankleThrow: 300,
+  bulldogFall: 340, bulldogRecover: 420, backFlip: 680, slamLift: 420, slamFall: 360, slamKick: 240, ankleReach: 240, ankleThrow: 300,
 } as const;
+export const ARENA_SCOOP_SLAM_TIMING = { load: 180, lift: 380, turn: 220, slam: 320 } as const;
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const ease = (value: number) => { const p = clamp(value); return p * p * (3 - 2 * p); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
 const blend = (a: ArenaPoint, b: ArenaPoint, p: number): ArenaPoint => ({ x: mix(a.x, b.x, p), y: mix(a.y, b.y, p) });
+const curve = (a: ArenaPoint, bend: ArenaPoint, b: ArenaPoint, p: number): ArenaPoint => blend(blend(a, bend, p), blend(bend, b, p), p);
 const distance = (a: ArenaPoint, b: ArenaPoint) => Math.hypot(a.x - b.x, a.y - b.y);
 const inside = (point: ArenaPoint) => Math.hypot((point.x - 500) / 290, (point.y - 416) / 98) <= 1;
 const zero = (): ArenaPoint => ({ x: 0, y: 0 });
@@ -87,9 +91,9 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   };
   const side = (Math.abs(initial.victim.x - initial.driver.x) > 1 ? initial.victim.x >= initial.driver.x ? 1 : -1 : layoutSide < 0 ? -1 : 1) as 1 | -1;
   const gap = distance(initial.driver, initial.victim);
-  const closeGap = kind === 'bulldog' ? 16 : 32;
+  const closeGap = kind === 'bulldog' ? 16 : 24;
   const goal: ArenaPoint = kind === 'dropkick' ? { x: initial.victim.x - side * 144, y: initial.victim.y }
-    : closeMove ? { x: Math.abs(initial.victim.x - initial.driver.x) > closeGap ? initial.victim.x - side * closeGap : initial.driver.x, y: initial.victim.y - (kind === 'bulldog' ? 14 : 8) }
+    : closeMove ? { x: Math.abs(initial.victim.x - initial.driver.x) > closeGap ? initial.victim.x - side * closeGap : initial.driver.x, y: initial.victim.y - (kind === 'bulldog' ? 14 : 0) }
     : catching ? { x: initial.driver.x + side * 42, y: initial.driver.y }
     : { x: initial.victim.x - side * 36, y: initial.victim.y };
   const movingOrigin = catching ? initial.victim : initial.driver;
@@ -106,7 +110,8 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     : window.plannedContactAt + launch - plannedLaunchAt;
   const contactAt = !canPerform || launchAt === null || window.contactAt === null ? null : Math.max(launchAt, window.contactAt ?? plannedContactAt);
   const contact = contactAt ?? plannedContactAt;
-  const floorAt = contact + (kind === 'clothesline' ? timing.clotheslineFall : kind === 'bulldog' ? timing.bulldogFall : kind === 'backbodydrop' ? timing.backFlip : timing.slamLift + timing.slamFall);
+  const scoopTiming = ARENA_SCOOP_SLAM_TIMING, scoopDuration = scoopTiming.load + scoopTiming.lift + scoopTiming.turn + scoopTiming.slam;
+  const floorAt = contact + (kind === 'clothesline' ? timing.clotheslineFall : kind === 'bulldog' ? timing.bulldogFall : kind === 'backbodydrop' ? timing.backFlip : kind === 'scoopslam' ? scoopDuration : timing.slamLift + timing.slamFall);
   const pickupReadyAt = floorAt + (kind === 'bulldog' ? timing.bulldogRecover : timing.groggy);
   const floorVictim = initial.contactVictim ?? goal;
   const supportDriver = initial.contactDriver ?? initial.driver;
@@ -138,6 +143,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     driverHeight: 0, victimHeight: 0, driverAngle: 0, victimAngle: 0, driverSuspension: 0, victimSuspension: 0,
     driverJumpTuck: 0, victimJumpTuck: 0, clotheslineStrength: 0, feetStrength: 0, dropkickProgress: 0,
     gripStrength: 0, bulldogProgress: 0, backBodyProgress: 0, spinebusterProgress: 0, scoopSlamProgress: 0,
+    scoopLoad: 0, scoopLift: 0, scoopTurn: 0, scoopDown: 0,
     kickAt, ankleGripAt, canKick: false, canGrabAnkle: false, footStrength: 0,
     launchAt, contactAt, releaseAt, plannedLaunchAt, plannedContactAt, requiredReleaseAt, landingAt, floorAt, pickupReadyAt, requiredEndAt,
     canLaunch: canPerform && elapsed >= plannedLaunchAt, canContact: launched && !contacted && elapsed >= plannedContactAt - 120 && elapsed < requiredEndAt,
@@ -158,7 +164,8 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     frame.driverPose = ankleGripAt !== null && elapsed >= ankleGripAt ? 'throw' : 'drag';
     frame.driverAngle = 0; frame.driverSlam = undefined;
     frame.gripTargets = ankles; frame.gripMode = 'ankle'; frame.gripStrength = 1;
-    frame.canGrabAnkle = ankleGripAt === null;
+    frame.ankleApproach = kind === 'scoopslam' ? ease((elapsed - pickupReadyAt) / timing.ankleReach) : undefined;
+    frame.canGrabAnkle = ankleGripAt === null && (frame.ankleApproach === undefined || frame.ankleApproach === 1);
     frame.canRelease = ankleGripAt !== null && elapsed >= requiredReleaseAt && !released;
     frame.stage = released ? 'release' : ankleGripAt === null ? 'ankle-approach' : elapsed - ankleGripAt < 80 ? 'ankle-grip' : 'toss';
     frame.driverPhase = ankleGripAt !== null ? clamp((elapsed - ankleGripAt) / timing.ankleThrow) : clamp((elapsed - pickupReadyAt) / Math.max(1, approach.duration));
@@ -227,24 +234,64 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     frame.canRelease = false;
     return finishAnkles();
   }
-  if (kind === 'spinebuster' || kind === 'scoopslam') {
+  if (kind === 'scoopslam') {
+    const age = contacted ? Math.max(0, elapsed - contactAt!) : 0;
+    const load = ease(age / scoopTiming.load), lift = ease((age - scoopTiming.load) / scoopTiming.lift);
+    const turn = ease((age - scoopTiming.load - scoopTiming.lift) / scoopTiming.turn);
+    const down = ease((age - scoopTiming.load - scoopTiming.lift - scoopTiming.turn) / scoopTiming.slam);
+    const victimOrigin = initial.contactVictim ?? initial.victim, driverOrigin = initial.contactDriver ?? goal;
+    const floorRoot = initial.scoopFloorVictim ?? { x: driverOrigin.x + side * 62, y: victimOrigin.y };
+    frame.driver = contacted ? { ...driverOrigin } : run.point;
+    frame.driverVelocity = contacted ? zero() : run.velocity;
+    frame.victim = contacted ? blend(victimOrigin, floorRoot, down) : { ...initial.victim };
+    frame.driverPose = launched ? 'scoopslam' : elapsed < plannedLaunchAt - timing.load ? 'run' : 'guard';
+    frame.victimPose = !contacted || age === 0 ? 'guard' : down === 1 ? 'stunned' : 'carried';
+    frame.driverPhase = contacted ? clamp(age / scoopDuration) : 0;
+    frame.victimPhase = down; frame.scoopSlamProgress = frame.driverPhase;
+    frame.scoopLoad = load; frame.scoopLift = lift; frame.scoopTurn = turn; frame.scoopDown = down;
+    frame.victimHeight = 56 * lift * (1 - down);
+    // Bring the upper back into the chest before turning; the head and hips
+    // trace one connected arc instead of lying flat and rising vertically.
+    frame.victimAngle = -side * Math.PI * (.36 * lift + .26 * turn - .12 * down);
+    frame.victimSuspension = lift * (1 - down);
+    if (contacted && age > 0) frame.victimCarryStretch = lift;
+    frame.victimSlam = contacted && down > 0 ? { tuck: .12 * Math.sin(down * Math.PI), slump: down } : undefined;
+    if (contacted) {
+      const start = initial.scoopWaist ?? { x: victimOrigin.x, y: victimOrigin.y - 40 };
+      const gathered = { x: start.x - side * 6, y: start.y };
+      const raised = { x: driverOrigin.x + side * 14, y: driverOrigin.y - 72 };
+      const turned = { x: driverOrigin.x + side * 22, y: driverOrigin.y - 66 };
+      const floor = initial.scoopFloorWaist ?? { x: floorRoot.x - side * 25, y: floorRoot.y - 19 };
+      frame.scoopSupport = age < scoopTiming.load ? blend(start, gathered, load)
+        : age < scoopTiming.load + scoopTiming.lift ? curve(gathered, { x: driverOrigin.x + side * 9, y: start.y - 12 }, raised, lift)
+          : age < scoopTiming.load + scoopTiming.lift + scoopTiming.turn ? curve(raised, { x: driverOrigin.x + side * 5, y: driverOrigin.y - 82 }, turned, turn)
+            : curve(turned, { x: floor.x - side * 10, y: turned.y + 10 }, floor, down);
+    }
+    frame.gripTargets = targets; frame.gripMode = 'cradle';
+    frame.gripStrength = launched ? contacted ? 1 - ease((down - .52) / .22) : ease((elapsed - launch) / scoopTiming.load) : 0;
+    frame.canContact = frame.canContact && frame.gripStrength > .95;
+    frame.stage = !launched ? frame.stage : !contacted ? 'attack' : age < scoopTiming.load ? 'contact'
+      : lift < 1 ? 'lift' : turn < 1 ? 'turn' : down < 1 ? 'fall' : 'groggy';
+    if (down === 1) frame.driverPose = 'guard';
+    return finishAnkles();
+  }
+  if (kind === 'spinebuster') {
     const runner = catching ? rush(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0) : run;
     const age = contacted ? Math.max(0, elapsed - contactAt!) : 0;
     const lift = ease(age / timing.slamLift), slam = ease((age - timing.slamLift) / timing.slamFall);
     const victimOrigin = initial.contactVictim ?? (catching ? goal : initial.victim);
     const driverOrigin = initial.contactDriver ?? (catching ? initial.driver : goal);
     frame.driver = catching ? { x: driverOrigin.x + (contacted ? side * 12 * lift : 0), y: driverOrigin.y } : contacted ? { ...driverOrigin } : run.point;
-    frame.victim = contacted ? { x: victimOrigin.x + side * (kind === 'scoopslam' ? 36 : 12) * slam - (kind === 'scoopslam' ? side * 48.96 * lift * (1 - slam) : 0), y: victimOrigin.y } : catching ? runner.point : { ...initial.victim };
+    frame.victim = contacted ? { x: victimOrigin.x + side * 12 * slam, y: victimOrigin.y } : runner.point;
     frame.driverVelocity = !catching && !contacted ? run.velocity : zero(); frame.victimVelocity = catching && !contacted ? runner.velocity : zero();
-    frame.driverPose = contacted ? slam === 1 ? kind === 'spinebuster' ? 'trip' : ankleGripAt !== null && elapsed >= ankleGripAt ? 'throw' : 'drag' : kind : launched ? kind : !catching && elapsed < plannedLaunchAt - timing.load ? 'run' : 'guard';
-    frame.victimPose = contacted ? slam === 1 ? 'stunned' : kind === 'scoopslam' ? 'carried' : 'airborne' : catching && launched ? 'run' : 'guard';
-    frame.driverPhase = slam === 1 ? kind === 'scoopslam' && ankleGripAt !== null ? clamp((elapsed - ankleGripAt) / timing.ankleThrow) : clamp((elapsed - floorAt) / timing.slamKick) : age < timing.slamLift ? lift * .5 : .5 + slam * .5;
-    frame.victimPhase = slam; frame.spinebusterProgress = kind === 'spinebuster' ? frame.driverPhase : 0; frame.scoopSlamProgress = kind === 'scoopslam' ? frame.driverPhase : 0;
-    frame.victimHeight = (kind === 'scoopslam' ? 70 : 72) * lift * (1 - slam);
-    frame.victimAngle = side * Math.PI * (kind === 'scoopslam' ? .5 * lift : .47 * slam);
+    frame.driverPose = contacted ? slam === 1 ? 'trip' : kind : launched ? kind : 'guard';
+    frame.victimPose = contacted ? slam === 1 ? 'stunned' : 'airborne' : catching && launched ? 'run' : 'guard';
+    frame.driverPhase = slam === 1 ? clamp((elapsed - floorAt) / timing.slamKick) : age < timing.slamLift ? lift * .5 : .5 + slam * .5;
+    frame.victimPhase = slam; frame.spinebusterProgress = frame.driverPhase;
+    frame.victimHeight = 72 * lift * (1 - slam);
+    frame.victimAngle = side * Math.PI * .47 * slam;
     frame.victimSuspension = lift * (1 - slam);
     frame.victimSlam = contacted && slam > 0 ? { tuck: .2 * Math.sin(slam * Math.PI), slump: slam } : undefined;
-    if (kind === 'scoopslam' && contacted) frame.victimCarryStretch = lift;
     const offset = { x: target.x - initial.victim.x, y: target.y - initial.victim.y };
     frame.gripTargets = [{ x: frame.victim.x + offset.x, y: frame.victim.y - frame.victimHeight + offset.y }, { x: frame.victim.x + offset.x + side * 8, y: frame.victim.y - frame.victimHeight + offset.y + 3 }];
     frame.gripMode = 'waist'; frame.gripStrength = launched && slam < 1 ? 1 : 0;
@@ -259,7 +306,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
       frame.canRelease = kickAt !== null && elapsed >= kickAt && !released;
     }
     frame.stage = !launched ? frame.stage : !contacted ? 'attack' : released ? 'release' : slam < 1 ? 'fall' : 'contact';
-    return kind === 'scoopslam' ? finishAnkles() : frame;
+    return frame;
   }
   const runner = rush(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0);
   const flip = contacted ? clamp((elapsed - contactAt!) / timing.backFlip) : 0;

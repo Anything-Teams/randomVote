@@ -497,6 +497,7 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
   const reverse = window.kind === 'backbodydrop' || window.kind === 'spinebuster';
   const steps = window.kind === 'dropkick' ? ['달려들기', '발 딛고 도약', '두 발 뻗기', '가슴에 실제 접촉', '공격자 착지', '공격자 자세 회복', '상대만 장외']
     : window.kind === 'spinebuster' ? ['상대 돌진', '허리 받아내기', '무게 받아 들기', '바닥에 내려찍기', '발차기 준비', '몸통에 실제 발차기', '상대만 장외']
+    : window.kind === 'scoopslam' ? ['거리 좁히기', '발 딛고 준비', '몸에 붙여 받치기', '다리로 들어 올리기', '몸을 돌려 메치기', '등부터 모래에 착지', '그로기', '발목으로 접근', '두 발목 잡기', '발 딛고 던지기', '상대만 장외']
     : ['거리 좁히기', '발 딛고 준비', labels[window.kind], '실제 접촉', '모래 위에 넘어졌다', '그로기', '발목으로 접근', '두 발목 잡기', '발 딛고 던지기', '상대만 장외'];
   const stage = frame.stage as string;
   let step = Math.max(0, ['approach', 'load', 'attack', 'contact', 'fall', 'groggy', 'ankle-approach', 'ankle-grip', 'toss', 'release'].indexOf(stage));
@@ -509,6 +510,9 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
   } else if (stage === 'load') {
     word = reverse ? window.kind === 'backbodydrop' ? '돌진 카운터!' : '받아내기!' : window.kind === 'clothesline' ? '돌진!' : '준비!';
     title = word; detail = reverse ? `${a}가 중심을 낮추고 다가오는 ${v}의 허리를 노립니다.` : `${a}가 발을 딛고 힘을 모읍니다.`;
+  } else if (window.kind === 'scoopslam' && (stage === 'lift' || stage === 'turn')) {
+    word = '안아 메치기!'; title = stage === 'lift' ? '몸에 붙여 들어 올리기' : '몸을 돌려 등부터 메치기';
+    detail = stage === 'lift' ? `${a}가 ${v}의 등과 허벅지를 받친 채 다리를 펴 들어 올립니다.` : `${a}가 안고 있는 ${v}를 몸과 함께 돌린 뒤 등부터 모래로 내려보냅니다.`;
   } else if (stage === 'attack' || stage === 'contact' || stage === 'fall') {
     const contact = window.contactAt != null && elapsed >= window.contactAt;
     if (window.kind === 'clothesline') detail = contact ? `${a}의 팔이 ${v}의 목과 윗가슴에 닿았습니다. ${v}가 중심을 잃고 모래 위로 넘어집니다.` : `${a}가 달려들며 한 팔을 ${v}의 목과 윗가슴 앞으로 뻗습니다.`;
@@ -537,6 +541,7 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
   }
   if (window.kind === 'dropkick') step = stage === 'approach' ? 0 : stage === 'load' ? 1 : stage === 'attack' ? 2 : stage === 'contact' ? 3 : stage === 'land' ? 4 : stage === 'recover' ? 5 : 6;
   if (window.kind === 'spinebuster') step = stage === 'approach' ? 0 : stage === 'load' || stage === 'attack' ? 1 : stage === 'fall' ? frame.victimHeight > 1 ? 2 : 3 : stage === 'release' ? 6 : window.kickAt != null && elapsed >= window.kickAt ? 5 : 4;
+  if (window.kind === 'scoopslam') step = stage === 'approach' ? 0 : stage === 'load' ? 1 : stage === 'attack' || stage === 'contact' ? 2 : stage === 'lift' ? 3 : stage === 'turn' ? 4 : stage === 'fall' ? 5 : stage === 'groggy' ? 6 : stage === 'ankle-approach' ? 7 : stage === 'ankle-grip' ? 8 : stage === 'toss' ? 9 : 10;
   return { title, detail, word, wordId, label: labels[window.kind], steps, step, reverse, stage };
 }
 

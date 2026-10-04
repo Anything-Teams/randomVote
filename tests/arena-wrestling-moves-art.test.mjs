@@ -115,7 +115,7 @@ test('back body drop and both waist slams load and extend through complete plant
   }
 });
 
-test('shared throw release starts at all actual supported palms then lowers both connected arms in the throw direction', () => {
+test('shared throw preserves its real support palms, follows upward, and retracts both complete arms directly to guard', () => {
   const smooth = value => value * value * (3 - 2 * value);
   for (const side of [-1, 1]) for (const gripMode of ['shoulder', 'ankle']) {
     const victim = fighter({ index: 2, pose: 'carried', carrySupport: 'shoulder', carryStretch: 1, angle: side * Math.PI / 2, facing: -side, y: 274, suspension: 1 });
@@ -125,17 +125,18 @@ test('shared throw release starts at all actual supported palms then lowers both
     const supported = paint(actor, 1000), hands = structuredClone(supported.contacts.hands);
     actor.gripTarget = undefined; actor.secondaryGripTarget = undefined; actor.gripStrength = 0;
     let previous = supported.contacts;
-    for (let frame = 0; frame <= 35; frame++) {
-      const progress = frame / 35, settled = smooth(progress);
+    for (let frame = 0; frame <= 56; frame++) {
+      const progress = frame / 56, settled = smooth(progress);
       actor.carrierRelease = { hands, elbows: supported.contacts.elbows, shoulders: supported.contacts.shoulders, progress, direction: side }; actor.carrierDrive = .86 + .14 * settled;
       const result = paint(actor, 1000 + frame * 10);
       if (frame === 0) hands.forEach((hand, arm) => assert.ok(distance(result.contacts.hands[arm], hand) < .001, 'dropping the support targets must preserve every actual palm on the release frame'));
       bones(actor, result);
-      result.contacts.hands.forEach((hand, arm) => assert.ok(distance(hand, previous.hands[arm]) < 9, 'a supported palm cannot jump to a default overhead hand on release'));
+      result.contacts.hands.forEach((hand, arm) => assert.ok(distance(hand, previous.hands[arm]) < 9, `a supported palm cannot jump to a default overhead hand on release: ${side}/${gripMode}/${frame}/${arm}/${distance(hand,previous.hands[arm])}`));
       result.contacts.elbows.forEach((elbow, arm) => assert.ok(distance(elbow, previous.elbows[arm]) < 12, 'the two forearms unfold continuously after releasing their shoulder/ankle holds'));
       previous = structuredClone(result.contacts);
     }
-    assert.ok(previous.hands.every((point, arm) => point.y > hands[arm].y + 40), 'both carriers finish with arms naturally lowered instead of frozen above their heads');
+    const guarded = sampleArenaFighterContacts({ ...actor, pose: 'guard', carrierRelease: undefined, animation: undefined }, 1560);
+    for (const key of ['shoulders', 'elbows', 'hands']) previous[key].forEach((point, arm) => assert.ok(distance(point, guarded[key][arm]) < .001, `the release ends at the actual ordinary guard, without a second throw or waist-to-chest snap: ${side}/${gripMode}/${key}/${arm}/${JSON.stringify({point, guarded:guarded[key][arm]})}`));
   }
 });
 
