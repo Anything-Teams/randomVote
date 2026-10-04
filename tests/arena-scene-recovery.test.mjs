@@ -14,11 +14,22 @@ assert.ok(source.includes(rankRead));
 source = source.replaceAll('drawArenaScenery(ctx, clock,', 'recoveryTestScenery(ctx, clock,')
   .replace(rankRead, `${rankRead} recoveryTestRanks = ranks;`)
   .replace(draw, 'recoveryTestActors = actors; recoveryTestWords = words; arenaDrawOrder([...actors.values()]).forEach(actor => { ctx.surpriseStart(actor); drawArenaFighter(ctx, actor, reduced ? 0 : clock); ctx.surpriseEnd(); });');
-source += '\nlet recoveryTestActors, recoveryTestRanks, recoveryTestWords; const recoveryTestScenery = () => {}; export const capturedActors = () => recoveryTestActors; export const capturedRanks = () => recoveryTestRanks; export const capturedWords = () => recoveryTestWords; export { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaRecoveryTargets };';
+// Read the very same actual pair and clocks through an ordinary lift round.
+// This bypasses the recovery-specific model for the reference scene while
+// preserving the real approach, contact centre, body motor and painted rig.
+const prelude = 'let ordinaryRecoveryPrelude = false;';
+assert.ok(source.includes(prelude));
+source = source.replace(prelude, `${prelude}
+      if (recoveryTestReference && exchange.recovery && !exchange.recovery.kind && elapsed <= exchange.recovery.throwAt) {
+        const original = exchange, recovery = original.recovery;
+        ordinaryRecoveryPrelude = true;
+        exchange = { ...original, recovery: undefined, tactic: 'lift', aggressor: recovery.throwerId ?? original.aggressor, start: recovery.start, impact: recovery.throwAt, resolve: recovery.throwAt + 1100 * unit, end: recovery.throwAt + 1100 * unit };
+      }`);
+source += '\nlet recoveryTestActors, recoveryTestRanks, recoveryTestWords, recoveryTestReference = false; const recoveryTestScenery = () => {}; export const setReferencePrelude = value => { recoveryTestReference = value; }; export const capturedActors = () => recoveryTestActors; export const capturedRanks = () => recoveryTestRanks; export const capturedWords = () => recoveryTestWords; export { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaRecoveryTargets };';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaRecoveryTargets, capturedActors, capturedRanks, capturedWords } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, arenaRecoveryTargets, capturedActors, capturedRanks, capturedWords, setReferencePrelude } = module.exports;
 const noop = () => {};
 const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
@@ -48,11 +59,12 @@ function context() {
   };
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
-function game(seed, reversed = false, mirrored = false, candidateOrder, suppliedOrder = order, frameDelta = 16) {
+function game(seed, reversed = false, mirrored = false, candidateOrder, suppliedOrder = order, frameDelta = 16, referencePrelude = false) {
   const props = { candidates: (candidateOrder ?? (reversed ? [...order].reverse() : order)).map(id => ({ id, name: id, color: '#ffad72' })), order: suppliedOrder, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
   return { sim, ctx, step(elapsed, paused = false) {
     ctx.records.clear();
+    setReferencePrelude(referencePrelude);
     render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : frameDelta, false);
     // The rare punch has a deterministic ordinary layout. Reflect its real
     // initialized bodies once to exercise the other physical heading as well.
@@ -127,6 +139,52 @@ for (const fixture of fixtures) for (const [mirrored, frameDelta] of [[false, 16
   if (!fixture.kind) assert.ok(called, 'the actual lifted body is accompanied by the early thrower call');
   assert.ok(departureGap > landedGap + 12, `${departureGap}/${landedGap}: a recovered fighter visibly leaves the original opponent`);
   assert.ok(maxClosing < 1, 'landing and departure cannot snap back into another grip');
+});
+
+for (const mirrored of [false, true]) test(`a somersault uses the complete ordinary painted throw until its continuous release, then lands and leaves alive (${mirrored ? 'mirror' : 'ordinary'})`, () => {
+  const fixture = fixtures[0], planned = arenaRounds(fixture.order, duration, rushRoll, fixture.seed).find(round => round.recovery && !round.recovery.kind && !round.final);
+  assert.ok(planned);
+  const throwerId = planned.recovery.throwerId ?? planned.aggressor;
+  const painted = rig => [rig.origin, rig.head, ...rig.headSides, rig.back, rig.waist, ...rig.shoulders, ...rig.elbows, ...rig.hands, ...rig.feet];
+  for (const frameDelta of [16, 50]) {
+    const scene = game(fixture.seed, false, mirrored, order, fixture.order, frameDelta);
+    const ordinary = game(fixture.seed, false, mirrored, order, fixture.order, frameDelta, true);
+    let lifted = false, firstFlight = false, landed = false, separated = false, previous, preludeFrames = 0;
+    for (let elapsed = 0; elapsed <= planned.recovery.end + frameDelta; elapsed += frameDelta) {
+      const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
+      if (!contact) { ordinary.step(elapsed); continue; }
+      const frame = arenaRecoveryTargets(contact.round, elapsed, contact.center), receiver = actors.get(planned.victim), thrower = actors.get(throwerId);
+      if (!frame?.active) { ordinary.step(elapsed); continue; }
+      const current = snapshot(receiver, scene.sim.bodies.get(planned.victim));
+      if (elapsed < frame.throwAt) {
+        const expected = ordinary.step(elapsed);
+        for (const id of [planned.victim, throwerId]) {
+          const actualActor = actors.get(id), ordinaryActor = expected.get(id);
+          assert.equal(actualActor.pose, ordinaryActor.pose, 'the prelude uses the same approach, grip and lifted pose as a deciding throw');
+          assert.equal(actualActor.facing, ordinaryActor.facing); assert.equal(actualActor.angle, ordinaryActor.angle);
+          assert.ok(distance(actualActor, ordinaryActor) < .001);
+          painted(actualActor.animation.contactPoints).forEach((point, index) => assert.ok(distance(point, painted(ordinaryActor.animation.contactPoints)[index]) < .001, `${mirrored}/${frameDelta}/${elapsed}/${id}: every real joint follows the ordinary throw before survival is revealed`));
+        }
+        lifted ||= current.height > 25; preludeFrames++;
+      } else if (frame.airborne && !firstFlight) {
+        firstFlight = true;
+        assert.ok(previous && contact.recoveryRelease?.snapshot, 'release saves the painted final lift instead of rebuilding an independent held rig');
+        assert.ok(distance(contact.recoveryRelease.snapshot.origin, previous.contacts.origin) < .001, 'the actual flight inherits the complete preceding painted snapshot');
+        const cap = 6 + frameDelta * .8;
+        painted(current.contacts).forEach((point, index) => assert.ok(distance(point, painted(previous.contacts)[index]) < cap, `${mirrored}/${frameDelta}/${elapsed}: the first survival frame cannot reset a painted joint`));
+        assert.equal(receiver.facing, previous.facing, 'revealing a somersault does not mirror the held body at release');
+      }
+      if (frame.stage === 'land') landed = true;
+      if (frame.stage === 'separate' || frame.stage === 'release') {
+        separated = true; assert.ok(landed);
+        assert.equal(receiver.gripTarget, undefined); assert.equal(thrower.gripTarget, undefined);
+      }
+      assert.equal(scene.sim.exits.has(planned.victim), false, 'the same initial throw can end in an inside survival without changing the elimination roster');
+      assert.equal(capturedRanks()[planned.victim], undefined);
+      previous = current;
+    }
+    assert.ok(preludeFrames > 20 && lifted && firstFlight && landed && separated, JSON.stringify({ mirrored, frameDelta, preludeFrames, lifted, firstFlight, landed, separated }));
+  }
 });
 
 for (const fixture of fixtures) for (const mirrored of [false, true]) test(`a landed ${fixture.kind ?? 'somersault'} keeps its painted arms connected when departure begins (${mirrored ? 'mirror' : 'ordinary'})`, () => {

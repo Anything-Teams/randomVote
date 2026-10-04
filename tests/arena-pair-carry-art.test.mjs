@@ -201,13 +201,19 @@ test('a nearby preferred ground stays within normal step speed while the synchro
   for (const side of [-1, 1]) for (let index = 0; index < 10; index++) {
     const round = { id: 'projection', index: 0, tactic: 'double-shove', aggressor: 'arms', helper: 'legs', victim: 'victim', rushOutcome: 'counter-throw', start: 0, impact: ARENA_PAIR_COUNTER_TIMING.release, resolve: 3300, end: 3300, rushLaunchAt: 0, rushContactAt: 0, contactSide: side, timeScale: 1, final: false };
     const previous = [undefined, undefined];
+    let floorWaist;
     for (let age = ARENA_PAIR_COUNTER_TIMING.grip; age < ARENA_PAIR_COUNTER_TIMING.release; age += 16) {
       const motion = arenaPairRushTargets(round, age, { x: 500, y: 416 }, { x: 500, y: 416 });
-      const victim = fighter({ index, x: motion.victim.x, y: motion.victim.y - motion.lift, angle: motion.victimAngle, facing: motion.chargerFacing, carryStretch: motion.victimCarryStretch, carrySupport: 'shoulder', suspension: motion.victimSuspension, motionImmediate: true });
+      const progress = { pairLoad: motion.pairLoad, pairLift: motion.pairLift, pairBackload: motion.pairBackload, pairHeave: motion.pairHeave };
+      const victim = fighter({ index, x: motion.victim.x, y: motion.victim.y - motion.lift, angle: motion.victimAngle, facing: motion.chargerFacing, carryStretch: motion.victimCarryStretch, carrySupport: 'shoulder', pairCarry: true, ...progress, suspension: motion.victimSuspension, motionImmediate: true });
+      const projected = sampleArenaFighterContacts(victim, age);
+      floorWaist ??= projected.waist;
+      victim.x += floorWaist.x + motion.throwShift - projected.waist.x;
+      victim.y += floorWaist.y - motion.lift - projected.waist.y;
       const held = sampleArenaFighterContacts(victim, age);
       for (let end = 0; end < 2; end++) {
         const endpoints = end ? held.feet : held.shoulders;
-        const holder = fighter({ index: (index + 3) % 10, facing: end ? side : -side, pose: 'overhead', angle: 0, carryStretch: undefined, overheadRaise: motion.overhead, carrierDrive: motion.carrierDrive, gripMode: end ? 'ankle' : 'shoulder', motionImmediate: true });
+        const holder = fighter({ index: (index + 3) % 10, facing: end ? side : -side, pose: motion.carrierPose, angle: 0, carryStretch: undefined, ...progress, gripMode: end ? 'ankle' : 'shoulder', motionImmediate: true });
         const ground = arenaCarryHolderPoint(holder, endpoints, age, previous[end]);
         if (previous[end]) assert.ok(distance(ground, previous[end]) / .016 < 165, `${side}/${index}/${age}/${end}: anatomical grip preservation cannot force a faster than normal ground step`);
         Object.assign(holder, ground, { gripTarget: endpoints[0], secondaryGripTarget: endpoints[1], gripStrength: 1, gripLocked: true });

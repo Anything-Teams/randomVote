@@ -90,6 +90,28 @@ test('actual launch and ankle contact gates keep the uncontacted defender uprigh
   assert.equal(sliding.victimPose, 'brace'); assert.equal(sliding.victimSlam, undefined); assert.deepEqual(sliding.victim, origins.victim);
 });
 
+test('the low slide begins with room left and carries running momentum through a visible ground journey', () => {
+  for (const side of [-1, 1]) {
+    const origins = { driver: { x: 500 - side * 280, y: 416 }, victim: { x: 500, y: 416 }, standingAnkle: { x: 500 - side * 7, y: 411.92 } };
+    const opening = arenaSlideTripTargets(window, window.start, center, origins, side);
+    const recorded = { ...window, launchAt: opening.plannedLaunchAt, hookAt: null, kickAt: null };
+    const before = arenaSlideTripTargets(recorded, recorded.launchAt - .001, center, origins, side);
+    const entered = arenaSlideTripTargets(recorded, recorded.launchAt, center, origins, side);
+    const lowered = arenaSlideTripTargets(recorded, recorded.launchAt + 180, center, origins, side);
+    const stopped = arenaSlideTripTargets(recorded, opening.plannedHookAt, center, origins, side);
+    assert.equal(entered.driverPose, 'slide');
+    assert.ok(distance(entered.driver, origins.standingAnkle) > 120, 'the seated slide starts well outside ankle reach');
+    assert.ok(distance(before.driverVelocity, entered.driverVelocity) < .001, 'the slide inherits the committed running speed without braking to a stop');
+    assert.ok(distance(before.driver, entered.driver) < .001, 'changing pose cannot move the root');
+    assert.equal(lowered.slideProgress, 1);
+    assert.ok(distance(lowered.driver, origins.standingAnkle) > 85, 'the body is already low while substantial travel remains');
+    assert.ok(distance(lowered.driver, entered.driver) > 30, 'lowering happens during real forward ground travel');
+    assert.ok(distance(stopped.driver, entered.driver) > 80, 'the foot reaches the rival after a visible slide, not an immediate hook');
+    assert.ok(distance(lowered.driverVelocity, { x: 0, y: 0 }) < distance(entered.driverVelocity, { x: 0, y: 0 }), 'ground friction reduces momentum after entry');
+    assert.deepEqual(stopped.victim, origins.victim); assert.equal(Math.abs(stopped.victimAngle), 0); assert.equal(stopped.victimPose, 'brace', 'the travel alone cannot script the fall');
+  }
+});
+
 test('one recorded ankle hook causes one fall, a complete rise, then a distinct real kick before the roll exit', () => {
   for (const side of [-1, 1]) {
     const origins = { driver: { x: 500 - side * 180, y: 416 }, victim: { x: 520, y: 416 }, hookVictim: { x: 523, y: 419 }, hookDriver: { x: 523 - side * 43, y: 419 }, kickTarget: { x: 523 - side * 8, y: 406 } };
@@ -111,5 +133,22 @@ test('one recorded ankle hook causes one fall, a complete rise, then a distinct 
     assert.equal(released.stage, 'release'); assert.equal(released.requiredImpactAt, kickAt);
     assert.equal(released.frontKick, .62, 'recording contact does not jump to a fully retracted kick');
     assert.deepEqual(released.victim, kicking.victim);
+  }
+});
+
+test('ordinary and jump-evaded slides label the actual attacking run as 돌진!', async () => {
+  const sources = await Promise.all(['src/arenaLogic.ts', 'src/arenaStoryLogic.ts'].map(async entry => {
+    const result = await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', write: false });
+    return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
+  }));
+  const [{ arenaActionWords }, { arenaStoryState }] = sources;
+  for (const evade of [false, true]) {
+    const round = { id: 'slide-words', index: 0, tactic: 'trip', aggressor: 'a', victim: 'v', start: 1000, impact: 7000, resolve: 8100, end: 8100, final: false, timeScale: 1,
+      slideTrip: { start: 1000, end: 7000, evade, launchAt: null, hookAt: null, kickAt: null, jumpAt: null, passAt: null } };
+    assert.deepEqual(arenaActionWords(round, 1300), [{ id: 'a', word: '돌진!' }]);
+    const running = arenaStoryState(round, 1300);
+    assert.equal(running.label, '돌진!'); assert.equal(running.steps[running.step], '돌진!');
+    const lowered = { ...round, slideTrip: { ...round.slideTrip, launchAt: 1800 } };
+    assert.equal(arenaActionWords(lowered, 1950)[0].word, '슬라이딩!', 'the running word ends when the grounded slide starts');
   }
 });

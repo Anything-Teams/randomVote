@@ -32,6 +32,7 @@ export const ARENA_SLIDE_TRIP_CHANCE = .02;
 export const ARENA_SLIDE_TRIP_EVADE_CHANCE = .02;
 export const ARENA_SLIDE_TRIP_MIN_GAP = 130;
 export const ARENA_SLIDE_TRIP_MIN_RUN = 320;
+export const ARENA_SLIDE_TRIP_ENTRY_GAP = 124;
 export const ARENA_SLIDE_TRIP_JUMP_DURATION = 520;
 export const ARENA_SLIDE_TRIP_TIMING = { runRamp: 180, slideRamp: 100, hook: 80, fall: 320, rise: 400, kickWindup: 240, kickRetract: 170 } as const;
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
@@ -51,17 +52,22 @@ export function arenaSlideTripEvadeOutcome(roll: number): boolean {
   return roll < 20;
 }
 
-/** Accelerate and brake on the real runway without ever stepping backwards. */
-function travel(origin: ArenaPoint, goal: ArenaPoint, age: number, cap: number, rampMs: number) {
-  const length = distance(origin, goal), ramp = Math.min(rampMs / 1000, Math.sqrt(length / Math.max(1, cap)));
-  const speed = Math.min(cap, length / Math.max(.001, ramp)), cruise = Math.max(0, length / Math.max(1, speed) - ramp);
-  const seconds = Math.max(0, age / 1000), duration = 2 * ramp + cruise;
-  let moved: number, velocity: number;
-  if (seconds < ramp) { moved = speed * seconds * seconds / (2 * Math.max(.001, ramp)); velocity = speed * seconds / Math.max(.001, ramp); }
-  else if (seconds < ramp + cruise) { moved = speed * ramp / 2 + speed * (seconds - ramp); velocity = speed; }
-  else { const braking = Math.min(ramp, seconds - ramp - cruise); moved = speed * (ramp / 2 + cruise + braking - braking * braking / (2 * Math.max(.001, ramp))); velocity = speed * (1 - braking / Math.max(.001, ramp)); }
+/** A committed runner carries the same speed into the seated slide. */
+function runningEntry(origin: ArenaPoint, goal: ArenaPoint, age: number) {
+  const length = distance(origin, goal), speed = 190, ramp = ARENA_SLIDE_TRIP_TIMING.runRamp / 1000;
+  const duration = (length / speed + ramp / 2) * 1000, t = Math.max(0, age / 1000);
+  const moved = Math.min(length, t < ramp ? speed * t * t / (2 * ramp) : speed * (t - ramp / 2));
   const direction = length > .001 ? { x: (goal.x - origin.x) / length, y: (goal.y - origin.y) / length } : { x: 0, y: 0 };
-  return { point: blend(origin, goal, moved / Math.max(.001, length)), velocity: { x: direction.x * velocity, y: direction.y * velocity }, duration: duration * 1000 };
+  const velocity = t * 1000 > duration ? 0 : speed * Math.min(1, t / ramp);
+  return { point: blend(origin, goal, moved / Math.max(.001, length)), velocity: { x: direction.x * velocity, y: direction.y * velocity }, duration };
+}
+
+/** Ground friction reduces the carried running speed over a visible slide. */
+function slidingTravel(origin: ArenaPoint, goal: ArenaPoint, age: number) {
+  const length = distance(origin, goal), speed = 190, duration = 2 * length / speed * 1000;
+  const p = clamp(age / Math.max(1, duration)), moved = length * (2 * p - p * p);
+  const direction = length > .001 ? { x: (goal.x - origin.x) / length, y: (goal.y - origin.y) / length } : { x: 0, y: 0 };
+  return { point: blend(origin, goal, moved / Math.max(.001, length)), velocity: { x: direction.x * speed * (1 - p), y: direction.y * speed * (1 - p) }, duration };
 }
 
 /** A feet-first slide makes one grounded fall; only the following real kick launches an exit. */
@@ -69,12 +75,15 @@ export function arenaSlideTripTargets(window: ArenaSlideTripWindow, elapsed: num
   const initial = origins ?? { driver: { x: center.x - layoutSide * 180, y: center.y + 5 }, victim: { x: center.x + layoutSide * 20, y: center.y } };
   const side = (Math.abs(initial.victim.x - initial.driver.x) > 1 ? initial.victim.x >= initial.driver.x ? 1 : -1 : layoutSide < 0 ? -1 : 1) as 1 | -1;
   const ankle = initial.standingAnkle ?? { x: initial.victim.x - side * 7, y: initial.victim.y - 4.08 };
-  const staging = { x: ankle.x - side * 72, y: initial.victim.y };
+  // A short but valid runway keeps its real run rather than backing up. With
+  // more room, sit down well before the ankle line and slide the rest of it.
+  const entryGap = Math.min(ARENA_SLIDE_TRIP_ENTRY_GAP, Math.max(40.8, side * (ankle.x - initial.driver.x) - 48));
+  const staging = { x: ankle.x - side * entryGap, y: initial.victim.y };
   // A nearby runner starts sliding where they stand; the move cannot send them
   // backwards to make room for a cosmetic runway.
   const ahead = side * (staging.x - initial.driver.x) > 0;
   const approachGoal = ahead ? staging : { ...initial.driver };
-  const run = travel(initial.driver, approachGoal, elapsed - window.start, 190, ARENA_SLIDE_TRIP_TIMING.runRamp);
+  const run = runningEntry(initial.driver, approachGoal, elapsed - window.start);
   const plannedLaunchAt = window.plannedLaunchAt ?? window.start + run.duration;
   const startingGap = distance(initial.driver, initial.victim);
   const victimInside = Math.hypot((initial.victim.x - 500) / 290, (initial.victim.y - 416) / 98) <= 1;
@@ -83,13 +92,13 @@ export function arenaSlideTripTargets(window: ArenaSlideTripWindow, elapsed: num
   const slideOrigin = initial.slideOrigin ?? approachGoal;
   const stopping = { x: ankle.x - side * 40.8, y: initial.victim.y };
   const slideGoal = side * (stopping.x - slideOrigin.x) > 0 ? stopping : { ...slideOrigin };
-  const slide = travel(slideOrigin, slideGoal, elapsed - (launchAt ?? elapsed), 240, ARENA_SLIDE_TRIP_TIMING.slideRamp);
+  const slide = slidingTravel(slideOrigin, slideGoal, elapsed - (launchAt ?? elapsed));
   const plannedHookAt = (launchAt ?? plannedLaunchAt) + (window.plannedPassAt === undefined ? slide.duration : window.plannedPassAt - plannedLaunchAt);
   const hookAt = window.hookAt === null || launchAt === null ? null : Math.max(launchAt, window.hookAt ?? plannedHookAt);
   const landedAt = hookAt === null ? null : hookAt + ARENA_SLIDE_TRIP_TIMING.hook + ARENA_SLIDE_TRIP_TIMING.fall;
   const kickReadyAt = landedAt === null ? null : landedAt + ARENA_SLIDE_TRIP_TIMING.rise;
   const kickAt = window.kickAt === null || kickReadyAt === null ? null : Math.max(kickReadyAt, window.kickAt ?? kickReadyAt + ARENA_SLIDE_TRIP_TIMING.kickWindup);
-  const slideProgress = launchAt === null ? 0 : ease((elapsed - launchAt) / Math.max(160, slide.duration));
+  const slideProgress = launchAt === null ? 0 : ease((elapsed - launchAt) / 180);
   const hookAge = hookAt === null ? -1 : elapsed - hookAt;
   const fall = ease((hookAge - ARENA_SLIDE_TRIP_TIMING.hook) / ARENA_SLIDE_TRIP_TIMING.fall);
   const rise = landedAt === null ? 0 : ease((elapsed - landedAt) / ARENA_SLIDE_TRIP_TIMING.rise);

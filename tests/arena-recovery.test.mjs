@@ -22,7 +22,7 @@ test('a failed throw completes one airborne somersault and lands feet first insi
     assert.equal(at(-1).active, false); assert.equal(at(0).active, true); assert.equal(at(ARENA_RECOVERY_DURATION).active, false);
     const span = ARENA_RECOVERY_THROW_SPAN, lifting = at(span * .85), release = at(span), midair = at(span + 460), landed = at(span + 880), recovered = at(span + 1099);
     assert.equal(lifting.stage, 'lift'); assert.equal(lifting.grip, true); assert.ok(lifting.height > 0 && lifting.height < 42);
-    assert.equal(release.stage, 'somersault'); assert.equal(release.grip, false); assert.equal(release.height, 42); assert.ok(Math.abs(release.angle) === 0);
+    assert.equal(release.stage, 'somersault'); assert.equal(release.grip, false); assert.equal(release.height, 42); assert.equal(release.angle, -.22 * 42 / 52);
     assert.equal(midair.airborne, true); assert.ok(midair.height > 170 && midair.height < 190 && Math.abs(midair.angle) > 3, 'the full somersault has a tall readable apex');
     assert.equal(landed.stage, 'land'); assert.equal(landed.airborne, false); assert.equal(landed.height, 0);
     assert.ok(Math.abs(landed.angle - side * Math.PI * 2) < 1e-10, 'exactly one full rotation reaches the landing');
@@ -73,12 +73,15 @@ test('the survival branch uses the same full lift and release timing as an ordin
       const elapsed = span * unit * progress, frame = arenaRecoveryTargets(recovery, elapsed, { x: 500, y: 416 }), ordinary = arenaBeat(normal, elapsed);
       assert.ok(Math.abs(frame.height - ordinary.liftProgress * 42) < 1e-8, 'the thrown survivor is not rushed through a short bonus lift');
       assert.ok(Math.abs(frame.liftPhase - ordinary.liftProgress) < 1e-8);
+      const ordinaryAction = arenaAction(normal, elapsed);
+      assert.ok(Math.abs(frame.phase - ordinaryAction.actors[0].phase) < 1e-12, 'the waist hold and loaded knees follow the same ordinary pose clock before release');
+      assert.ok(Math.abs(frame.angle - -.22 * ordinaryAction.lift / 52) < 1e-12, 'the lifted victim inherits the ordinary slight body tilt rather than revealing a separate upright escape rig');
     }
     for (const age of [0, 16, 39, 40]) {
       const recovered = arenaRecoveryTargets(recovery, (span + age) * unit, { x: 500, y: 416 });
-      const ordinary = arenaThrow(age * unit, { x: 523, y: 416 }, { x: 678, y: 425 }, 1, unit, { lift: 42, angle: 0 });
+      const ordinary = arenaThrow(age * unit, { x: 523, y: 416 }, { x: 678, y: 425 }, 1, unit, { lift: 42, angle: -.22 * 42 / 52 });
       assert.equal(recovered.height, ordinary.height, 'the release inherits the normal 40ms hold instead of immediately dropping the carried height');
-      assert.equal(recovered.angle, 0);
+      assert.equal(recovered.angle, ordinary.angle, 'the ordinary release hold finishes before the escape rotation begins in flight');
     }
     assert.equal(arenaRecoveryTargets(recovery, (span + 879) * unit, { x: 500, y: 416 }).airborne, true);
     assert.equal(arenaRecoveryTargets(recovery, (span + 880) * unit, { x: 500, y: 416 }).stage, 'land');

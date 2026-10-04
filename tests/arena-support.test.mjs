@@ -144,7 +144,7 @@ test('lifting loads the hips, drives upward and follows the release with a visib
   assert.equal(arenaThrow(64, { x: 526, y: 425 }, { x: 885, y: 436 }).stage, 'flight', 'the released body cannot hang in place through the follow-through');
 });
 
-test('alliances increase only slightly, preserve previous eligible stories and remain one surprise per large field', () => {
+test('alliances retain the base stories with a reduced bonus chance and remain one surprise per large field', () => {
   let eligible = 0, before = 0, after = 0;
   for (let variation = 0; variation < 1200; variation++) {
     const order = Array.from({ length: 8 }, (_, i) => `support-${variation}-${i}`);
@@ -158,6 +158,6 @@ test('alliances increase only slightly, preserve previous eligible stories and r
     assert.ok(small.every(bout => !['team', 'betrayal'].includes(bout.tactic)));
   }
   const added = (after - before) / eligible;
-  assert.ok(added >= .025 && added <= .06, `only a few percentage points are added, got ${added}`);
+  assert.ok(added >= .004 && added <= .02, `the reduced bonus adds about one percentage point, got ${added}`);
   assert.ok(after / eligible < .45, 'alliances cannot become the usual story');
 });

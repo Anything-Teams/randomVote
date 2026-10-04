@@ -35,7 +35,7 @@ test('a lifted fighter strikes the lifter before approaching its grounded feet f
     assert.equal(elbow.frame.elbowContact, 1, 'the contact stroke and groggy reaction share a clock');
     assert.ok(elbow.frame.elbowImpact > .99);
     assert.equal(elbow.frame.victimPose, 'stunned');
-    assert.equal(groggy.frame.stage, 'groggy');
+    assert.equal(groggy.frame.stage, 'ankle-approach');
     assert.ok(Math.abs(groggy.frame.victimAngle) > 1.4 && groggy.frame.lift === 0, 'the lifter lies groggy before ankles are raised');
     assert.equal(grab.frame.stage, 'ankle-grip');
     assert.equal(grab.frame.grip, 'ankle');
@@ -45,6 +45,25 @@ test('a lifted fighter strikes the lifter before approaching its grounded feet f
     assert.equal(release.frame.lift, 0, 'the initial counter cannot raise the groggy lifter for a second throw');
     assert.equal(release.frame.aggressorPose, 'drag');
     assert.equal(release.frame.grip, undefined, 'the shared grounded exit takes over the actual ankle grip');
+  }
+});
+
+test('the elbow counter starts a bounded planted walk immediately after landing without a waiting phase', () => {
+  for (const side of [-1, 1]) {
+    const actual = { ...round, contactSide: side }, landedAt = actual.start + (actual.impact - actual.start) * .67;
+    let previous = arenaTechniqueTargets(actual, landedAt, { x: 500, y: 416 });
+    assert.equal(previous.stage, 'ankle-approach'); assert.equal(previous.aggressorLift, 0);
+    const original = { ...previous.aggressor }, floor = { ...previous.victim };
+    for (let elapsed = landedAt + 16; elapsed <= landedAt + 600; elapsed += 16) {
+      const frame = arenaTechniqueTargets(actual, elapsed, { x: 500, y: 416 });
+      assert.equal(frame.stage, 'ankle-approach'); assert.equal(frame.aggressorLift, 0);
+      assert.deepEqual(frame.victim, floor, 'only the standing counterattacker moves');
+      assert.ok(distance(frame.aggressor, previous.aggressor) <= 165 * .016 + 1e-6, 'the direct approach still has normal walking acceleration');
+      assert.ok(distance(frame.aggressor, original) > distance(previous.aggressor, original), 'the first grounded frame already begins the walk');
+      assert.equal(frame.grip, undefined, 'contact still waits for the actual feet rather than a planned early grip');
+      previous = frame;
+    }
+    assert.ok(distance(previous.aggressor, original) > 75, 'the previous pause cannot absorb the first half-second');
   }
 });
 

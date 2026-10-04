@@ -48,12 +48,18 @@ for (const tactic of ['team', 'betrayal']) test(`the live ${tactic} calls its al
   const props = { candidates: order.map(id => ({ id, name: id, color: '#ffad72' })), order, duration: 44000, arenaRushRoll: 7, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
   const caller = tactic === 'team' ? planned.aggressor : planned.victim;
-  let request = false, response = false, linked = false, attacking = false, walkingCall = false, shadows = 0;
+  let request = false, response = false, linked = false, attacking = false, walkingCall = false, failed = false, shadows = 0;
   for (let elapsed = 0; elapsed < planned.impact + 300; elapsed += 16) {
     ctx.clear(); render(ctx, props, elapsed, elapsed, sim, 16, false);
     const actual = sim.contacts.get(planned.id)?.round;
     if (!actual) continue;
     const action = arenaAction(actual, elapsed), actors = capturedActors(), words = capturedWords();
+    if (tactic === 'betrayal' && action.stage === 'betrayal') {
+      assert.equal(words.get(caller), '실패다!');
+      const head = actors.get(caller).animation.contactPoints.head;
+      assert.ok(ctx.labels.some(label => label.value === '실패다!' && Math.abs(label.x - head.x) < .001 && label.y <= head.y - 21));
+      failed = true;
+    }
     for (const [id, word] of words) {
       if (!social.has(word)) continue;
       assert.ok(['approach', 'link'].includes(action.stage), 'alliance conversation finishes before the technical attack');
@@ -71,5 +77,6 @@ for (const tactic of ['team', 'betrayal']) test(`the live ${tactic} calls its al
     shadows += ctx.fills.filter(fill => fill.style === '#25302d40' && fill.path.some(part => part.kind === 'ellipse')).length;
   }
   assert.ok(request && response && linked && attacking && walkingCall, JSON.stringify({ tactic, seed, request, response, linked, attacking, walkingCall }));
+  if (tactic === 'betrayal') assert.ok(failed, 'breaking the alliance visibly calls its failure');
   assert.ok(shadows > 5, 'the fighters keep their normal floor shadows');
 });

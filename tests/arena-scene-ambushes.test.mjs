@@ -36,7 +36,7 @@ function context() {
   let matrix = identity(), stack = [], currentId;
   const records = new Map();
   const target = {
-    globalAlpha: 1, measureText: value => ({ width: value.length * 8 }), createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }),
+    globalAlpha: 1, texts: [], fillText(value) { target.texts.push(value); }, measureText: value => ({ width: value.length * 8 }), createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }),
     save() { stack.push({ matrix: [...matrix], alpha: target.globalAlpha }); },
     restore() { const saved = stack.pop(); if (saved) { matrix = saved.matrix; target.globalAlpha = saved.alpha; } },
     transform(...next) { matrix = multiply(matrix, next); },
@@ -53,7 +53,7 @@ function context() {
   };
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
-function game(seed, reversed = false, mirrored = false, candidateOrder, initialRoots, suppliedOrder = order) {
+function game(seed, reversed = false, mirrored = false, candidateOrder, initialRoots, suppliedOrder = order, frameDelta = 16) {
   const props = { candidates: (candidateOrder ?? (reversed ? [...order].reverse() : order)).map(id => ({ id, name: id, color: '#ffad72' })), order: suppliedOrder, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
   setInitialize((sim, props, elapsed, reset) => {
@@ -61,7 +61,8 @@ function game(seed, reversed = false, mirrored = false, candidateOrder, initialR
   });
   return { sim, ctx, step(elapsed, paused = false) {
     ctx.records.clear();
-    render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : 16, false);
+    ctx.texts.length = 0;
+    render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : frameDelta, false);
     // The rare passer has one deterministic ordinary layout. Reflect its real
     // initialized bodies once to exercise the other physical heading as well.
     if (mirrored && elapsed === 0) {
@@ -87,26 +88,39 @@ function snapshot(actor, body) {
 const points = contacts => [contacts.origin, contacts.head, contacts.waist, ...contacts.hands, ...contacts.feet];
 const intersectsViewport = values => Math.max(...values.map(point => point.x)) > 0 && Math.min(...values.map(point => point.x)) < 1000 && Math.max(...values.map(point => point.y)) > 0 && Math.min(...values.map(point => point.y)) < 620;
 
-for (const mirrored of [false, true]) test(`a live feet-first slide hooks the real ankle, stands, and kicks one opponent out (${mirrored ? 'mirrored' : 'ordinary'})`, () => {
+for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`a live feet-first slide hooks the real ankle, stands, and kicks one opponent out (${mirrored ? 'mirrored' : 'ordinary'}, ${delta}ms)`, () => {
   const seed = 46, planned = arenaRounds(rareOrder, duration, rushRoll, seed).find(round => round.slideTrip);
   assert.ok(planned, 'the production independent roll selects the sliding attack');
-  const scene = game(seed, false, mirrored, undefined, undefined, rareOrder), stages = new Set();
-  let hooked = false, kicked = false, rolled = false, resolved = false, previousDriver;
-  for (let elapsed = 0; elapsed <= planned.resolve + 1500; elapsed += 16) {
+  const scene = game(seed, false, mirrored, undefined, undefined, rareOrder, delta), stages = new Set();
+  let hooked = false, kicked = false, rolled = false, resolved = false, loweredWithRoom = false, previousDriver;
+  for (let elapsed = 0; elapsed <= planned.resolve + 1500; elapsed += delta) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
     if (!contact?.slideTripOrigins || !contact.round.slideTrip) continue;
     const actual = contact.round, window = actual.slideTrip;
     const frame = arenaSlideTripTargets(window, elapsed, contact.center, contact.slideTripOrigins, actual.contactSide);
     const driver = actors.get(actual.aggressor), victim = actors.get(actual.victim), body = scene.sim.bodies.get(actual.aggressor);
-    const detail = `${mirrored}/${elapsed}/${frame.stage}`;
+    const detail = `${mirrored}/${delta}/${elapsed}/${frame.stage}`;
     stages.add(frame.stage);
     assert.ok(points(driver.animation.contactPoints).every(point => Number.isFinite(point.x) && Number.isFinite(point.y)), `the actual sliding/rising rig stays finite: ${detail}`);
-    if (!scene.sim.exits.has(actual.victim) && previousDriver) assert.ok(distance(body, previousDriver) <= 240 * .016 + .01, `the slide cannot teleport the actual body: ${detail}`);
+    if (!scene.sim.exits.has(actual.victim) && previousDriver) assert.ok(distance(body, previousDriver) <= 240 * delta / 1000 + .01, `the slide cannot teleport the actual body: ${detail}`);
     previousDriver = { x: body.x, y: body.y };
+    if (frame.stage === 'approach') assert.ok(scene.ctx.texts.includes('돌진!'), `the actual running attack paints its headword: ${detail}`);
+    if (!hooked) {
+      assert.equal(Math.abs(victim.angle), 0, 'the rival stays standing throughout the uncontacted ground journey');
+      assert.ok(!scene.sim.exits.has(actual.victim), 'sliding entry cannot eliminate the rival before toe contact');
+    }
+    if (!loweredWithRoom && frame.stage === 'slide' && driver.slideProgress >= .8) {
+      assert.ok(driver.animation.motion.crouch > 13, 'the actual painted pelvis has lowered into the sliding pose');
+      assert.ok(distance(body, contact.slideTripOrigins.standingAnkle) > 80, `the low pose begins while the ankle is still beyond reach: ${detail}`);
+      loweredWithRoom = true;
+    }
     if (window.hookAt === elapsed) {
       assert.equal(driver.pose, 'slide');
       assert.ok(driver.animation.contactPoints.feet.some(foot => distance(foot, contact.slideTripOrigins.standingAnkle) < 8), `a real leading sole contacts the ankle before the fall: ${detail}`);
       assert.equal(Math.abs(victim.angle), 0, 'the defender is still upright at the first ankle contact');
+      assert.ok(loweredWithRoom, 'the actual low slide is visible before hooking the rival');
+      assert.ok(distance(body, contact.slideTripOrigins.slideOrigin) > 60, `the seated body actually crosses the sand before ankle contact: ${detail}`);
+      assert.ok(elapsed - window.launchAt > 300, 'toe contact follows ground travel instead of the entry pose');
       hooked = true;
     }
     if (hooked && !scene.sim.exits.has(actual.victim)) assert.ok(distance(scene.sim.bodies.get(actual.victim), contact.slideTripOrigins.hookVictim) < .001, 'the victim falls on the same footprint until the kick');
@@ -244,7 +258,7 @@ for (const mirrored of [false, true]) test(`two live allies independently clothe
         assert.ok(Math.abs(distance(rig.shoulders[arm], elbow) - 11 * actor.scale) < .001);
         assert.ok(Math.abs(distance(elbow, hand) - 10.5 * actor.scale) < .001, 'the impact cannot stretch the striking arm');
       });
-      assert.equal(actual.impact - window.contactAt, 2200, 'the existing ordinary-speed shared throw is reused');
+      assert.ok(actual.impact > window.contactAt && actual.pairPickupAt == null, 'the shared throw reserves its finish until actual four-hand pickup');
       hit = true;
     }
     if (contact.pairCarryOrigins && !exit) {
@@ -263,7 +277,7 @@ for (const mirrored of [false, true]) test(`two live allies independently clothe
     if (exit?.round.id === actual.id && !thrown) {
       assert.equal(previousVictim?.pose, 'carried', 'the free flight inherits the last supported body');
       assert.equal(victim.carrySupport, 'shoulder', 'the linked throw keeps the same supported body shape after release');
-      assert.ok(Math.abs(exit.lift - 142) < .01, 'the throw starts at the same existing overhead height');
+      assert.ok(exit.lift > 80 && exit.lift <= 84, 'the throw starts at the supported heave height');
       assert.ok(distance(previousVictim.contacts.origin, { x: exit.origin.x, y: exit.origin.y - exit.lift }) < .01, 'releasing the shared body cannot teleport it');
       const now = victim.animation.contactPoints, delta = { x: now.origin.x - previousVictim.contacts.origin.x, y: now.origin.y - previousVictim.contacts.origin.y };
       for (const limb of ['shoulders', 'elbows', 'hands', 'feet']) now[limb].forEach((point, index) => assert.ok(distance(point, { x: previousVictim.contacts[limb][index].x + delta.x, y: previousVictim.contacts[limb][index].y + delta.y }) < .01, 'releasing the shoulder-supported body preserves every limb'));

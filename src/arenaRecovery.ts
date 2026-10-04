@@ -99,7 +99,9 @@ export function arenaRecoveryTargets(round: ArenaRound, elapsed: number, center:
   const height = throwAge < 0 ? take * 42 : !landed ? 42 * (1 - ease(flight)) + 158 * 4 * flight * (1 - flight) : 0;
   // Most of the rotation happens around the high part of the arc. The last
   // quarter of the descent lets the straightened feet read before contact.
-  const turn = side * Math.PI * 2 * ease((flight - .08) / .76);
+  const releaseAngle = -.22 * 42 / 52;
+  const turn = mix(releaseAngle, side * Math.PI * 2, ease((flight - .08) / .76));
+  const heldPhase = progress < .52 ? clamp((progress - .30) / .22) : take;
   const thrownFrom = inside({ x: center.x - side * 23, y: center.y });
   // A survivor uses the landing momentum to leave this opponent behind.
   // Bend along the sand when the rim leaves no straight runway.
@@ -110,9 +112,9 @@ export function arenaRecoveryTargets(round: ArenaRound, elapsed: number, center:
     kind: undefined,
     active: elapsed >= round.recovery.start && elapsed < round.recovery.end,
     stage: progress < .30 ? 'approach' : progress < .52 ? 'hold' : throwAge < 0 ? 'lift' : !landed ? 'somersault' : throwAge < 1100 ? 'land' : throwAge < 2100 ? 'separate' : 'release',
-    side, phase: throwAge < 0 ? take : clamp(throwAge / 350), airborne,
+    side, phase: throwAge < 0 ? heldPhase : clamp(throwAge / 350), airborne,
     thrower, receiver,
-    height, angle: turn, grip: progress >= .30 && throwAge < 0,
+    height, angle: throwAge < 0 ? -.22 * take * 42 / 52 : turn, grip: progress >= .30 && throwAge < 0,
     throwAt: round.recovery.throwAt ?? round.recovery.start + throwSpan * unit,
     flightPhase: flight, throwPhase: clamp(throwAge / 350), liftPhase: take,
     landingPhase: clamp((throwAge - 880) / 220), returnCenter: escaped.returnCenter,

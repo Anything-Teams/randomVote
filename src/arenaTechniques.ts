@@ -164,12 +164,22 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
   } else if (round.tactic === 'elbow') {
     const close = ease((phase - .30) / .04);
     const raised = ease((phase - .30) / .15), descend = ease((phase - .55) / .12);
-    const fall = ease((phase - .55) / .12), circle = ease((phase - .67) / .17);
+    const fall = ease((phase - .55) / .12);
+    // Once the counterattacker has landed, a normal planted step begins at
+    // once. Integrate one walking motor rather than easing a moving target.
+    const approachAge = Math.max(0, (elapsed - round.start - span * .67) / 1000);
+    const approachLength = Math.hypot(102, 6), speed = 165, ramp = .18;
+    const cruise = approachLength / speed - ramp;
+    const brake = Math.min(ramp, Math.max(0, approachAge - ramp - cruise));
+    const walked = approachAge < ramp ? speed * approachAge ** 2 / (2 * ramp)
+      : approachAge < ramp + cruise ? speed * (ramp / 2 + approachAge - ramp)
+        : speed * (ramp / 2 + cruise + brake - brake ** 2 / (2 * ramp));
+    const circle = clamp(walked / approachLength);
     frame.aggressorLift = raised * 44 * (1 - descend);
     frame.aggressorSuspension = raised * (1 - descend);
     frame.aggressor.x = center.x - side * mix(24, 12, close) + side * 102 * circle;
-    frame.aggressor.y = center.y + Math.sin(circle * Math.PI) * 18 + circle * 6;
-    frame.aggressorFacing = phase >= .76 ? -side : side;
+    frame.aggressor.y = center.y + circle * 6;
+    frame.aggressorFacing = phase >= .67 ? -side : side;
     frame.victim = { x: center.x + side * mix(24, 22, close), y: center.y };
     frame.victimAngle = -side * Math.PI * .47 * fall;
     frame.victimPose = phase >= .55 ? 'stunned' : undefined;
@@ -187,7 +197,7 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     frame.lift = 0;
     const timing = arenaFloorExitTiming(round), age = Math.max(0, elapsed - round.impact);
     frame.aggressorPose = phase >= .45 && phase < .61 ? 'elbow' : phase >= .84 ? elapsed >= round.impact && age >= timing.dragUntil ? 'throw' : 'drag' : undefined;
-    frame.stage = phase < .45 ? 'lift-counter' : phase < .55 ? 'elbow' : phase < .67 ? 'elbow-impact' : phase < .76 ? 'groggy' : phase < .84 ? 'ankle-approach' : elapsed < round.impact ? 'ankle-grip' : age < timing.dragUntil ? 'drag' : 'release';
+    frame.stage = phase < .45 ? 'lift-counter' : phase < .55 ? 'elbow' : phase < .67 ? 'elbow-impact' : phase < .84 ? 'ankle-approach' : elapsed < round.impact ? 'ankle-grip' : age < timing.dragUntil ? 'drag' : 'release';
   }
   return frame;
 }

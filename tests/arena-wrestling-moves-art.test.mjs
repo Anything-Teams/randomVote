@@ -95,6 +95,48 @@ test('a bulldog grips the actual painted head sides with ordinary arms even as b
   }
 });
 
+test('a fading head hold preserves its two complete arm arcs through fall, recovery and the next grip', () => {
+  const smooth = value => { const p = Math.max(0, Math.min(1, value)); return p * p * (3 - 2 * p); };
+  // This fixture isolates head-hold arm release. Complete falls and grounded
+  // leg proportions are covered by the actual Scene and floor-body tests.
+  const armBones = (actor, frame) => {
+    for (let arm = 0; arm < 2; arm++) {
+      const { shoulders, elbows, hands } = frame.contacts;
+      assert.ok(Math.abs(distance(shoulders[arm], elbows[arm]) - 11 * actor.scale) < .001);
+      assert.ok(Math.abs(distance(elbows[arm], hands[arm]) - 10.5 * actor.scale) < .001);
+    }
+    assert.ok(frame.matrix.every(Number.isFinite) && points(frame.contacts).every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
+    assert.ok(Math.abs(Math.hypot(frame.matrix[0], frame.matrix[1]) - actor.scale) < 1e-8);
+  };
+  for (const facing of [-1, 1]) for (const step of [16, 50]) {
+    const driver = fighter({ facing, pose: 'bulldog', bulldogProgress: 0, gripMode: 'head', motionImmediate: false });
+    const free = paint(driver, 1000), center = { x: (free.contacts.shoulders[0].x + free.contacts.shoulders[1].x) / 2, y: (free.contacts.shoulders[0].y + free.contacts.shoulders[1].y) / 2 };
+    const victim = fighter({ index: 1, facing: -facing });
+    let sides = sampleArenaFighterContacts(victim, 1000).headSides;
+    const middle = { x: (sides[0].x + sides[1].x) / 2, y: (sides[0].y + sides[1].y) / 2 };
+    victim.x += center.x + facing * 12 - middle.x; victim.y += center.y - 9 - middle.y;
+    sides = sampleArenaFighterContacts(victim, 1000).headSides;
+    // Material hand indices follow the actual temples in either heading.
+    sides.sort((a, b) => (a.x - b.x) * facing);
+    Object.assign(driver, { gripTarget: sides[1], secondaryGripTarget: sides[0], gripStrength: 1, gripLocked: true });
+    let previous = structuredClone(paint(driver, 1000).contacts);
+    previous.hands.forEach((hand, arm) => assert.ok(distance(hand, sides[arm]) < .001, 'the complete hold begins on two distinct actual temples'));
+    for (let age = step; age <= 940 + step; age += step) {
+      const fall = smooth(age / 460), rise = smooth((age - 460) / 480);
+      Object.assign(driver, { pose: age < 460 ? 'bulldog' : 'recover', bulldogProgress: fall, slamEntry: true, slamProgress: { tuck: 0, slump: fall * (1 - rise) }, gripStrength: 1 - smooth((fall - .72) / .28) });
+      const frame = paint(driver, 1000 + age);
+      armBones(driver, frame);
+      frame.contacts.elbows.forEach((point, arm) => assert.ok(distance(point, previous.elbows[arm]) < 8 + step * .9, 'releasing through the shoulder cannot flip the elbow around an IK pole'));
+      frame.contacts.hands.forEach((point, arm) => assert.ok(distance(point, previous.hands[arm]) < 8 + step * .9, 'the held and resting forearms use one continuous arc across angle wrapping'));
+      assert.ok(driver.animation.headGripArms?.every(memory => memory.free.concat(memory.held).every(Number.isFinite)), 'fall and recovery retain finite material arm angles');
+      previous = structuredClone(frame.contacts);
+    }
+    Object.assign(driver, { gripMode: 'waist', gripTarget: undefined, secondaryGripTarget: undefined, gripStrength: 0 });
+    armBones(driver, paint(driver, 2000));
+    assert.equal(driver.animation.headGripArms, undefined, 'changing to the next grip clears head-only material angles');
+  }
+});
+
 test('back body drop and both waist slams load and extend through complete planted legs', () => {
   for (const pose of ['backbodydrop', 'spinebuster', 'scoopslam']) for (const facing of [-1, 1]) for (const index of [0, 3, 6, 9]) {
     const actor = fighter({ index, facing, pose, motionImmediate: false });

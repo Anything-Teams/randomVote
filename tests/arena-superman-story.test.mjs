@@ -58,7 +58,7 @@ test('story and head words use the recorded short-run takeoff and the real fist 
   assert.ok(actual.canPerform && actual.plannedLaunchAt <= launchAt, 'the short-run takeoff follows a real complete run and plant');
   const reader = arenaSupermanPunchTargets(round.supermanPunch, launchAt + 50, center);
   assert.equal(reader.launchAt, launchAt, 'a narration reader without real origins must not delay the recorded takeoff');
-  const cases = [[start, 0, '달려들기!'], [launchAt + 50, 2, '도약!'], [launchAt + 160, 3, '슈퍼맨 펀치!'], [hitAt, 3, '슈퍼맨 펀치!'], [launchAt + timing.air, 4, undefined], [launchAt + timing.air + timing.land, 5, undefined]];
+  const cases = [[start, 0, '돌진!'], [launchAt + 50, 2, '도약!'], [launchAt + 160, 3, '슈퍼맨 펀치!'], [hitAt, 3, '슈퍼맨 펀치!'], [launchAt + timing.air, 4, undefined], [launchAt + timing.air + timing.land, 5, undefined]];
   for (const [clock, step, word] of cases) {
     const story = arenaStoryState(round, clock), words = arenaActionWords(round, clock);
     assert.equal(story.kind, 'superman-punch'); assert.equal(story.step, step);

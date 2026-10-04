@@ -7,6 +7,8 @@ const {
   arenaLinkedRushTargets, arenaLinkedRushOutcome, ARENA_LINKED_RUSH_CHANCE,
   ARENA_LINKED_RUSH_SPEED, ARENA_LINKED_RUSH_MAX_PRELUDE,
 } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
+const shared = await build({ entryPoints: ['src/arenaPairRush.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { ARENA_PAIR_COUNTER_TIMING, arenaPairRushTargets } = await import(`data:text/javascript;base64,${Buffer.from(shared.outputFiles[0].text).toString('base64')}`);
 const center = { x: 500, y: 416 }, window = { start: 4000, end: 13000 };
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const inside = point => Math.hypot((point.x - 500) / 303, (point.y - 416) / 112) <= 1 + 1e-9;
@@ -84,7 +86,7 @@ test('two distinct striking hands reach separate actual neck and chest points wi
     assert.deepEqual(hit.linkedArms, reversed ? [0, 1] : [1, 0]);
     assert.deepEqual(hit.contactPair, hit.pair, 'the post-contact throw inherits the exact two hit roots');
     assert.deepEqual(hit.contactVictim, origins.victim);
-    assert.equal(hit.requiredEndAt, hit.contactAt + 2200, 'only the existing shared post-contact stroke owns the remainder');
+    assert.equal(hit.requiredEndAt, hit.contactAt + ARENA_PAIR_COUNTER_TIMING.release, 'the canonical linked contact uses the same current grounded-pickup and shared-heave clock');
   }
 });
 
@@ -157,7 +159,36 @@ test('a recorded real contact freezes that actual hit root rather than pulling a
     assert.deepEqual(frame.pair, incoming.pair);
     assert.deepEqual(frame.contactPair, incoming.pair);
     assert.equal(frame.contactAt, actualContact);
-    assert.equal(frame.requiredEndAt, actualContact + 2200);
+    assert.equal(frame.requiredEndAt, actualContact + ARENA_PAIR_COUNTER_TIMING.release);
+  }
+});
+
+test('a real double-clothesline hit hands the exact roots to a floor pickup, then waits for actual four-point support', () => {
+  for (const above of [false, true]) for (const reversed of [false, true]) {
+    const origins = initial(above, reversed), plan = arenaLinkedRushTargets(window, window.start, center, origins);
+    const contactAt = plan.contactAt - 16, hit = arenaLinkedRushTargets({ ...window, launchAt: plan.launchAt, contactAt }, contactAt, center, origins);
+    const side = hit.contactPair[0].x >= hit.contactPair[1].x ? 1 : -1;
+    const cast = { id: 'linked-pickup', index: 0, tactic: 'double-shove', aggressor: 'a', helper: 'h', victim: 'v', rushOutcome: 'counter-throw', start: contactAt, impact: contactAt + ARENA_PAIR_COUNTER_TIMING.release, resolve: contactAt + ARENA_PAIR_COUNTER_TIMING.release + 1100, end: contactAt + ARENA_PAIR_COUNTER_TIMING.release + 1100, final: false, contactSide: side, rushLaunchAt: contactAt, rushContactAt: contactAt, pairPickupAt: null };
+    const carry = { victim: { ...hit.contactVictim }, pair: structuredClone(hit.contactPair), direction: { ...hit.direction }, facing: 1 };
+    const impact = arenaPairRushTargets(cast, contactAt, center, undefined, carry);
+    assert.deepEqual(impact.victim, hit.contactVictim);
+    assert.deepEqual([impact.aggressor, impact.helper], hit.contactPair, 'contact does not manufacture another layout before the grounded pickup');
+    const groundedAt = contactAt + ARENA_PAIR_COUNTER_TIMING.grip;
+    const grounded = arenaPairRushTargets(cast, groundedAt, center, undefined, carry);
+    const late = arenaPairRushTargets(cast, groundedAt + 1800, center, undefined, carry);
+    assert.equal(late.stage, 'grip'); assert.equal(late.waitingForPickup, true); assert.equal(late.lift, 0); assert.equal(late.victimCarryStretch, 0);
+    assert.deepEqual(late.victim, grounded.victim, 'a nominal linked end cannot lift or move an unsupported stunned body');
+    const pickupAt = groundedAt + 1800;
+    carry.pickup = { victim: { ...late.victim }, pair: [{ ...late.aggressor }, { ...late.helper }], waist: { x: late.victim.x, y: late.victim.y - 15 } };
+    const recorded = { ...cast, pairPickupAt: pickupAt };
+    const first = arenaPairRushTargets(recorded, pickupAt, center, undefined, carry);
+    assert.deepEqual([first.victim, first.aggressor, first.helper], [late.victim, late.aggressor, late.helper]);
+    assert.equal(first.lift, 0);
+    const duration = ARENA_PAIR_COUNTER_TIMING.release - ARENA_PAIR_COUNTER_TIMING.grip;
+    assert.equal(first.requiredImpactAt, pickupAt + duration);
+    const release = arenaPairRushTargets(recorded, pickupAt + duration, center, undefined, carry);
+    assert.equal(release.stage, 'release'); assert.equal(release.lift, 84); assert.equal(release.pairHeave, 1);
+    assert.equal(release.grip, undefined); assert.deepEqual(carry.victim, hit.contactVictim, 'the floor pickup anchor remains separate from the original hit point');
   }
 });
 
