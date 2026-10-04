@@ -100,7 +100,7 @@ test('other eligible single encounters add about twelve percent rim attempts wit
   let eligible = 0, attempts = 0, successes = 0;
   for (let seed = 0; seed < 4096; seed++) {
     const first = arenaRounds(order, 44_000, 7, seed)[0];
-    if (first.escape || first.recovery) continue;
+    if (first.escape || first.recovery || first.tripCounter || first.passingTrip || first.pairDodge) continue;
     eligible++;
     const shouldAttempt = arenaEscapeRoll(seed, 101) % 100 < 12;
     assert.equal(!!first.rim, shouldAttempt, 'only the independent twelve percent roll creates an extra encounter');

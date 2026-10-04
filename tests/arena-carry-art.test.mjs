@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
 const bundle = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { createArenaFighterAnimation, drawArenaFighter, sampleArenaFighterContacts } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
+const { createArenaFighterAnimation, drawArenaFighter, sampleArenaFighterContacts, arenaCarryHolderPoint } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 const rushBundle = await build({ entryPoints: ['src/arenaPairRush.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { arenaPairRushTargets } = await import(`data:text/javascript;base64,${Buffer.from(rushBundle.outputFiles[0].text).toString('base64')}`);
 const ctx = Object.fromEntries(['save', 'restore', 'translate', 'rotate', 'scale', 'transform', 'fillRect', 'beginPath', 'ellipse', 'fill', 'moveTo', 'lineTo', 'closePath'].map(key => [key, () => {}]));
 const fighter = overrides => ({ candidate: { id: 'fighter', name: '선수', color: '#ffad72' }, index: 1, x: 500, y: 416, depthY: 416, scale: 2.04, facing: -1, pose: 'carried', angle: Math.PI / 2, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, phase: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...overrides });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const parts = contacts => [contacts.head, contacts.waist, ...contacts.hands, ...contacts.feet];
-const overheadPlacement = (ends, facing) => ({ x: (ends[0].x + ends[1].x) / 2 - facing * Math.sin(17 * Math.PI / 180) * 23 * 2.04, y: (ends[0].y + ends[1].y) / 2 + (19.8 + Math.cos(17 * Math.PI / 180) * 23 + 2 + 26) * 2.04 });
+const overheadPlacement = (ends, facing, index = 1) => arenaCarryHolderPoint(fighter({ index, facing, pose: 'overhead', overheadRaise: 1, angle: 0, gripMode: 'wrist' }), ends, 2000);
 
 test('the carried body unfolds both arms beyond its head and straightens both complete legs', () => {
   for (const side of [-1, 1]) {
@@ -35,7 +35,7 @@ test('both helpers can hold the two actual wrists and the two actual ankles abov
     const victim = fighter({ index: 2, angle: side * Math.PI / 2, facing: -side, carryStretch: 1, y: 279, depthY: 421, suspension: 1 });
     const contacts = sampleArenaFighterContacts(victim, 2000);
     for (const [index, facing, ends, gripMode] of [[1, -side, contacts.hands, 'wrist'], [3, side, contacts.feet, 'ankle']]) {
-      const holder = fighter({ index, ...overheadPlacement(ends, facing), facing, pose: 'overhead', overheadRaise: 1, angle: 0, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
+      const holder = fighter({ index, ...overheadPlacement(ends, facing, index), facing, pose: 'overhead', overheadRaise: 1, angle: 0, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
       drawArenaFighter(ctx, holder, 2000);
       const held = holder.animation.contactPoints;
       assert.ok(distance(held.hands[0], ends[1]) < .001, 'the far hand actually holds the second limb');
@@ -52,7 +52,8 @@ test('the two overhead helpers lift with extended supported arms instead of fold
     const victim = fighter({ index, angle: side * Math.PI / 2, facing: -side, carryStretch: 1, y: 279, depthY: 421, suspension: 1 });
     const points = sampleArenaFighterContacts(victim, 2000);
     for (const [facing, ends, gripMode] of [[-side, points.hands, 'wrist'], [side, points.feet, 'ankle']]) {
-      const body = fighter({ index: (index + 3) % 10, ...overheadPlacement(ends, facing), facing, pose: 'overhead', overheadRaise: 1, carrierDrive: 1, angle: 0, carryStretch: undefined, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
+      const body = fighter({ index: (index + 3) % 10, ...overheadPlacement(ends, facing, index), facing, pose: 'overhead', overheadRaise: 1, carrierDrive: 1, angle: 0, carryStretch: undefined, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
+      Object.assign(body, arenaCarryHolderPoint(body, ends, 2000));
       drawArenaFighter(ctx, body, 2000);
       const contacts = body.animation.contactPoints;
       for (let arm = 0; arm < 2; arm++) {
@@ -176,7 +177,7 @@ test('the shared throw keeps all four limb holds through body transfer and relea
     const victim = fighter({ index: 2, angle: side * Math.PI / 2, facing: -side, carryStretch: 1, y: 279, depthY: 421, suspension: 1 });
     const contacts = sampleArenaFighterContacts(victim, 2000);
     for (const [index, facing, ends, gripMode] of [[1, -side, contacts.hands, 'wrist'], [3, side, contacts.feet, 'ankle']]) {
-      const body = fighter({ index, ...overheadPlacement(ends, facing), facing, pose: 'overhead', overheadRaise: 1, carrierDrive, angle: 0, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
+      const body = fighter({ index, ...overheadPlacement(ends, facing, index), facing, pose: 'overhead', overheadRaise: 1, carrierDrive, angle: 0, gripMode, gripTarget: ends[0], secondaryGripTarget: ends[1], gripStrength: 1, gripLocked: true });
       drawArenaFighter(ctx, body, 2000);
       const points = body.animation.contactPoints;
       assert.ok(distance(points.hands[0], ends[1]) < .001 && distance(points.hands[1], ends[0]) < .001, 'neither actual hand can detach from the held wrist or ankle during the weight transfer');
@@ -225,6 +226,7 @@ test('the joint throw keeps the actual wrist and ankle contact throughout its co
       const ends = sampleArenaFighterContacts(victim, at);
       for (const [point, facing, pair, gripMode] of [[motion.aggressor, -side, ends.hands, 'wrist'], [motion.helper, side, ends.feet, 'ankle']]) {
         const holder = fighter({ pose: 'overhead', x: point.x, y: point.y, facing, angle: 0, carryStretch: undefined, overheadRaise: motion.overhead, carrierDrive: motion.carrierDrive, gripMode, gripTarget: pair[0], secondaryGripTarget: pair[1], gripStrength: 1, gripLocked: true });
+        Object.assign(holder, arenaCarryHolderPoint(holder, pair, at));
         const held = sampleArenaFighterContacts(holder, at);
         assert.ok(distance(held.hands[0], pair[1]) < .001 && distance(held.hands[1], pair[0]) < .001, `the weight transfer keeps all four real holds at ${at}ms`);
       }

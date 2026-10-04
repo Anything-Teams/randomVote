@@ -18,7 +18,7 @@ const cameraCompiled = await build({ entryPoints: ['src/racingCamera.ts'], bundl
 const { createRacingCamera, racingFocusIds, placeRacingField } = await import(`data:text/javascript;base64,${Buffer.from(cameraCompiled.outputFiles[0].text).toString('base64')}`);
 const participants = Array.from({ length: 10 }, (_, index) => ({ id: `player-${index}`, name: `선수 ${index}`, color: '#f9d56e' }));
 // A physical prelude can start before the later deciding technique.
-const arenaEntry = round => Math.min(round.start, ...[round.recovery?.start, round.escape?.start, round.rim?.start, round.rimCharge?.start].filter(Number.isFinite));
+const arenaEntry = round => Math.min(round.start, ...[round.pairDodge?.start, round.passingTrip?.start, round.recovery?.start, round.escape?.start, round.rim?.start, round.rimCharge?.start].filter(Number.isFinite));
 
 test('only arena draws a variable runtime, while election and racing keep their existing length', () => {
   const unused = () => { throw new Error('Fixed modes must not draw a duration'); };

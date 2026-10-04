@@ -11,18 +11,18 @@ const draw = 'arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFig
 assert.ok(source.includes(draw));
 source = source.replaceAll('drawArenaScenery(ctx, clock,', 'jointTestScenery(ctx, clock,')
   .replace(draw, 'jointTestActors = actors; arenaDrawOrder([...actors.values()]).forEach(actor => { ctx.jointStart(actor); drawArenaFighter(ctx, actor, reduced ? 0 : clock); ctx.jointEnd(); });');
-source += '\nlet jointTestActors; const jointTestScenery = () => {}; export const capturedActors = () => jointTestActors; export { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks };';
+source += '\nlet jointTestActors; const jointTestScenery = () => {}; export const capturedActors = () => jointTestActors; export { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks }; export { ARENA_PAIR_COUNTER_TIMING } from "./arenaPairRush";';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks, capturedActors } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks, capturedActors, ARENA_PAIR_COUNTER_TIMING } = module.exports;
 const noop = () => {};
 const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
 const project = (matrix, point) => ({ x: matrix[0] * point.x + matrix[2] * point.y + matrix[4], y: matrix[1] * point.x + matrix[3] * point.y + matrix[5] });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const order = ['1', '2', '3', '4', '5'];
-const duration = 44000, seed = 0, rushRoll = 7;
+const duration = 44000, seed = 1, rushRoll = 7;
 const planned = arenaRounds(order, duration, rushRoll, seed).find(round => round.rushOutcome === 'counter-throw');
 assert.ok(planned, 'the requested numeric five-person fixture contains a shared throw');
 
@@ -48,11 +48,26 @@ function context() {
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
 function game(reversed = false) {
-  const props = { candidates: (reversed ? [...order].reverse() : order).map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
+  const props = { candidates: order.map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
   return { sim, ctx, step(elapsed, paused = false) {
     ctx.records.clear();
     render(ctx, { ...props, paused }, elapsed, elapsed, sim, paused ? 0 : 16, false);
+    if (reversed && !paused && elapsed === planned.start - 2400) {
+      // Initialize the opposite field layout before this encounter's preparation
+      // begins. Reserve its two wrestlers from incidental minis while they walk
+      // into their real grips; no attached root is overridden later in the scene.
+      const first = sim.bodies.get(planned.aggressor), second = sim.bodies.get(planned.helper);
+      const firstOrigin = { x: first.x, y: first.y };
+      first.x = second.x; first.y = second.y;
+      second.x = firstOrigin.x; second.y = firstOrigin.y;
+      for (const body of [first, second]) {
+        body.vx = 0; body.vy = 0; body.motorX = 0; body.motorY = 0;
+        body.animation = undefined; body.roam = undefined; body.restUntil = planned.start;
+      }
+      sim.minis.clear();
+      for (const key of sim.contacts.keys()) if (key.startsWith('mini-')) sim.contacts.delete(key);
+    }
     return capturedActors();
   } };
 }
@@ -120,13 +135,13 @@ for (const reversed of [false, true]) test(`the live pair counter stops at the n
     const actual = contact.round, frame = arenaPairRushTargets(actual, elapsed, contact.center, contact.chargerOrigin);
     const victim = actors.get(planned.victim);
     const detail = `${reversed}/${elapsed}/${frame.stage}`;
-    assert.ok(Math.abs(actual.impact - frame.contactAt - 3000 * actual.timeScale) < .001, `the actual scene cannot stretch the counter to fill the planned round: ${detail}`);
+    assert.ok(Math.abs(actual.impact - frame.contactAt - ARENA_PAIR_COUNTER_TIMING.release) < .001, `the actual scene cannot stretch the counter to fill the planned round: ${detail}`);
     if (elapsed >= frame.contactAt && elapsed < actual.impact) {
       contacted = true;
       const displacement = { x: scene.sim.bodies.get(planned.victim).x - frame.contactPoint.x, y: scene.sim.bodies.get(planned.victim).y - frame.contactPoint.y };
       if (frame.stage === 'rebound' || frame.stage === 'groggy') assert.ok(displacement.x * frame.chargeDirection.x + displacement.y * frame.chargeDirection.y <= .001, `the runner rebounds on the entry side instead of passing through both opponents: ${detail}`);
       assert.equal(victim.facing, frame.chargerFacing, `collision and falling cannot mirror the whole body in one frame: ${detail}`);
-      if (previous && elapsed < frame.contactAt + 1930 * actual.timeScale) {
+      if (previous && elapsed < frame.contactAt + ARENA_PAIR_COUNTER_TIMING.lift) {
         const root = victim.animation.contactPoints.origin, delta = { x: root.x - previous.origin.x, y: root.y - previous.origin.y };
         points(victim.animation.contactPoints).forEach((point, index) => assert.ok(distance(point, { x: points(previous)[index].x + delta.x, y: points(previous)[index].y + delta.y }) < 20, `the painted head, hands and feet move continuously through the impact and prone grip: ${detail}`));
       }

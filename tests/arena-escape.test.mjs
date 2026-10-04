@@ -41,7 +41,7 @@ test('escapes only occur with more than two survivors and never change the suppl
     assert.ok(rounds.filter(round => round.escape).length <= 2);
     if (rounds.filter(round => round.escape).length === 2) cappedGames++;
     rounds.forEach((round, index) => {
-      const entry = round.rimCharge?.start ?? round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start;
+      const entry = round.pairDodge?.start ?? round.passingTrip?.start ?? round.rimCharge?.start ?? round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start;
       assert.equal(entry, rounds[index - 1]?.resolve ?? 0, 'each next scene immediately follows the previous deciding result');
       assert.ok([entry, round.start, round.impact, round.resolve, round.end].every(Number.isFinite));
       assert.ok(entry <= round.start && round.start < round.impact && round.impact < round.resolve && round.resolve <= round.end);

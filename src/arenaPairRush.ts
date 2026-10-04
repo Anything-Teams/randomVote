@@ -35,10 +35,22 @@ const drive = (value: number, ramp = .2) => {
   return (p < ramp ? p * p / (2 * ramp) : p - ramp / 2) / (1 - ramp / 2);
 };
 
+/** Pure replay of normal ground steps; seeking cannot bypass the walking cap. */
+function carrierGround(origin: ArenaPoint, age: number, target: (at: number) => ArenaPoint): ArenaPoint {
+  const end = Math.max(0, Math.min(ARENA_PAIR_COUNTER_TIMING.release, age));
+  let ground = { ...origin };
+  for (let at = 0; at < end; at += 8) {
+    const next = Math.min(end, at + 8), goal = target(next), dx = goal.x - ground.x, dy = goal.y - ground.y, distance = Math.hypot(dx, dy);
+    const amount = Math.min(1, 160 * (next - at) / (1000 * Math.max(.001, distance)));
+    ground = { x: ground.x + dx * amount, y: ground.y + dy * amount };
+  }
+  return ground;
+}
+
 /** Real post-contact milliseconds; a long bout never slows down an individual action. */
 export const ARENA_PAIR_COUNTER_TIMING = {
-  rebound: 440, fallStart: 240, grip: 1180, lift: 1930,
-  overhead: 2660, toss: 2810, release: 3000,
+  rebound: 400, fallStart: 200, grip: 700, lift: 1900,
+  overhead: 1900, toss: 2000, release: 2200,
 } as const;
 export const ARENA_PAIR_CONTACT_RADIUS = 22;
 
@@ -108,11 +120,11 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   // The Scene records the real contact from its actual runway. Consumers
   // without that origin must use the recorded instant, not a default runway.
   const contactAt = round.rushContactAt !== undefined && launchAt !== null && round.rushContactAt >= launchAt ? round.rushContactAt : earliestContact;
-  const postContactDuration = outcome === 'counter-throw' ? ARENA_PAIR_COUNTER_TIMING.release * unit : 1800;
+  const postContactDuration = outcome === 'counter-throw' ? ARENA_PAIR_COUNTER_TIMING.release : 1800;
   const requiredImpactAt = contactAt + postContactDuration;
   const contactPhase = (contactAt - round.start) / span;
   const launchPhase = ((launchAt ?? round.impact) - round.start) / span;
-  const released = launchAt !== null && elapsed >= round.impact;
+  const released = launchAt !== null && elapsed >= (outcome === 'counter-throw' ? requiredImpactAt : round.impact);
   const runProgress = launchAt === null ? 0 : clamp((elapsed - launchAt) / Math.max(1, contactAt - launchAt));
   const approach = drive(runProgress);
   const impactAge = launchAt === null ? -1 : elapsed - contactAt;
@@ -158,38 +170,40 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
     return frame;
   }
   const timing = ARENA_PAIR_COUNTER_TIMING;
-  const age = impactAge / unit;
+  const age = impactAge;
   const reboundProgress = clamp(age / timing.rebound), rebound = ease(reboundProgress);
-  const fallen = ease((age - timing.fallStart) / (timing.rebound - timing.fallStart)), arrive = drive(age / timing.grip);
+  const fallen = ease((age - timing.fallStart) / (timing.rebound - timing.fallStart));
   const stretch = ease((age - timing.grip) / (timing.lift - timing.grip));
-  const lifted = ease((age - timing.lift) / (timing.overhead - timing.lift));
+  // Straightening the held arms and lifting the body are one continuous pull.
+  const lifted = ease((age - timing.grip) / (timing.overhead - timing.grip));
   const tossed = drive((age - timing.toss) / (timing.release - timing.toss));
   // The collision deflects the runner visibly sideways before the body
   // settles. Helpers go to that landing instead of resetting a prone body.
-  const pace = Math.min(1, unit), deflection = { x: (-chargeDirection.x * 40 - chargeDirection.y * 12 * side) * pace, y: (-chargeDirection.y * 40 + chargeDirection.x * 12 * side) * pace };
+  const pace = 1, deflection = { x: -chargeDirection.x * 30 - chargeDirection.y * 10 * side, y: -chargeDirection.y * 30 + chargeDirection.x * 10 * side };
   const fallenPoint = { x: contact.x + deflection.x, y: contact.y + deflection.y };
   const chargerX = mix(origin.x, contact.x, approach) + deflection.x * rebound;
   const chargerY = mix(origin.y, contact.y, approach) + deflection.y * rebound;
-  const carriedX = fallenPoint.x + side * tossed * 20;
-  frame.victim = { x: mix(chargerX, carriedX, stretch), y: mix(chargerY, fallenPoint.y, stretch) };
+  // Keeping the foot-origin marker fixed during suspension slides the entire
+  // horizontal rig by its 24-local-pixel pivot. Cancel that marker shift so
+  // the actual hips rise above the same patch of sand.
+  frame.victim = { x: mix(chargerX, fallenPoint.x, stretch) - side * 48.96 * lifted + side * tossed * 18, y: mix(chargerY, fallenPoint.y, stretch) };
   // The former opponents stop wrestling, go to opposite ends of the stunned
   // charger, and keep those arm/ankle holds through the shared lifting stroke.
-  // Floor-aware rotation initially shifts the stretched skeleton about 48px
-  // toward its toes. Both carriers follow that offset as the body leaves the
-  // sand, rather than stretching their arms beyond their anatomical reach.
+  // Both carriers approach the landing with normal planted steps, then
+  // follow the unfolding limb ends while the horizontal hips rise in place.
   // The rig and its holders share the actual landing depth. An entry from
   // above/below the pair cannot leave holders at the old contact depth.
   const carrierShiftY = fallenPoint.y - center.y - 5;
-  frame.aggressor = { x: mix(center.x + side * 22, carriedX + side * (mix(24, 121, stretch) + lifted * 29.54), arrive), y: center.y + mix(14, mix(10, -4, lifted) + carrierShiftY, arrive) };
-  frame.helper = { x: mix(center.x - side * 22, carriedX - side * (mix(85, 89, stretch) - lifted * 67.54), arrive), y: center.y + mix(-14, mix(6, -2, lifted) + carrierShiftY, arrive) };
-  // Follow the painted wrists/ankles from the prone grip into the raised
-  // body. At the peak both shoulders sit beneath their endpoint midpoint,
-  // letting both human-length arms extend rather than folding one elbow.
-  const lowCarry = stretch * (1 - lifted);
-  frame.aggressor.x -= side * 20 * lowCarry;
-  frame.aggressor.y += 4 * lowCarry + 6 * lifted;
-  frame.helper.x += side * 18 * lowCarry;
-  frame.helper.y += 8 * lowCarry + 4 * lifted;
+  const desired = (at: number, legs: boolean) => {
+    const unfold = ease((at - timing.grip) / (timing.lift - timing.grip)), rise = ease((at - timing.grip) / (timing.overhead - timing.grip));
+    const toss = drive((at - timing.toss) / (timing.release - timing.toss)), approach = drive(at / timing.grip), low = unfold * (1 - rise);
+    const bodyX = fallenPoint.x - side * 48.96 * rise + side * toss * 18;
+    return legs
+      ? { x: mix(center.x - side * 22, bodyX - side * (mix(85, 89, unfold) - rise * 67.54), approach) + side * 18 * low, y: center.y + mix(-14, mix(6, -2, rise) + carrierShiftY, approach) + 8 * low + 4 * rise }
+      : { x: mix(center.x + side * 22, bodyX + side * (mix(24, 121, unfold) + rise * 29.54), approach) - side * 20 * low, y: center.y + mix(14, mix(10, -4, rise) + carrierShiftY, approach) + 4 * low + 6 * rise };
+  };
+  frame.aggressor = carrierGround({ x: center.x + side * 22, y: center.y + 14 }, age, at => desired(at, false));
+  frame.helper = carrierGround({ x: center.x - side * 22, y: center.y - 14 }, age, at => desired(at, true));
   frame.rebound = rebound;
   frame.groggy = age >= timing.rebound ? 1 - stretch : 0;
   frame.reboundHeight = age >= 0 && age < timing.rebound ? Math.sin(reboundProgress * Math.PI) ** 2 * 26 * pace : 0;
@@ -203,7 +217,7 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   frame.grip = released ? undefined : age >= timing.grip ? 'arms-legs' : impactAge < 0 ? 'pair' : undefined;
   frame.carrierPose = age < timing.grip ? 'drag' : 'overhead';
   frame.armsHolderId = round.aggressor; frame.legsHolderId = round.helper;
-  frame.stage = waitingForGrip ? 'wrestle' : released ? 'release' : phase < launchPhase ? 'wrestle' : phase < contactPhase ? 'charge' : age < timing.rebound ? 'rebound' : age < timing.grip ? 'groggy' : age < timing.lift ? 'grip' : age < timing.overhead ? 'lift' : age < timing.toss ? 'overhead' : 'toss';
+  frame.stage = waitingForGrip ? 'wrestle' : released ? 'release' : phase < launchPhase ? 'wrestle' : phase < contactPhase ? 'charge' : age < timing.rebound ? 'rebound' : age < timing.grip ? 'groggy' : age < timing.grip + 100 ? 'grip' : age < timing.overhead ? 'lift' : age < timing.toss ? 'overhead' : 'toss';
   return frame;
 }
 

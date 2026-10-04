@@ -67,16 +67,20 @@ test('the two-person shove first contacts the locked pair, pushes both continuou
 });
 
 test('an occasional rush keeps its exact three-to-seven branch ratio and consumes only the next drawn losers', () => {
-  const seen = new Set(); let rushGames = 0, doubles = 0, counters = 0;
+  const seen = new Set(); let rushGames = 0, doubles = 0, counters = 0, dodges = 0;
   for (let variant = 0; variant < 160; variant++) for (let roll = 0; roll < 10; roll++) {
     const order = Array.from({ length: 8 }, (_, i) => `narrative-${variant}-${i}`), living = new Set(order);
     const rounds = arenaRounds(order, 44000, roll); let previousEnd = 0;
     if (!roll && rounds.some(round => round.rushOutcome)) rushGames++;
     for (const round of rounds) {
-      assert.equal(round.rimCharge?.start ?? round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start, previousEnd); previousEnd = round.end;
+      assert.equal(round.rimCharge?.start ?? round.rim?.start ?? round.pairDodge?.start ?? round.passingTrip?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start, previousEnd); previousEnd = round.end;
       assert.ok(living.has(round.aggressor));
       if (round.tactic === 'betrayal') { seen.add(round.counterSide); seen.add(round.counterFailed ? 'failed' : 'succeeded'); }
       const exits = arenaEliminatedIds(round);
+      if (round.pairDodge) {
+        assert.ok(roll >= 3); assert.equal(round.secondaryVictim, undefined);
+        assert.equal(round.victim, [...living].at(-1)); dodges++;
+      }
       if (round.rushOutcome) {
         assert.equal(round.rushOutcome, roll < 3 ? 'double-out' : 'counter-throw');
         if (roll >= 3) { counters++; assert.equal(round.secondaryVictim, undefined); }
@@ -98,7 +102,7 @@ test('an occasional rush keeps its exact three-to-seven branch ratio and consume
     assert.ok(rounds.filter(round => !!round.secondaryVictim).length <= 1);
   }
   assert.ok(rushGames > 10 && rushGames < 80, 'the three-person story remains occasional across matches');
-  assert.equal(doubles, rushGames * 3); assert.equal(counters, rushGames * 7);
+  assert.equal(doubles, rushGames * 3); assert.equal(counters + dodges, rushGames * 7);
   assert.deepEqual(seen, new Set(['front', 'back', 'failed', 'succeeded']));
 });
 

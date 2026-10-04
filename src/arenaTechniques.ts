@@ -46,8 +46,8 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
   const probe = round.tactic === 'sidekick' ? 0 : Math.sin(clamp((phase - .08) / .20) * Math.PI);
   const frame = {
     stage: phase < .08 ? 'approach' : phase < .20 ? 'probe' : phase < .30 ? 'reset' : 'grip', side, phase,
-    aggressor: { x: center.x - side * (24 - probe * 7), y: center.y },
-    victim: { x: center.x + side * (24 + probe * 5), y: center.y + probe * 3 },
+    aggressor: { x: center.x - side * (24 + probe * (round.tripCounter ? 5 : -7)), y: center.y },
+    victim: { x: center.x + side * (24 + probe * (round.tripCounter ? -4 : 5)), y: center.y + probe * 3 },
     lift: 0, victimAngle: 0, aggressorAngle: 0, aggressorLift: 0, yaw: 0, victimSuspension: 0, victimPose: undefined as 'held' | 'stunned' | 'roll' | 'airborne' | 'brace' | undefined,
     grip: phase >= .30 ? 'waist' as 'wrist' | 'waist' | 'ankle' | undefined : phase < .20 && phase >= .08 ? 'waist' : undefined,
     contact: 0,

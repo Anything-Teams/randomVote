@@ -22,7 +22,7 @@ export default function ArenaStory({ round, candidates, elapsed, preview, finish
         <div className="arena-story-side" aria-label={story.leftLabel}>{story.left.map(chip)}</div>
         <div className="arena-story-link"><b aria-hidden="true">{story.relation}</b><span>{story.relationLabel}</span></div>
         <div className="arena-story-side" aria-label={story.rightLabel}>{story.right.map(chip)}</div>
-        {story.intruderLabel && round && <div className="arena-story-intruder">{chip(round.aggressor)}<span>{story.intruderLabel}</span></div>}
+        {story.intruderLabel && round && <div className="arena-story-intruder">{chip(story.intruderId ?? round.aggressor)}<span>{story.intruderLabel}</span></div>}
       </div>
       <p className="arena-story-accessible">{story.action}</p>
     </> : <><strong>{title}</strong><span>{detail}</span></>}
