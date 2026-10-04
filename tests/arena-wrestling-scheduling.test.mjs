@@ -9,8 +9,8 @@ async function source(entry) {
 const { arenaRounds, arenaRanks, arenaEliminatedIds, arenaMiniExchanges, arenaContactRound } = await source('src/arenaLogic.ts');
 const { arenaEscapeRoll } = await source('src/arenaEscape.ts');
 const { arenaWrestlingMoveOutcome } = await source('src/arenaWrestlingMoves.ts');
-const offsets = [['clothesline', 1409], ['dropkick', 1451], ['bulldog', 1487], ['backbodydrop', 1511], ['spinebuster', 1553], ['scoopslam', 1597]];
-const fallback = { clothesline: 'ram', dropkick: 'sidekick', bulldog: 'brace', backbodydrop: 'catch', spinebuster: 'counter', scoopslam: 'lift' };
+const offsets = [['clothesline', 1409], ['dropkick', 1451], ['powerbomb', 1487], ['backbodydrop', 1511], ['spinebuster', 1553], ['scoopslam', 1597]];
+const fallback = { clothesline: 'ram', dropkick: 'sidekick', powerbomb: 'brace', backbodydrop: 'catch', spinebuster: 'counter', scoopslam: 'lift' };
 const reserved = round => round.exchange || round.helper || round.rushOutcome || round.escape || round.recovery || round.rim || round.rimCharge
   || round.kickCatch || round.supermanPunch || round.linkedRush || round.slideTrip || round.pairDodge || round.passingTrip || round.tripCounter;
 

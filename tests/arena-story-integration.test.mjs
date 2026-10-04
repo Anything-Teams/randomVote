@@ -69,7 +69,7 @@ test('an elbow knockout announces foot approach, grounded dragging, rim throw an
     assert.equal(arenaAction(round, tossAt).actors[0].pose, 'throw');
     assert.match(arenaStoryState(round, tossAt).steps[8], /끝에서 던지기/);
     assert.deepEqual(arenaActionWords(round, tossAt), [{ id: 'a', word: '던지기!' }]);
-    const recoveryAt = round.resolve + 10 * unit;
+    const recoveryAt = at((timing.landUntil + timing.recoverUntil) / 2);
     assert.ok(recoveryAt < at(timing.recoverUntil));
     const recovery = arenaStoryState(round, recoveryAt);
     assert.match(recovery.steps[recovery.step], /몸 일으키기/); assert.doesNotMatch(recovery.action, /우승 확정|순위가 확정/);

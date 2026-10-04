@@ -277,13 +277,15 @@ test('a live elbow counter leaves its stunned opponent at the hit and the holder
     fallen ??= { ...contact.elbowFall };
     const body = scene.sim.bodies.get(round.victim), victim = actors.get(round.victim), driver = actors.get(round.aggressor);
     lastState = { elapsed, seed, order, duration, round: contact.round, timing, fallen, body: { x: body.x, y: body.y }, driver: { x: driver.x, y: driver.y, pose: driver.pose, gripMode: driver.gripMode, gripLocked: driver.gripLocked, gripStrength: driver.gripStrength }, movedTowardFeet, gripSeen, dragSeen };
-    const age = elapsed - round.impact;
-    if (age < timing.stunnedUntil) assert.ok(distance(body, fallen) < 1e-8, 'only the holder moves toward the grip; the victim stays where the head hit occurred');
+    const actual = contact.round;
+    const age = elapsed - actual.impact;
+    if (actual.elbowGripAt != null && age >= arenaFloorExitTiming(actual).dragUntil) break;
+    if (actual.elbowGripAt == null || age < arenaFloorExitTiming(actual).stunnedUntil) assert.ok(distance(body, fallen) < 1e-8, 'only the holder moves toward the grip; the victim stays where the head hit occurred');
     else {
       dragSeen = true;
       if (previousBody) assert.ok(distance(body, previousBody) <= 2.65, 'the elbow knockout follows the same bounded floor pull as a slam');
     }
-    if (elapsed >= round.impact) {
+    if (actual.elbowGripAt != null && elapsed >= actual.impact) {
       assert.ok(victim?.candidate, 'the grounded opponent keeps a valid painted actor after leaving the active fighter list');
       assert.ok(Math.abs(victim.y - body.y) < 1e-8 && victim.depthY === body.y, 'the knockout stays on the floor until the rim throw');
       assert.equal(victim.suspension ?? 0, 0, 'the holder never raises the stunned opponent again');

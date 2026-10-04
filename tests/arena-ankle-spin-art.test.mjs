@@ -93,3 +93,75 @@ test('the ankle spin snapshot releases the identical body and follows its flight
     assert.deepEqual(sampleArenaFighterContacts(land, 4000), sampleArenaFighterContacts({ ...land, spinRelease: undefined }, 4000));
   }
 });
+
+
+test('the spinning ankle holder releases from its actual loaded shoulders and retracts smoothly into guard', () => {
+  for (const facing of [-1, 1]) for (const step of [16, 50]) {
+    const x = facing === 1 ? 516.26 : 483.74, y = 408.82;
+    const reflected = point => ({ x: facing === 1 ? point.x : 1000 - point.x, y: point.y });
+    const actor = fighter({ x, y, depthY: y, facing, index: 1, pose: 'throw', angle: 0, phase: 1, yaw: facing * Math.PI * 2, pivotTurn: facing * Math.PI * 2, ankleApproach: 1, ankleThrowProgress: 1, ankleSpinRaise: 0, footTarget: undefined, gripMode: 'ankle', gripLocked: true, gripStrength: 1, secondaryGripTarget: reflected({ x: 507.08, y: 316.82 }), gripTarget: reflected({ x: 525.44, y: 316.82 }), motionImmediate: false });
+    const supported = structuredClone(paint(actor, 3000).contacts), motion = actor.animation.motion, hip = actor.animation.supportHip;
+    const stance = { crouch: hip.y + 20, hipX: hip.x, lean: motion.lean, head: motion.head, shoulderLift: motion.shoulderLift, contact: motion.contact };
+    assert.equal(stance.contact, 1, 'the fixture exercises a supporting far shoulder that moved forward for the ankle hold');
+    const snapshot = { hands: supported.hands, elbows: supported.elbows, shoulders: supported.shoulders, direction: facing, stance };
+    delete actor.gripTarget; delete actor.secondaryGripTarget;
+    actor.gripStrength = 0; actor.carrierRelease = { ...snapshot, progress: 0 };
+    const released = paint(actor, 3000);
+    parts(supported).forEach((point, index) => assert.ok(distance(point, parts(released.contacts)[index]) < .001, 'opening both palms preserves the actual head, shoulders, elbows and material feet on the release frame'));
+    let previous = structuredClone(released.contacts);
+    for (let age = step; age <= 650 + step; age += step) {
+      actor.carrierRelease.progress = Math.min(1, age / 650);
+      const frame = paint(actor, 3000 + age);
+      for (let arm = 0; arm < 2; arm++) {
+        assert.ok(Math.abs(distance(frame.contacts.shoulders[arm], frame.contacts.elbows[arm]) - 11 * actor.scale) < .001);
+        assert.ok(Math.abs(distance(frame.contacts.elbows[arm], frame.contacts.hands[arm]) - 10.5 * actor.scale) < .001);
+      }
+      parts(frame.contacts).forEach((point, index) => assert.ok(distance(point, parts(previous)[index]) < 8 + step * .9, 'the supporting shoulder returns gradually while both complete arms follow and retract'));
+      previous = structuredClone(frame.contacts);
+    }
+    delete actor.carrierRelease; delete actor.ankleApproach; delete actor.ankleThrowProgress; delete actor.ankleSpinRaise; delete actor.pivotTurn; delete actor.yaw; delete actor.gripMode;
+    actor.pose = 'guard'; actor.phase = 0;
+    for (let age = 650 + 2 * step; age <= 1000; age += step) {
+      const frame = paint(actor, 3000 + age);
+      parts(frame.contacts).forEach((point, index) => assert.ok(distance(point, parts(previous)[index]) < 8 + step * .9, 'the final guarding arms do not restart a mirrored elbow branch'));
+      previous = structuredClone(frame.contacts);
+    }
+    assert.ok(actor.animation.motion.contact < .01);
+  }
+});
+
+test('the ankle spin blends face and back surfaces through each profile instead of swapping them in one frame', () => {
+  function faceOpacity(actor, clock) {
+    const stack = [], eyes = [];
+    const ctx = new Proxy({ globalAlpha: 1, fillStyle: '', save() { stack.push({ alpha: this.globalAlpha, color: this.fillStyle }); }, restore() { const saved = stack.pop(); this.globalAlpha = saved.alpha; this.fillStyle = saved.color; }, fillRect() { if (this.fillStyle === '#172b37') eyes.push(this.globalAlpha); } }, { get: (object, key) => key in object ? object[key] : () => {}, set: (object, key, value) => (object[key] = value, true) });
+    drawArenaFighter(ctx, actor, clock);
+    return eyes[0] ?? 0;
+  }
+  for (const facing of [-1, 1]) for (const profile of [Math.PI / 2, Math.PI * 1.5]) {
+    const alpha = [-.02, 0, .02].map(offset => faceOpacity(fighter({ facing, pose: 'throw', angle: 0, footTarget: undefined, gripMode: 'ankle', pivotTurn: profile + offset, yaw: profile + offset }), 1000));
+    assert.ok(alpha.every(value => value > .3 && value < .7), 'both surfaces remain partially visible through the narrow profile');
+    assert.ok(Math.abs(alpha[2] - alpha[0]) < .15, 'crossing the profile cannot abruptly erase the painted eyes');
+  }
+  for (const orbit of [0, Math.PI]) {
+    const alpha = [-.02, 0, .02].map(offset => faceOpacity(fighter({ pose: 'stunned', angle: 0, footTarget: undefined, spinSuspension: { orbit: orbit + offset, flatness: 1, weight: 1, gripLimb: 'feet', gripBoth: true, grips: [{ x: 490.82, y: 324 }, { x: 509.18, y: 324 }] } }), 1000));
+    assert.ok(alpha.every(value => value > .3 && value < .7));
+    assert.ok(Math.abs(alpha[2] - alpha[0]) < .15);
+  }
+});
+
+test('the ankle holder raises both real hands above its head with ordinary arm bones and grounded feet', () => {
+  for (const facing of [-1, 1]) for (const step of [16, 50]) {
+    const actor = fighter({ x: 500, y: 416, depthY: 416, facing, pose: 'throw', angle: 0, phase: .8, footTarget: undefined, ankleThrowProgress: .8, ankleSpinRaise: 1, gripMode: 'ankle', gripLocked: true, gripStrength: 1, secondaryGripTarget: { x: 500 - facing * 9.18, y: 282 }, gripTarget: { x: 500 + facing * 9.18, y: 282 }, motionImmediate: false });
+    for (let clock = 1000; clock <= 1200; clock += step) {
+      const frame = paint(actor, clock);
+      for (const [arm, target] of [actor.secondaryGripTarget, actor.gripTarget].entries()) {
+        assert.ok(distance(frame.contacts.hands[arm], target) < .001, 'the high rotating body remains in the two actual palms');
+        assert.ok(Math.abs(distance(frame.contacts.shoulders[arm], frame.contacts.elbows[arm]) - 11 * actor.scale) < .001);
+        assert.ok(Math.abs(distance(frame.contacts.elbows[arm], frame.contacts.hands[arm]) - 10.5 * actor.scale) < .001);
+        assert.ok(frame.contacts.hands[arm].y < frame.contacts.head.y + 10, 'the raised support is visibly at the head rather than a low waist carry');
+      }
+      assert.ok(actor.animation.motion.crouch < 2 && Math.abs(actor.animation.motion.lean) < 1, 'high support straightens the trunk instead of sinking into a deep squat');
+      assert.ok(frame.contacts.feet.every(foot => foot.y <= 416 && foot.y >= 407), 'both supporting soles stay on the sand while the shoulders lift');
+    }
+  }
+});

@@ -10,7 +10,11 @@ export const isArenaFloorDrag = (round: ArenaRound): boolean => round.tactic ===
 export function arenaFloorExitTiming(round: ArenaRound, unit = round.timeScale ?? 1) {
   const scale = Math.max(.001, unit);
   const finish = Math.max(1100, Math.min(2600, (round.resolve - round.impact) / scale - 1400));
-  return { stunnedUntil: 900 * scale, dragUntil: finish * scale, tossUntil: (finish + 880) * scale, landUntil: (finish + 1080) * scale, recoverUntil: (finish + 1580) * scale };
+  // The elbow sequence already approaches and takes the actual ankles before
+  // this clock starts. Repeating the pickup pause here stopped both bodies.
+  const pickup = round.tactic === 'elbow' ? 0 : 900;
+  const dragEnd = pickup + finish - 900;
+  return { stunnedUntil: pickup * scale, dragUntil: dragEnd * scale, tossUntil: (dragEnd + 880) * scale, landUntil: (dragEnd + 1080) * scale, recoverUntil: (dragEnd + 1580) * scale };
 }
 /** A single quick jump keeps the airborne kick independent of the bout's introduction. */
 export function arenaSidekickWindow(round: ArenaRound) {
@@ -189,15 +193,15 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     if (phase >= .67) frame.victimFloorRig = { pose: 'stunned', phase: 1, angle: -side * Math.PI * .47, suspension: 0 };
     frame.victimGrip = phase >= .30 && phase < .55 ? 'waist' : undefined;
     frame.victimLift = raised * 44;
-    frame.grip = phase >= .84 && elapsed < round.impact ? 'ankle' : undefined;
+    frame.grip = (round.elbowGripAt === null ? phase >= .67 : phase >= .84 && elapsed < round.impact) ? 'ankle' : undefined;
     frame.elbowContact = ease((phase - .45) / .10) * (1 - ease((phase - .55) / .06));
     frame.elbowImpact = phase >= .55 && phase < .64 ? 1 - ease((phase - .55) / .09) : 0;
     // Once the lifter falls, keep the entire floor rig grounded. The winner
     // walks to its painted feet, then pulls that same body toward the rim.
     frame.lift = 0;
-    const timing = arenaFloorExitTiming(round), age = Math.max(0, elapsed - round.impact);
+    const timing = arenaFloorExitTiming(round), age = round.elbowGripAt === null ? 0 : Math.max(0, elapsed - round.impact);
     frame.aggressorPose = phase >= .45 && phase < .61 ? 'elbow' : phase >= .84 ? elapsed >= round.impact && age >= timing.dragUntil ? 'throw' : 'drag' : undefined;
-    frame.stage = phase < .45 ? 'lift-counter' : phase < .55 ? 'elbow' : phase < .67 ? 'elbow-impact' : phase < .84 ? 'ankle-approach' : elapsed < round.impact ? 'ankle-grip' : age < timing.dragUntil ? 'drag' : 'release';
+    frame.stage = phase < .45 ? 'lift-counter' : phase < .55 ? 'elbow' : phase < .67 ? 'elbow-impact' : phase < .84 ? 'ankle-approach' : elapsed < round.impact || round.elbowGripAt === null ? 'ankle-grip' : age < timing.dragUntil ? 'drag' : 'release';
   }
   return frame;
 }

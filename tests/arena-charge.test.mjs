@@ -25,7 +25,7 @@ test('a charge uses its existing run-up and cannot send a close or misaligned pa
     const actual = arenaContactRound(round, center, item);
     assert.equal(actual.tactic, round.tactic);
     assert.ok(actual.chargeSetup);
-    const start = item.targets(actual, round.start, center), preparing = item.targets(actual, round.start + 300, center);
+    const start = item.targets(actual, round.start, center), preparing = item.targets(actual, round.start + (item.tactic === 'ram' ? 150 : 300), center);
     const from = item.chargerId === 'a' ? item.aggressor : item.victim, receiver = item.chargerId === 'a' ? item.victim : item.aggressor;
     assert.deepEqual(start[item.driver], from);
     assert.deepEqual(start[item.receiver], receiver);
@@ -45,6 +45,11 @@ test('a charge uses its existing run-up and cannot send a close or misaligned pa
     { aggressor: { x: 300, y: 425 }, victim: { x: 700, y: 425 } },
   ]) {
     const actual = arenaContactRound({ ...base, tactic }, { x: 530, y: 425 }, participants);
+    if (tactic === 'ram' && participants.aggressor.x === 300) {
+      assert.equal(actual.tactic, 'ram', 'a shoulder charge uses a long existing runway at its physical sprint speed');
+      assert.deepEqual(arenaRamTargets(actual, base.start, { x: 530, y: 425 }).driver, participants.aggressor);
+      continue;
+    }
     assert.ok(['counter', 'brace'].includes(actual.tactic), 'an unsuitable run-up becomes a nearby blocking exchange');
     assert.equal(actual.chargeSetup, undefined);
     const before = arenaAction(actual, actual.start);

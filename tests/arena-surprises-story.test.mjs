@@ -66,11 +66,12 @@ test('the one-percent trip counter describes the real first pusher and the braci
   assert.equal(technique.stage, 'probe');
   assert.equal(action.actors.find(actor => actor.id === round.victim).pose, 'push');
   assert.equal(action.actors.find(actor => actor.id === round.aggressor).pose, 'brace');
-  assert.equal(opening.label, '발걸기 되치기'); assert.deepEqual(opening.left, [round.victim]); assert.deepEqual(opening.right, [round.aggressor]);
+  assert.equal(opening.label, '서로 빈틈을 본다'); assert.deepEqual(opening.left, [round.victim]); assert.deepEqual(opening.right, [round.aggressor]);
   assert.match(opening.action, /밀어오는 힘.*받/);
   const hook = arenaStoryState(round, round.start + (round.impact - round.start) * .50);
   assert.deepEqual(hook.left, [round.aggressor]); assert.deepEqual(hook.right, [round.victim]);
-  assert.match(hook.action, /먼저 공격한 상대/); assert.equal(hook.step, 2);
+  assert.match(hook.action, /먼저 공격한 상대/); assert.equal(hook.step, 2); assert.equal(hook.label, '발걸기 되치기');
   const ordinary = arenaStoryState({ ...round, tripCounter: false }, clock);
-  assert.notEqual(ordinary.label, opening.label, 'ordinary ankle hooks retain their existing technique story');
+  assert.equal(ordinary.label, opening.label, 'the shared probe does not disclose either upcoming finish');
+  assert.notEqual(arenaStoryState({ ...round, tripCounter: false }, round.start + (round.impact - round.start) * .50).label, hook.label, 'the actual hooks retain their distinct technique stories');
 });

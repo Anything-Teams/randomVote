@@ -12,29 +12,30 @@ const { racingObstacleMotion, racingObstacleStatus } = await source('src/racingO
 const players = Array.from({ length: 10 }, (_, index) => ({ id: `player-${index}`, name: `선수 ${index}`, color: '#abcdef' }));
 const pace = (timeline, id, at) => (readRacingDistance(timeline, id, at + 8) - readRacingDistance(timeline, id, at - 8)) / 16;
 
-test('a hit keeps its lost ground while the rider steadies, then earns it back with one continuous pursuit', () => {
+test('a hit retains lost ground after normal pace returns without an automatic rank refund', () => {
   for (const count of [2, 6, 10]) for (const seed of [0, 1, 17]) {
     const list = players.slice(0, count), order = list.map(player => player.id).reverse();
     const timeline = buildRacingTimeline(list, order, 44_000, createRacingIncidents(list, order, 44_000, seed));
-    assert.ok(timeline.tricks[1].start >= timeline.tricks[0].recovered, 'the next attack cannot replace an unfinished recovery pose');
+    assert.ok(timeline.tricks[1].start >= timeline.tricks[0].recovered);
     for (const trick of timeline.tricks) {
-      const catchup = racingTrickRecoveryStart(trick), without = { ...timeline, tricks: timeline.tricks.filter(item => item !== trick) };
-      assert.ok(catchup - trick.lowest >= 750, 'the maximum gap remains readable for at least three quarters of a second');
-      for (const at of [trick.lowest, (trick.lowest + catchup) / 2, catchup]) {
-        assert.equal(racingTrickLoss(trick, at), trick.loss);
-        assert.ok(Math.abs(readRacingDistance(without, trick.targetId, at) - readRacingDistance(timeline, trick.targetId, at) - trick.loss) < 1e-9);
-        assert.equal(racingTrickMotion(trick, trick.targetId, at, []).crouch, 0, 'steadying the rider never imitates immediate reacceleration');
+      const without = { ...timeline, tricks: timeline.tricks.filter(item => item !== trick) };
+      let previous = 0;
+      for (let at = trick.impact; at <= trick.recovered + 1000; at += 16) {
+        const loss = racingTrickLoss(trick, at);
+        assert.ok(loss >= previous - 1e-12, 'no timer returns lost distance');
+        previous = loss;
       }
-      const holdAt = (trick.lowest + catchup) / 2;
-      assert.ok(Math.abs(pace(timeline, trick.targetId, holdAt) - pace(without, trick.targetId, holdAt)) < 1e-10, 'the lost gap remains instead of snapping back');
-      assert.ok(racingTrickLoss(trick, catchup + (trick.recovered - catchup) * .05) > trick.loss * .98, 'pursuit begins gently');
-      const middle = (catchup + trick.recovered) / 2;
-      assert.ok(pace(timeline, trick.targetId, middle) > pace(without, trick.targetId, middle));
-      assert.ok(racingTrickMotion(trick, trick.targetId, middle, []).crouch > .8);
-      assert.equal(racingTrickLoss(trick, trick.recovered), 0);
+      assert.ok(trick.loss > .005, 'the hit produces a visible physical setback');
+      for (const at of [trick.lowest, trick.recovered, trick.recovered + 500, timeline.finish]) assert.ok(Math.abs(racingTrickLoss(trick, at) - trick.loss) < 1e-8);
+      const steadyAt = (trick.lowest + racingTrickRecoveryStart(trick)) / 2;
+      assert.ok(Math.abs(pace(timeline, trick.targetId, steadyAt) - pace(without, trick.targetId, steadyAt)) < 1e-10, 'the horse resumes normal pace without an extra catch-up boost');
+      assert.ok(Math.abs(readRacingDistance(without, trick.targetId, steadyAt) - readRacingDistance(timeline, trick.targetId, steadyAt) - trick.loss) < 1e-9);
+      assert.equal(racingTrickMotion(trick, trick.targetId, steadyAt, []).crouch, 0);
+      const before = racingStandings(timeline, trick.recovered - .001), after = racingStandings(timeline, trick.recovered + .001);
+      assert.deepEqual(after.map(item => item.id), before.map(item => item.id), 'end of rider recovery cannot restore ranks');
+      assert.ok(Math.abs(after.find(item => item.id === trick.targetId).distance - before.find(item => item.id === trick.targetId).distance) < .000001);
     }
-    assert.equal(timeline.finish, 39_000);
-    assert.deepEqual(racingStandings(timeline, 44_000).map(item => item.id), order);
+    assert.deepEqual(racingStandings(timeline, Math.max(44_000, ...Object.values(timeline.finishTimes))).map(item => item.id), order);
   }
 });
 
@@ -52,7 +53,8 @@ test('standing up preserves the trailing gap and an upright rhythm before the ac
       assert.ok(Math.abs(pace(timeline, obstacle.actorId, holdAt) - pace(without, obstacle.actorId, holdAt)) < 1e-10);
       const chaseAt = (obstacle.catchupStart + obstacle.catchupEnd) / 2;
       assert.ok(racingObstacleMotion(obstacle, chaseAt).crouch > .7);
-      assert.ok(pace(timeline, obstacle.actorId, chaseAt) > pace(without, obstacle.actorId, chaseAt));
+      if (chaseAt < timeline.straight.start - 8) assert.ok(pace(timeline, obstacle.actorId, chaseAt) > pace(without, obstacle.actorId, chaseAt));
+      else assert.ok(pace(timeline, obstacle.actorId, chaseAt) > pace(timeline, obstacle.actorId, obstacle.recovered + 16), 'the final continuous effort grows from the actual recovered pace');
       assert.equal(racingObstacleLoss(obstacle, obstacle.catchupEnd), 0);
       assert.deepEqual(racingObstacleMotion(obstacle, obstacle.catchupEnd), {});
     }

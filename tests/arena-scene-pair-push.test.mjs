@@ -14,11 +14,11 @@ assert.ok(source.includes(draw) && source.includes(initialize));
 source = source.replaceAll('drawArenaScenery(ctx, clock,', 'pairPushTestScenery(ctx, clock,')
   .replace(initialize, 'pairPushTestInitialize(sim, props, elapsed, reset); ' + initialize)
   .replace(draw, 'pairPushTestActors = actors; ' + draw);
-source += '\nlet pairPushTestActors; const pairPushTestScenery = () => {}; let pairPushTestInitialize = () => {}; export const setInitialize = fn => { pairPushTestInitialize = fn; }; export const capturedActors = () => pairPushTestActors; export { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks };';
+source += '\nlet pairPushTestActors; const pairPushTestScenery = () => {}; let pairPushTestInitialize = () => {}; export const setInitialize = fn => { pairPushTestInitialize = fn; }; export const capturedActors = () => pairPushTestActors; export { render, createArenaCamera, arenaRounds, arenaPairRushTargets, arenaPairPushFlight, resolvedRanks };';
 const bundled = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundled.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaPairRushTargets, resolvedRanks, capturedActors, setInitialize } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaPairRushTargets, arenaPairPushFlight, resolvedRanks, capturedActors, setInitialize } = module.exports;
 const noop = () => {};
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const ground = actor => ({ x: actor.x, y: actor.depthY ?? actor.y });
@@ -103,18 +103,19 @@ for (const [name, offset] of directions) for (const side of [-1, 1]) test(`the l
           assert.ok(ellipse(exit.landing) > 1, `the own-rim exit target is genuinely outside: ${detail}/${id}`);
           assert.ok(along(exit.landing, exit.origin, incoming) > 65, `the flight continues beyond the edge in the incoming direction: ${detail}/${id}`);
           assert.ok(Math.abs(across(exit.landing, exit.origin, incoming)) < .1, `the exit cannot bend toward a different static side: ${detail}/${id}`);
-          const age = Math.max(0, elapsed - (exit.launchedAt ?? exit.round.impact) - (id === exit.round.helper ? 70 * actual.timeScale : 0));
+          const age = Math.max(0, elapsed - (exit.launchedAt ?? exit.round.impact));
+          const flight = arenaPairPushFlight(age, exit.origin, exit.landing, exit.side, actual.timeScale, { speed: exit.velocity, angle: exit.angle });
           if (!exitStarts.has(id)) {
             exitStarts.set(id, { ...exit.origin });
             const previousRig = lastPainted?.get(id), rig = actor.animation.contactPoints;
             assert.ok(previousRig && distance(previousRig.origin, rig.origin) < 18 * delta / 16, `the first actual flight frame inherits the pushed body continuously: ${detail}/${id}`);
           }
-          if (age < 880 * actual.timeScale) {
+          if (age < flight.duration) {
             assert.ok(along(now.get(id), exitStarts.get(id), incoming) >= -.01);
             assert.ok(Math.abs(across(now.get(id), exitStarts.get(id), incoming)) < .1, `every airborne ground sample stays on its incoming ray: ${detail}/${id}/${JSON.stringify({ ground: now.get(id), origin: exit.origin, landing: exit.landing, incoming, age })}`);
             if (exitPrevious.has(id)) assert.ok(along(now.get(id), exitPrevious.get(id), incoming) >= -.01, `the free flight cannot reverse: ${detail}/${id}`);
             exitPrevious.set(id, now.get(id));
-          } else if (age < 1100 * actual.timeScale) {
+          } else if (age < flight.duration + 220 * actual.timeScale) {
             assert.ok(distance(now.get(id), exit.landing) < .001, `the outside landing ends on the recorded ray: ${detail}/${id}/${JSON.stringify({ ground: now.get(id), origin: exit.origin, landing: exit.landing, incoming, age })}`); landed = true;
           }
         }
@@ -122,7 +123,8 @@ for (const [name, offset] of directions) for (const side of [-1, 1]) test(`the l
       previous = now;
       if (elapsed >= actual.resolve) {
         assert.deepEqual(resolvedRanks(order, [actual], elapsed), { '1': 2, '2': 1, '3': 3 }, 'the incoming direction changes no drawn elimination place');
-        resolved = true; break;
+        resolved = true;
+        if (landed) break;
       }
     }
     assert.ok(contacted && released && landed && resolved, `the real charge, planted push, outside flight and ranking complete: ${name}/${side}/${delta}ms/${[...stages]}`);

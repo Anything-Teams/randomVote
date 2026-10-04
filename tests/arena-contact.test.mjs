@@ -54,13 +54,14 @@ test('edge pushing keeps both feet grounded at contact, reaches the rim and drop
   }
 });
 
-test('charge anticipation and the driven run visibly lower and lean the torso without snapping', () => {
+test('charge anticipation sets a shallow stance and the driven run leans forward without sitting or snapping', () => {
   const animation = createArenaFighterAnimation(), fighter = actor(animation);
   drawArenaFighter(ctx, fighter, 0);
   const standing = { ...animation.motion };
   fighter.chargePreparation = 1;
   for (let at = 16; at <= 480; at += 16) drawArenaFighter(ctx, fighter, at);
-  assert.ok(animation.motion.crouch > standing.crouch + 4);
+  assert.ok(animation.motion.crouch > standing.crouch + 1, 'the planted preparation has a visible brief knee compression');
+  assert.ok(animation.motion.crouch < standing.crouch + 2.5, 'the preparation cannot sink into the previous seated stance');
   assert.ok(animation.motion.lean > 14, 'the first step has a distinct forward set');
   fighter.pose = 'run'; fighter.chargeStrength = 1;
   let previous = { ...animation.motion };
@@ -68,6 +69,7 @@ test('charge anticipation and the driven run visibly lower and lean the torso wi
     fighter.velocityX = Math.min(145, (at - 480) * .5);
     fighter.x += fighter.velocityX * .016; fighter.gaitDistance += fighter.velocityX * .016;
     drawArenaFighter(ctx, fighter, at);
+    assert.ok(animation.motion.crouch < 4, 'driving forward does not keep the running body in a squat');
     assert.ok(Math.abs(animation.motion.lean - previous.lean) < 3, 'the torso never jumps into its running angle');
     previous = { ...animation.motion };
   }

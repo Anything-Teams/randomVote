@@ -118,12 +118,18 @@ test('the elbow knockout reuses the suplex floor drag and throws only after reac
     const actual = { ...round, impact: round.impact * unit, resolve: round.resolve * unit, timeScale: unit };
     const timing = arenaFloorExitTiming(actual, unit), origin = { x: 500, y: 416 }, landing = { x: direction < 0 ? 115 : 885, y: 470 }, preparation = { lift: 0, angle: -direction * Math.PI * .47 };
     assert.equal(isArenaFloorDrag(actual), true);
+    assert.equal(timing.stunnedUntil, 0, 'the completed elbow ankle pickup does not repeat a frozen pickup beat');
+    const firstStep = arenaTechniqueExit(actual, 80 * unit, origin, landing, direction, unit, preparation);
+    assert.equal(firstStep.stage, 'drag'); assert.ok(direction * (firstStep.x - origin.x) > .1, 'the ankle hold immediately begins a grounded pull');
     for (const age of [0, timing.stunnedUntil * .99, timing.stunnedUntil, timing.dragUntil * .80, timing.dragUntil - .001]) {
       const frame = arenaTechniqueExit(actual, age, origin, landing, direction, unit, preparation);
       assert.ok(frame.stage === 'stunned' || frame.stage === 'drag');
       assert.equal(frame.height, 0, 'the groggy opponent cannot leave the ground while being pulled');
       assert.equal(frame.angle, preparation.angle, 'the initial floor pose survives the entire ankle drag');
-      assert.deepEqual(frame, arenaTechniqueExit({ ...actual, tactic: 'suplex' }, age, origin, landing, direction, unit, preparation), 'both knockout techniques follow one shared floor model');
+      const slam = arenaTechniqueExit({ ...actual, tactic: 'suplex' }, age + 900 * unit, origin, landing, direction, unit, preparation);
+      assert.equal(frame.stage, slam.stage, 'the elbow uses the same drag after omitting the completed pickup pause');
+      assert.ok(distance(frame, slam) < 1e-8);
+      assert.ok(Math.abs(frame.phase - slam.phase) < 1e-8);
     }
     const before = arenaTechniqueExit(actual, timing.dragUntil - .001, origin, landing, direction, unit, preparation);
     const release = arenaTechniqueExit(actual, timing.dragUntil, origin, landing, direction, unit, preparation);

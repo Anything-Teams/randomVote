@@ -6,7 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
-const { ARENA_PAIR_COUNTER_TIMING, ARENA_PAIR_CONTACT_RADIUS, ARENA_PAIR_THROW_UPWARD, arenaPairRushContact, arenaPairRushOutcome, arenaPairRushCast, arenaPairRushTargets, arenaPairRushFlight } = await source('src/arenaPairRush.ts');
+const { ARENA_PAIR_COUNTER_TIMING, ARENA_PAIR_CONTACT_RADIUS, ARENA_PAIR_THROW_UPWARD, arenaPairRushContact, arenaPairRushOutcome, arenaPairRushCast, arenaPairRushTargets, arenaPairRushFlight, arenaPairPushFlight } = await source('src/arenaPairRush.ts');
 const { createArenaFighterAnimation, sampleArenaFighterContacts, arenaCarryHolderPoint } = await source('src/game/ArenaFighter.ts');
 const { arenaAction, arenaActionWords, arenaNarration } = await source('src/arenaLogic.ts');
 const { arenaStoryState } = await source('src/arenaStoryLogic.ts');
@@ -66,7 +66,7 @@ test('a delayed counter never shows a throw before its actual collision and rele
   }
   const delayed = { ...waiting, rushLaunchAt: 9000, rushContactAt: 10000, impact: 10000 + ARENA_PAIR_COUNTER_TIMING.release };
   assert.equal(arenaAction(delayed, 10020).stage, 'resist', 'the recorded collision starts the rebound even after the planned impact');
-  assert.equal(arenaAction(delayed, 12300).stage, 'throw', 'the helpers release only after the complete actual lifting stroke');
+  assert.equal(arenaAction(delayed, 10000 + ARENA_PAIR_COUNTER_TIMING.release + 20).stage, 'throw', 'the helpers release only after the complete actual lifting stroke');
 });
 
 test('a failed rush rebounds, pauses groggy, and is grabbed at both ends before the shared throw', () => {
@@ -260,7 +260,7 @@ test('a failed charge visibly rebounds beside the pair before becoming groggy at
     assert.ok(after.reboundHeight > 0);
     assert.ok(after.rebound > 0, 'physical backward recoil starts with the same collision');
     assert.ok(distance(hit.victim, after.victim) < 2, 'the reaction begins continuously rather than snapping onto the floor');
-    const flying = arenaPairRushTargets(actual, opening.contactAt + ARENA_PAIR_COUNTER_TIMING.rebound / 2, center), landed = arenaPairRushTargets(actual, opening.contactAt + 480, center), settled = arenaPairRushTargets(actual, opening.contactAt + ARENA_PAIR_COUNTER_TIMING.grip - 1, center);
+    const flying = arenaPairRushTargets(actual, opening.contactAt + ARENA_PAIR_COUNTER_TIMING.rebound / 2, center), landed = arenaPairRushTargets(actual, opening.contactAt + ARENA_PAIR_COUNTER_TIMING.rebound + 80, center), settled = arenaPairRushTargets(actual, opening.contactAt + ARENA_PAIR_COUNTER_TIMING.grip - 1, center);
     assert.equal(flying.stage, 'rebound'); assert.equal(flying.reboundHeight, 26);
     assert.ok(Math.abs(distance(hit.victim, flying.victim) - Math.hypot(30, 10) / 2) < .001 && Math.abs(flying.victimAngle) < .35, 'the body first completes half its actual recoil while still mostly upright');
     assert.equal(landed.stage, 'groggy'); assert.equal(landed.reboundHeight, 0); assert.equal(landed.groggy, 1);
@@ -277,11 +277,11 @@ test('a failed charge visibly rebounds beside the pair before becoming groggy at
 test('the collision immediately rocks both bodies then a continuous planted push ejects them without lifting', () => {
   for (const side of [-1, 1]) {
     const actual = round(0, side), center = { x: side > 0 ? 650 : 350, y: 420 }, opening = frameAt(actual, 0, center);
-    const at = progress => arenaPairRushTargets(actual, opening.contactAt + (actual.impact - opening.contactAt) * progress, center);
+    const at = progress => arenaPairRushTargets(actual, opening.contactAt + opening.postContactDuration * progress, center);
     const hit = at(0), next = arenaPairRushTargets(actual, opening.contactAt + 16, center), shock = arenaPairRushTargets(actual, opening.contactAt + 45, center), pushing = at(.2), last = at(.999), release = at(1);
     assert.equal(hit.stage, 'contact');
     assert.equal(hit.impactStrength, 1);
-    assert.equal(hit.grip, undefined, 'the shoulder hit breaks their old mutual wrestling grip');
+    assert.equal(hit.grip, 'pair', 'the near wrestler transmits the planted push through the real mutual grip');
     assert.ok(Math.abs(next.victimAngle) > .10 && Math.abs(next.helperAngle) > .07, 'both recoil in the very next displayed frame');
     assert.ok(Math.abs(shock.victimAngle) > .35 && Math.abs(shock.helperAngle) > .25, 'the shoulder impact has a visible body recoil rather than a tiny tilt');
     assert.equal(pushing.stage, 'push');
@@ -299,13 +299,15 @@ test('the collision immediately rocks both bodies then a continuous planted push
     const before = arenaPairRushTargets(actual, opening.contactAt - .001, center), after = arenaPairRushTargets(actual, opening.contactAt + .001, center);
     assert.ok(distance(before.aggressor, after.aggressor) < .001, 'the charger does not step backwards onto a push staging mark');
     const ellipse = point => ((point.x - 500) / 303) ** 2 + ((point.y - 416) / 112) ** 2;
-    assert.ok(ellipse(release.victim) > .9 && ellipse(release.helper) > .9, 'both bodies reach the lip of the arena before their exit flight');
+    assert.ok(Math.max(ellipse(release.victim), ellipse(release.helper)) > .9, 'the first lost footing starts the free group motion without compressing the distant body onto the rim');
+    assert.ok(Math.abs((release.victim.x - release.helper.x) - (hit.victim.x - hit.helper.x)) < 1e-8);
+    assert.ok(Math.abs((release.victim.y - release.helper.y) - (hit.victim.y - hit.helper.y)) < 1e-8);
     assert.ok(ellipse(release.aggressor) < 1, 'the pushing charger remains on the sand');
   }
 });
 
 test('a successful two-body rush is described as shoulder impact then grounded pushing in every explanation', () => {
-  const actual = round(0), opening = frameAt(actual, 0), elapsed = opening.contactAt + (actual.impact - opening.contactAt) * .5;
+  const planned = round(0), opening = frameAt(planned, 0), actual = { ...planned, rushLaunchAt: opening.launchAt, rushContactAt: opening.contactAt, rushPushDuration: opening.postContactDuration, impact: opening.requiredImpactAt }, elapsed = opening.contactAt + opening.postContactDuration * .5;
   const candidates = [actual.aggressor, actual.victim, actual.helper].map(id => ({ id, name: id, color: '#dc784c' }));
   const action = arenaAction(actual, elapsed), words = arenaActionWords(actual, elapsed);
   assert.equal(action.lift, 0); assert.equal(action.liftedId, undefined);
@@ -346,11 +348,13 @@ test('an explicit grip gate reserves the actual charger until both wrestlers are
 
 test('the grip gate reports the real runway and minimum remaining story time for a late or distant charger', () => {
   for (const roll of [0, 7]) for (const side of [-1, 1]) {
-    const center = { x: 500, y: 416 }, actual = { ...round(roll, side, roll < 3 ? 7900 : 10900), rushLaunchAt: 3000, timeScale: 1 };
+    const center = { x: 500, y: 416 }, actual = { ...round(roll, side, 10900), rushLaunchAt: 3000, timeScale: 1 };
     const contact = { x: center.x - side * (roll < 3 ? 36 : 53), y: center.y + 5 }, origin = { x: contact.x - side * 285, y: contact.y + 60 };
     const frame = arenaPairRushTargets(actual, 3000, center, origin);
     assert.ok(frame.contactAt > 4900 && frame.contactAt < 5100, 'a long runway receives actual running time after the real grip');
-    assert.ok(Math.abs(frame.requiredImpactAt - frame.contactAt - (roll < 3 ? 1800 : ARENA_PAIR_COUNTER_TIMING.release)) < 1e-8);
+    assert.ok(Math.abs(frame.requiredImpactAt - frame.contactAt - frame.postContactDuration) < 1e-8);
+    if (roll < 3) assert.ok(frame.postContactDuration >= 700, 'the planted push follows its actual distance at bounded speed');
+    else assert.equal(frame.postContactDuration, ARENA_PAIR_COUNTER_TIMING.release);
     assert.ok(frame.requiredImpactAt <= actual.impact);
     const tooLate = arenaPairRushTargets({ ...actual, rushLaunchAt: 9500 }, 9500, center, origin);
     assert.ok(tooLate.requiredImpactAt > actual.impact, 'the scene can reject an impossible late launch without secretly increasing running speed');
@@ -436,21 +440,21 @@ test('the floor pickup waits for four actual contacts, then load, shared rise an
       assert.equal(frame.pickupAt, null); assert.equal(frame.grip, 'arms-legs'); assert.equal(frame.carrierPose, 'pairlift');
       assert.deepEqual(frame.victim, grounded.victim, 'the fallen body cannot creep toward a scheduled fake lift');
       for (const field of ['lift', 'victimSuspension', 'victimCarryStretch', 'pairLoad', 'pairLift', 'pairBackload', 'pairHeave', 'throwShift']) assert.equal(Math.abs(frame[field]), 0);
-      assert.ok(frame.requiredImpactAt >= elapsed + 1200, 'an unrecorded four-point pickup cannot resolve the round');
+      assert.ok(frame.requiredImpactAt >= elapsed + timing.release - timing.grip, 'an unrecorded four-point pickup cannot resolve the round');
     }
     const pickupAt = opening.plannedPickupAt + 1400, saved = arenaPairRushTargets(pending, pickupAt, center, origin);
     const origins = { victim: opening.contactPoint, pair: [{ x: 500 + side * 22, y: 430 }, { x: 500 - side * 22, y: 402 }], direction: { x: -opening.chargeDirection.x, y: -opening.chargeDirection.y }, facing: opening.chargerFacing, pickup: { victim: saved.victim, pair: [saved.aggressor, saved.helper], waist: { x: saved.victim.x + side * 20, y: saved.victim.y - 15 } } };
     const recorded = { ...pending, rushContactAt: opening.contactAt, pairPickupAt: pickupAt };
     const start = arenaPairRushTargets(recorded, pickupAt, center, origin, origins);
     for (const role of ['aggressor', 'helper', 'victim']) assert.deepEqual(start[role], saved[role], 'the actual pickup begins at the three saved roots');
-    assert.equal(start.lift, 0); assert.equal(start.requiredImpactAt, pickupAt + 1200);
-    const accepting = arenaPairRushTargets(recorded, pickupAt + 100, center, origin, origins);
+    assert.equal(start.lift, 0); assert.equal(start.requiredImpactAt, pickupAt + timing.release - timing.grip);
+    const accepting = arenaPairRushTargets(recorded, pickupAt + (timing.load - timing.grip) / 2, center, origin, origins);
     assert.equal(accepting.stage, 'load'); assert.equal(accepting.pairLoad, .5); assert.equal(accepting.lift, 0);
-    const raised = arenaPairRushTargets(recorded, pickupAt + 680, center, origin, origins);
+    const raised = arenaPairRushTargets(recorded, pickupAt + timing.lift - timing.grip, center, origin, origins);
     assert.equal(raised.lift, 70); assert.equal(raised.pairLift, 1); assert.equal(raised.pairBackload, 0);
-    const loadedBack = arenaPairRushTargets(recorded, pickupAt + 900, center, origin, origins);
+    const loadedBack = arenaPairRushTargets(recorded, pickupAt + timing.toss - timing.grip, center, origin, origins);
     assert.equal(loadedBack.lift, 64); assert.equal(loadedBack.throwShift, -side * 6); assert.equal(loadedBack.pairHeave, 0);
-    const release = arenaPairRushTargets(recorded, pickupAt + 1200, center, origin, origins);
+    const release = arenaPairRushTargets(recorded, pickupAt + timing.release - timing.grip, center, origin, origins);
     assert.equal(release.stage, 'release'); assert.equal(release.lift, 84); assert.equal(release.throwShift, side * 18);
     assert.equal(release.grip, undefined); assert.equal(release.requiredImpactAt, start.requiredImpactAt, 'the actual release clock stays fixed after pickup');
     assert.deepEqual(origins.pickup.victim, saved.victim, 'sampling never changes the captured floor geometry');
@@ -479,9 +483,9 @@ test('a successful rush pushes both wrestlers and follows them in the actual inc
       for (const role of ['victim', 'helper']) {
         const exit = role === 'victim' ? release.victimExit : release.helperExit;
         assert.ok(forward(release[role], contact[role]) > 30);
-        assert.ok(ellipse(release[role]) < 1 && ellipse(release[role]) > .78, 'each pushed wrestler reaches its own face of the ellipse');
+        assert.ok(ellipse(release[role]) < 1, 'both wrestlers retain their real offsets while their first lost footing starts the exit');
         assert.ok(ellipse(exit) > 1, 'the recorded exit target lies outside that same edge');
-        assert.ok(forward(exit, release[role]) > 80 && Math.abs(across(exit, release[role])) < 1e-7, 'the free flight continues the push direction instead of turning toward an unrelated rim');
+        assert.ok(forward(exit, release[role]) >= 90 - 1e-7 && Math.abs(across(exit, release[role])) < 1e-7, 'the free flight continues the push direction instead of turning toward an unrelated rim');
       }
       assert.ok(forward(release.aggressor, contact.aggressor) > 30 && ellipse(release.aggressor) < 1, 'the running charger follows the push while remaining on the sand');
     }
@@ -580,5 +584,38 @@ test('the joint heave launches upward on one gravity arc without changing the ou
     assert.equal(arenaPairRushFlight(1100 * unit, origin, landing, side, unit, held).stage, 'recover', 'the ranking and recovery clock stay unchanged');
     const other = arenaPairRushFlight(880 * unit * 220 / (2 * 362), origin, landing, side, unit, { lift: 142, angle: side * Math.PI / 2 });
     assert.ok(other.height > 172 && other.height < 182, 'the separate passing-trip throw retains its existing flight');
+  }
+});
+
+test('two pushed bodies keep their original spacing and final speed until each actually crosses the rim', () => {
+  const ellipse = point => ((point.x - 500) / 303) ** 2 + ((point.y - 416) / 112) ** 2;
+  for (const side of [-1, 1]) for (const offset of [{ x: -190, y: 0 }, { x: 190, y: 0 }, { x: 0, y: -90 }, { x: 0, y: 90 }, { x: -150, y: 70 }, { x: 150, y: -70 }]) {
+    const center = { x: 500, y: 416 }, origin = { x: center.x + offset.x, y: center.y + offset.y };
+    const planned = { ...round(0, side, 10000), rushLaunchAt: 500 }, opening = arenaPairRushTargets(planned, 0, center, origin);
+    const release = arenaPairRushTargets(planned, opening.requiredImpactAt, center, origin);
+    const origins = [release.victim, release.helper], landings = [release.victimExit, release.helperExit];
+    const sample = age => origins.map((point, index) => arenaPairPushFlight(age, point, landings[index], side, 1, { speed: release.pushSpeed, angle: index ? release.helperAngle : release.victimAngle }));
+    const start = sample(0), infinitesimal = sample(.001);
+    for (let index = 0; index < 2; index++) {
+      assert.ok(distance(start[index], origins[index]) < 1e-8, 'no release root reset');
+      assert.ok(Math.abs(distance(start[index], infinitesimal[index]) * 1e6 - release.pushSpeed) < .1, 'the final push and first free step have the same velocity');
+    }
+    const originalGap = { x: origins[0].x - origins[1].x, y: origins[0].y - origins[1].y };
+    let previous = start, sawSeparateFootLoss = false, bothFell = false;
+    for (let age = 16; age <= 1300; age += 16) {
+      const current = sample(age);
+      assert.ok(Math.abs(current[0].x - current[1].x - originalGap.x) < 1e-7);
+      assert.ok(Math.abs(current[0].groundY - current[1].groundY - originalGap.y) < 1e-7, 'the pair never compresses or crosses in free motion');
+      for (let index = 0; index < 2; index++) {
+        assert.ok(distance(current[index], previous[index]) / .016 <= 165, 'the released motion stays physically bounded');
+        assert.ok([current[index].x, current[index].y, current[index].angle].every(Number.isFinite));
+        if (current[index].stage === 'overrun') assert.ok(ellipse(current[index]) <= 1 + 1e-7, 'a body only falls after its own feet cross the actual ellipse');
+        if (current[index].stage === 'fall') assert.ok(ellipse(current[index]) >= 1 - 1e-7);
+      }
+      sawSeparateFootLoss ||= current.some(frame => frame.stage === 'overrun') && current.some(frame => frame.stage === 'fall');
+      bothFell ||= current.every(frame => ['fall', 'land'].includes(frame.stage));
+      previous = current;
+    }
+    assert.ok(sawSeparateFootLoss && bothFell, 'one coherent push preserves offset while the two distinct rim contacts occur');
   }
 });

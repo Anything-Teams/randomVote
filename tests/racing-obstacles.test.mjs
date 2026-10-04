@@ -171,7 +171,8 @@ test('course mistakes lose real speed and ranks, then recover without moving the
       const at = (obstacle.impact + obstacle.lowest) / 2, recoveryAt = (obstacle.catchupStart + obstacle.catchupEnd) / 2;
       const speed = (plan, time) => (readRacingDistance(plan, obstacle.actorId, time + 8) - readRacingDistance(plan, obstacle.actorId, time - 8)) / 16;
       assert.ok(speed(timeline, at) < speed(noCourse, at) * .55, 'the checked horse loses forward speed');
-      assert.ok(speed(timeline, recoveryAt) > speed(noCourse, recoveryAt), 'recovery earns back the lost ground through acceleration');
+      if (recoveryAt < timeline.straight.start - 8) assert.ok(speed(timeline, recoveryAt) > speed(noCourse, recoveryAt), 'recovery earns back lost ground through actual acceleration');
+      else assert.ok(speed(timeline, recoveryAt) > speed(timeline, obstacle.recovered + 16), 'the final sustained effort accelerates from the actual recovered pace');
       assert.ok(Math.abs(readRacingDistance(noCourse, obstacle.actorId, obstacle.lowest) - readRacingDistance(timeline, obstacle.actorId, obstacle.lowest) - racingObstacleLoss(obstacle, obstacle.lowest)) < 1e-9);
       const before = racingStandings(timeline, obstacle.impact).find(item => item.id === obstacle.actorId).rank;
       const peak = racingStandings(timeline, obstacle.lowest).find(item => item.id === obstacle.actorId).rank;

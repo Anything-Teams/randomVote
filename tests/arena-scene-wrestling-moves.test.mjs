@@ -52,12 +52,18 @@ function context() {
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
 
-const seeds = { clothesline: 19, dropkick: 15, bulldog: 4, backbodydrop: 16, spinebuster: 11, scoopslam: 40 };
+const seeds = { clothesline: 19, dropkick: 15, powerbomb: 4, backbodydrop: 16, spinebuster: 11, scoopslam: 40 };
 const inside = point => Math.hypot((point.x - 500) / 303, (point.y - 416) / 112) < 1;
 const points = rig => [rig.origin, rig.head, rig.waist, ...rig.hands, ...rig.feet];
 // `origin` changes from a nominal ground marker to the projected pivot when a
 // snapshot is released; continuity concerns the painted body and joints.
 const paintedPoints = rig => [rig.head, ...rig.headSides, rig.back, rig.waist, ...rig.shoulders, ...rig.elbows, ...rig.hands, ...rig.feet];
+const inverse = matrix => {
+  const determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
+  assert.ok(Math.abs(determinant) > 1e-6, 'the actual spin transform remains invertible');
+  return [matrix[3] / determinant, -matrix[1] / determinant, -matrix[2] / determinant, matrix[0] / determinant,
+    (matrix[2] * matrix[5] - matrix[3] * matrix[4]) / determinant, (matrix[1] * matrix[4] - matrix[0] * matrix[5]) / determinant];
+};
 const cradleTargets = rig => [rig.back, { x: rig.waist.x + ((rig.feet[0].x + rig.feet[1].x) / 2 - rig.waist.x) * .28, y: rig.waist.y + ((rig.feet[0].y + rig.feet[1].y) / 2 - rig.waist.y) * .28 }];
 const segmentGap = (point, from, to) => {
   const dx = to.x - from.x, dy = to.y - from.y;
@@ -65,8 +71,8 @@ const segmentGap = (point, from, to) => {
   return distance(point, { x: from.x + dx * t, y: from.y + dy * t });
 };
 function roots(kind) {
-  return kind === 'bulldog' || kind === 'scoopslam' ? { driver: { x: 470, y: 416 }, victim: { x: 530, y: 416 } }
-    : kind === 'backbodydrop' || kind === 'spinebuster' ? { driver: { x: 525, y: 416 }, victim: { x: 300, y: 416 } }
+  return kind === 'powerbomb' ? { driver: { x: 470, y: 416 }, victim: { x: 530, y: 416 } }
+    : kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam' ? { driver: { x: 525, y: 416 }, victim: { x: 300, y: 416 } }
       : { driver: { x: 320, y: 416 }, victim: { x: 520, y: 416 } };
 }
 function game(kind, { mirrored = false, controlled = true, frameDelta = 16 } = {}) {
@@ -96,12 +102,13 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
   for (const frameDelta of [16, 50]) {
     const scene = game(kind, { mirrored, frameDelta });
     let contactSeen = false, releaseSeen = false, finalSeen = false, fallbackSeen = false, attackerJumped = false, attackerLanded = false;
-    let actualContactAt, anklesSeen = false, ankleFrames = 0, previousRig, previousDriverRig, runSeen = false, floorSeen = false;
+    let actualContactAt, anklesSeen = false, ankleFrames = 0, previousRig, previousDriverRig, previousSpinMatrix, previousSpinWeight, previousTurn, spinFrames = 0, fullTurnSeen = false, runSeen = false, floorSeen = false;
     const scoopStages = new Set();
     const clotheslineStages = new Set();
     let sharedFallSeen = false, standingBeforeGrip = false, dragOrigin, dragTravel = 0, dragFrames = 0;
     let counterGuardSeen = false, counterPrepareSeen = false;
-    let chestHoldFrames = 0;
+    let overlapLiftTurnFrames = 0, overheadFrames = 0, pivotFrames = 0, tangentFrames = 0;
+    const spinFinish = kind === 'backbodydrop' || kind === 'scoopslam' || kind === 'powerbomb';
     const detail = (elapsed, frame) => `${kind}/${mirrored}/${frameDelta}ms/${elapsed}/${frame?.stage}`;
     for (let elapsed = 0; elapsed <= 20000; elapsed += frameDelta) {
       const actors = scene.step(elapsed), contact = scene.sim.contacts.get(scene.planned.id), actual = contact?.round;
@@ -120,21 +127,54 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       }
       const window = actual.wrestlingMove, frame = arenaWrestlingMoveTargets(window, elapsed, contact.center, contact.wrestlingMoveOrigins, actual.contactSide);
       assert.ok(inside(scene.sim.bodies.get(actual.aggressor)), `caster stays inside: ${detail(elapsed, frame)}`);
-      if ((kind === 'scoopslam' || kind === 'clothesline' || kind === 'spinebuster' || kind === 'bulldog') && window.launchAt != null && !exit && previousDriverRig) {
+      if ((kind === 'scoopslam' || kind === 'clothesline' || kind === 'spinebuster' || (kind === 'backbodydrop' && elapsed >= frame.pickupReadyAt)) && window.launchAt != null && (!exit || spinFinish && elapsed - exit.launchedAt <= 750) && previousDriverRig) {
         const cap = 8 + frameDelta * .9;
         for (const [point, prior] of paintedPoints(paintedDriver).map((point, index) => [point, paintedPoints(previousDriverRig)[index]])) assert.ok(distance(point, prior) < cap, `receiving the back or reaching for the ankles cannot reverse a caster joint by ${distance(point, prior).toFixed(2)}px in one frame: ${detail(elapsed, frame)}`);
       }
       if (kind !== 'dropkick' && window.contactAt != null && !exit && previousRig) {
         const cap = 8 + frameDelta * .9;
+        // A full revolution has genuine angular travel. Compare the painted
+        // skeleton in its actual consecutive transforms, while preserving the
+        // ordinary displacement cap for the fall and the low pickup entry.
+        const rigidSpin = spinFinish && frame.ankleSpin?.weight === 1 && previousSpinWeight === 1 && previousSpinMatrix;
+        const spinTransform = rigidSpin ? multiply(victim.animation.spinSnapshot.matrix, inverse(previousSpinMatrix)) : undefined;
         for (const [point, prior] of paintedPoints(paintedVictim).map((point, index) => [point, paintedPoints(previousRig)[index]])) {
-          assert.ok(distance(point, prior) < cap, `a fall or ankle pickup cannot flip a painted joint by ${distance(point, prior).toFixed(2)}px in one frame: ${detail(elapsed, frame)}`);
+          const expected = spinTransform ? project(spinTransform, prior) : prior;
+          assert.ok(distance(point, expected) < (spinTransform ? 3 : cap), `a fall, pickup or supported rotation cannot reset its painted skeleton (gap ${distance(point, expected).toFixed(2)}px): ${detail(elapsed, frame)}`);
         }
+      }
+      if (spinFinish && frame.ankleSpin && !exit) {
+        assert.equal(driver.pivotTurn, frame.pivotTurn, 'the actual caster follows the recorded full-turn clock');
+        assert.equal(victim.spinSuspension.gripBoth, true, 'both real foot ends are supported throughout the rotation');
+        if (frame.ankleSpin.weight === 1) {
+          assert.ok(paintedVictim.head.y <= driver.depthY + 3, 'the crown clears the actual sand plane while the normal body passes beneath the supporting hands');
+          for (let arm = 0; arm < 2; arm++) {
+            assert.ok(Math.abs(distance(paintedDriver.shoulders[arm], paintedDriver.elbows[arm]) - 11 * driver.scale) < .001 && Math.abs(distance(paintedDriver.elbows[arm], paintedDriver.hands[arm]) - 10.5 * driver.scale) < .001, 'raising the ankle support keeps both complete normal arm sections');
+          }
+          const matrix = victim.animation.spinSnapshot.matrix;
+          const paintedAngle = Math.atan2(matrix[1] * victim.facing, matrix[0] * victim.facing);
+          const radial = { x: Math.cos(frame.ankleSpin.orbit), y: .30 + Math.sin(frame.ankleSpin.orbit) * .10 };
+          const expectedAngle = Math.atan2(-radial.x, radial.y);
+          assert.ok(Math.abs(Math.atan2(Math.sin(paintedAngle - expectedAngle), Math.cos(paintedAngle - expectedAngle))) < 1e-8, 'the actual body circles the ankle support instead of resetting its orbital angle');
+          assert.equal(frame.ankleSpin.planar, true, 'the ankle swing uses the same horizontal plane as the existing wrist spin');
+          const width = Math.hypot(matrix[0], matrix[1]) / victim.scale, depth = Math.hypot(matrix[2], matrix[3]) / victim.scale;
+          assert.ok(Math.abs(width - (.42 + Math.abs(Math.sin(frame.ankleSpin.orbit)) * .58)) < 1e-8 && width >= .42 - 1e-8, 'depth turns retain full visible body width of the existing wrist spin');
+          assert.ok(Math.abs(depth - Math.hypot(radial.x, radial.y)) < 1e-8, 'the body follows the known horizontal depth projection rather than rotating vertically');
+          const skeleton = victim.animation.skeleton;
+          for (let leg = 0; leg < 2; leg++) {
+            assert.ok(distance(skeleton.hips[leg], skeleton.knees[leg]) <= 11.001 && distance(skeleton.knees[leg], skeleton.feet[leg]) <= 11.001, 'both supported legs keep complete normal bones during the full revolution');
+          }
+        }
+        if (previousTurn !== undefined) assert.ok(Math.abs(driver.pivotTurn - previousTurn) <= Math.PI * 2 * frameDelta / ((kind === 'backbodydrop' ? 1150 : 1400) * .91) + 1e-8, 'the real rotation accelerates continuously and retains its release momentum without an angular reset');
+        previousTurn = driver.pivotTurn;
+        if (frame.stage === 'spin') spinFrames++;
+        if (Math.abs(Math.abs(driver.pivotTurn) - Math.PI * 2) < 1e-8) fullTurnSeen = true;
       }
       if (window.contactAt == null) {
         assert.equal(exit, undefined, 'a planned collision cannot create a premature exit');
         assert.equal(capturedRanks()[actual.victim], undefined);
         if (kind === 'clothesline') runSeen ||= driver.pose === 'run' && Math.hypot(driver.velocityX, driver.velocityY) > 80;
-        if ((kind === 'backbodydrop' || kind === 'spinebuster') && window.launchAt != null) {
+        if ((kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam') && window.launchAt != null) {
           assert.ok(distance(frame.driver, contact.wrestlingMoveOrigins.driver) < .001, 'the receiver waits in place while the drawn loser runs toward the waist catch');
           runSeen ||= victim.pose === 'run' && Math.hypot(victim.velocityX, victim.velocityY) > 80;
           if (kind === 'backbodydrop' && frame.counterPreparation === 0 && elapsed > window.launchAt) {
@@ -152,14 +192,17 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         if (kind === 'clothesline') {
           assert.ok(runSeen && elapsed - window.launchAt >= 320, 'the solo clothesline accelerates in a real run before striking');
           assert.ok(distance(frame.driver, contact.wrestlingMoveOrigins.launchDriver) > 70);
-          assert.ok(segmentGap(contact.wrestlingMoveOrigins.target, paintedDriver.elbows[1], paintedDriver.hands[1]) < 8, `actual forearm reaches neck: ${detail(elapsed, frame)}`);
+          const insideForearm = { x: paintedDriver.elbows[1].x + (paintedDriver.hands[1].x - paintedDriver.elbows[1].x) * .25, y: paintedDriver.elbows[1].y + (paintedDriver.hands[1].y - paintedDriver.elbows[1].y) * .25 };
+          assert.ok(segmentGap(contact.wrestlingMoveOrigins.target, paintedDriver.elbows[1], insideForearm) < 8, `the actual inside elbow, rather than the fist, reaches the neck: ${detail(elapsed, frame)}`);
+          assert.ok(distance(contact.wrestlingMoveOrigins.target, paintedDriver.hands[1]) > 12, 'the striking fist extends beyond the hooked neck');
+          assert.equal(driver.clotheslineInner, true);
         }
         else if (kind === 'dropkick') {
           paintedDriver.feet.forEach((foot, leg) => assert.ok(distance(foot, frame.footTargets[leg]) < 7, `both real soles reach the chest: ${detail(elapsed, frame)}`));
           assert.ok(Math.abs(driver.angle) > 1.45, 'the wrestler kicks from an almost horizontal airborne body');
           assert.ok(Math.abs(paintedDriver.head.x - paintedDriver.waist.x) > Math.abs(paintedDriver.head.y - paintedDriver.waist.y) * 2, 'the actual head and hips are laid out horizontally');
           assert.ok((driver.depthY ?? scene.sim.bodies.get(actual.aggressor).y) - driver.y > 20, 'the two-foot strike takes place in the actual jump');
-        } else if (kind === 'bulldog') paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, paintedVictim.headSides[arm]) < 7, `both hands reach actual painted head sides (gap ${distance(hand, paintedVictim.headSides[arm]).toFixed(2)}px): ${detail(elapsed, frame)}`));
+        } else if (kind === 'powerbomb') paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, arm === 0 ? paintedVictim.waist : { x: paintedVictim.waist.x + frame.side * 6, y: paintedVictim.waist.y + 3 }) < 8, `both hands receive the actual waist before the powerbomb: ${detail(elapsed, frame)}`));
         else if (kind === 'scoopslam') paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, cradleTargets(paintedVictim)[arm]) < 7, `the scoop accepts the actual back and thigh in separate hands: ${detail(elapsed, frame)}`));
         else assert.ok(paintedDriver.hands.some(hand => distance(hand, paintedVictim.waist) < 7), `receiver touches the real incoming waist (gap ${Math.min(...paintedDriver.hands.map(hand => distance(hand, paintedVictim.waist))).toFixed(2)}px): ${detail(elapsed, frame)}`);
       }
@@ -167,15 +210,32 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         attackerJumped ||= frame.driverHeight > 20;
         if (window.launchAt != null && elapsed >= frame.landingAt && frame.driverHeight === 0) attackerLanded = true;
       }
-      if (kind === 'bulldog' && contactSeen && frame.gripStrength > .95 && frame.stage === 'fall') {
-        paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, paintedVictim.headSides[arm]) < 8, `head grip remains attached through the common fall (gap ${distance(hand, paintedVictim.headSides[arm]).toFixed(2)}px): ${detail(elapsed, frame)}`));
+      if (kind === 'powerbomb' && contactSeen && frame.gripMode === 'waist' && frame.gripStrength > .95) {
+        const targets = [paintedVictim.waist, { x: paintedVictim.waist.x + frame.side * 6, y: paintedVictim.waist.y + 3 }];
+        paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, targets[arm]) < 8, `both actual waist contacts remain attached through the folded load and seated lift: ${detail(elapsed, frame)}`));
+        if (frame.powerbombLift === 1 && frame.powerbombDown === 0) {
+          overheadFrames++;
+          assert.ok(paintedVictim.waist.y < paintedDriver.head.y - 2, "the seated hips clear the caster's actual crown");
+          assert.equal(victim.powerbombVictim, true); assert.equal(Math.abs(frame.victimAngle), 0);
+        }
       }
-      if ((kind === 'backbodydrop' || kind === 'spinebuster') && contactSeen && frame.gripMode === 'waist' && frame.gripStrength > .95) {
+      if ((kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam') && contactSeen && frame.gripMode === 'waist' && frame.gripStrength > .95) {
         assert.ok(paintedDriver.hands.some(hand => distance(hand, paintedVictim.waist) < 8), `the received waist remains supported while the catcher still holds it: ${detail(elapsed, frame)}`);
+        if (kind === 'backbodydrop' && frame.backBodyRaise === 1) {
+          overheadFrames++;
+          assert.ok(paintedVictim.waist.y < paintedDriver.head.y - 2, 'the received waist is visibly raised above the catcher\'s actual head before turning over');
+          assert.ok(frame.victimHeight > 105, 'the lifted body does not begin its flip at chest height');
+        }
+      }
+      if (kind === 'scoopslam' && frame.scoopHeadPivot && !frame.ankleSpin && !exit) {
+        pivotFrames++;
+        assert.ok(Math.abs(paintedVictim.head.x - contact.wrestlingMoveOrigins.scoopHeadImpact.x) < 1e-6, 'the crown that struck the floor fixes the collapse axis instead of sliding sideways');
+        assert.ok(paintedVictim.head.y <= contact.wrestlingMoveOrigins.scoopHeadImpact.y + 1e-6, 'the rolling skull stays above its actual impact plane');
+        assert.ok(paintedVictim.headSides.every(point => point.y <= contact.wrestlingMoveOrigins.scoopFloorVictim.y + .001), 'the temples cannot sink below the sand while the torso collapses');
       }
       if (kind === 'scoopslam' && contactSeen && frame.gripMode === 'cradle' && !exit) {
         scoopStages.add(frame.stage);
-        if (frame.scoopLift === 1 && frame.scoopTurn === 0 && frame.scoopDown === 0) chestHoldFrames++;
+        if (frame.scoopLift > 0 && frame.scoopTurn > 0 && frame.scoopDown === 0 && frame.gripStrength > .95) overlapLiftTurnFrames++;
         if (frame.gripStrength > .95) paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, cradleTargets(paintedVictim)[arm]) < 8, `normal arms support the actual back and thigh through the load, rise and turn (gap ${distance(hand, cradleTargets(paintedVictim)[arm]).toFixed(2)}px): ${detail(elapsed, frame)}`));
         if (frame.scoopLift > .2 && frame.scoopDown === 0) {
           assert.equal(victim.carrySupport, 'cradle');
@@ -203,7 +263,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           assert.equal(driver.facing, frame.side, 'backwards dragging does not turn the holder away from the ankles');
         }
       }
-      if ((kind === 'spinebuster' || kind === 'bulldog') && contactSeen && !exit && frame.stage === 'drag') {
+      if (kind === 'spinebuster' && contactSeen && !exit && frame.stage === 'drag') {
         dragFrames++; dragOrigin ??= { ...frame.driver };
         dragTravel = Math.max(dragTravel, distance(dragOrigin, frame.driver));
         assert.equal(driver.pose, 'drag'); assert.equal(victim.pose, 'stunned'); assert.equal(frame.victimHeight, 0);
@@ -213,7 +273,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         assert.equal(window.kickAt, null, 'receiving the rush ends with an ankle drag and throw');
         if (frame.gripMode === 'ankle') assert.ok(window.contactAt != null && elapsed - window.contactAt >= 1660, 'the received weight, lift, floor slam and stun precede the ankle approach');
       }
-      if (['clothesline', 'bulldog', 'backbodydrop', 'scoopslam', 'spinebuster'].includes(kind)) {
+      if (['clothesline', 'powerbomb', 'backbodydrop', 'scoopslam', 'spinebuster'].includes(kind)) {
         if (window.ankleGripAt == null) assert.equal(exit, undefined, 'the slam does not replace actual two-toe pickup');
         if (window.ankleGripAt != null && !exit) {
           anklesSeen = true; ankleFrames++;
@@ -221,8 +281,8 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           if (kind === 'scoopslam') {
             assert.equal(frame.ankleApproach, 1, 'the caster finishes its normal arm reach before establishing an actual ankle hold');
             assert.ok(window.ankleGripAt - window.contactAt >= 1780 + 200 + 240, 'the supported load, lift, turn, floor landing and reaching hand each finish before the ankle grab');
-            assert.equal(frame.requiredReleaseAt, window.ankleGripAt + 660);
-            if (elapsed - window.ankleGripAt < 180) { assert.equal(frame.victimHeight, 0); assert.equal(driver.pose, 'drag', 'the caster first receives the actual ankle weight before its separate throw stroke'); }
+            assert.equal(frame.requiredReleaseAt, window.ankleGripAt + 1920);
+            if (elapsed - window.ankleGripAt < 520) { assert.equal(frame.victimHeight, 0); assert.equal(frame.ankleSpinProgress, 0, 'the caster accepts both actual ankle weights before beginning its revolution'); }
           }
           paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, paintedVictim.feet[arm]) < 8, `both painted toes stay in the palms for the complete preflight stroke (gap ${distance(hand, paintedVictim.feet[arm]).toFixed(2)}px): ${detail(elapsed, frame)}`));
         }
@@ -230,13 +290,24 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       if (exit && !releaseSeen) {
         releaseSeen = true;
         assert.ok(contactSeen && actualContactAt <= elapsed, 'the actual hit precedes the only exit');
-        if (['clothesline', 'bulldog', 'backbodydrop', 'scoopslam', 'spinebuster'].includes(kind)) assert.ok(anklesSeen && ankleFrames >= (frameDelta === 16 ? 8 : 4), 'the actual two-ankle grab persists during the complete 300ms throw stroke');
-        if (kind === 'backbodydrop') assert.ok(elapsed - actualContactAt >= 680, 'the loser completes the inside flip before being released behind the catcher');
-        if (kind === 'clothesline' || kind === 'spinebuster' || kind === 'bulldog') {
+        if (['clothesline', 'powerbomb', 'backbodydrop', 'scoopslam', 'spinebuster'].includes(kind)) assert.ok(anklesSeen && ankleFrames >= (frameDelta === 16 ? 8 : 4), 'the actual two-ankle grab persists during the complete 300ms throw stroke');
+        if (spinFinish) {
+          assert.equal(frame.requiredReleaseAt, window.ankleGripAt + (kind === 'backbodydrop' ? 1670 : 1920), 'the actual ankle grip owns the load and complete revolution, with no separate throw pause');
+          assert.ok(spinFrames >= (frameDelta === 16 ? 55 : 17), 'the actual caster visibly completes one full revolution before release');
+          assert.ok(Math.abs(Math.abs(frame.pivotTurn) - Math.PI * 2) < 1e-8);
+          fullTurnSeen = true;
+          assert.ok(elapsed - frame.requiredReleaseAt < frameDelta, 'release occurs on the first frame that finishes the full revolution');
+          assert.ok(Math.abs(frame.ankleAngularVelocity) > 4.8, 'the full revolution releases while it still carries angular momentum');
+          assert.ok(exit.spinFlight && Math.hypot(exit.spinFlight.velocity.x, exit.spinFlight.velocity.y) > 50, 'the exit inherits the real final mass velocity');
+          assert.ok(Math.abs(exit.spinFlight.velocity.x) > Math.abs(exit.spinFlight.velocity.y) * 3, 'the actual final body motion exits left or right instead of downward');
+          assert.ok(!inside(exit.landing), 'the inherited tangent carries the body beyond the actual rim');
+        }
+        if (kind === 'clothesline' || kind === 'spinebuster') {
           const root = scene.sim.bodies.get(actual.aggressor);
           const edgeX = 500 + frame.finishSide * 303 * Math.sqrt(Math.max(0, 1 - ((root.y - 416) / 112) ** 2));
           assert.ok(Math.abs(root.x - edgeX) < 50, 'the holder reaches the actual rim while retaining an inside footing');
           assert.ok(dragTravel > 150 && dragFrames >= (frameDelta === 16 ? 80 : 25), 'the connected ankle hold persists while pulling across the sand');
+          if(kind === 'spinebuster') { assert.equal(frame.finishSide, frame.side, 'the spinebuster drags toward the opposite rim from its former counter finish'); assert.equal(driver.facing, -frame.side, 'the spinebuster keeps the held toes in front while walking backwards'); }
           assert.equal(exit.side, frame.finishSide, 'the throw carries the loser past the pulling-side boundary');
         }
         if (previousRig) {
@@ -245,17 +316,29 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         }
         assert.equal(exit.round.victim, scene.planned.victim);
       }
+      if (spinFinish && exit && elapsed > exit.launchedAt && elapsed - exit.launchedAt <= 100 && previousRig) {
+        tangentFrames++;
+        assert.equal(victim.pose, 'airborne', 'the released body immediately enters free flight without a hold stage');
+        const moved = { x: paintedVictim.waist.x - previousRig.waist.x, y: paintedVictim.waist.y - previousRig.waist.y }, velocity = exit.spinFlight.velocity;
+        assert.ok(moved.x * velocity.x + moved.y * velocity.y > 0, 'the first free frame continues the measured release tangent');
+        assert.ok((moved.x * velocity.x + moved.y * velocity.y) / (Math.hypot(moved.x, moved.y) * Math.hypot(velocity.x, velocity.y)) > .85, 'free flight does not change to an unrelated straight throw direction');
+      }
       previousRig = structuredClone(paintedVictim); previousDriverRig = structuredClone(paintedDriver);
+      previousSpinMatrix = victim.animation.spinSnapshot?.matrix ? [...victim.animation.spinSnapshot.matrix] : undefined;
+      previousSpinWeight = victim.spinSuspension?.weight;
     }
     assert.ok(contactSeen && finalSeen, JSON.stringify({ kind, mirrored, frameDelta, contactSeen, releaseSeen, finalSeen, anklesSeen, fallbackSeen }));
     assert.equal(fallbackSeen, false, 'a connected finishing technique cannot replace its floor pickup with a rematch');
     assert.ok(releaseSeen, 'a contacted finishing technique must complete its real release');
-    if (kind === 'backbodydrop' || kind === 'spinebuster') assert.ok(runSeen, 'the incoming opponent has a visible actual run before the receiver catches');
+    if (kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam') assert.ok(runSeen, 'the incoming opponent has a visible actual run before the receiver catches');
     if (kind === 'backbodydrop') assert.ok(counterGuardSeen && counterPrepareSeen, 'the receiver stays normal through the first half of the real run, then visibly prepares the counter');
+    if (kind === 'backbodydrop' || kind === 'powerbomb') assert.ok(overheadFrames >= 1, 'the real waist visibly clears the receiver\'s head before the flip');
+    if (spinFinish) assert.ok(fullTurnSeen && tangentFrames >= 1, 'one full rotation and its immediate tangent flight both occur in the actual painted Scene');
     if (kind === 'dropkick') assert.ok(attackerJumped && attackerLanded, 'the attacking jump returns to the sand while only the hit loser exits');
     if (kind === 'scoopslam') {
       assert.ok(['contact', 'lift', 'turn', 'fall', 'groggy'].every(stage => scoopStages.has(stage)), 'a scoop visibly receives the weight, rises, turns and lands before the ankle finish');
-      assert.ok(chestHoldFrames >= (frameDelta === 16 ? 6 : 2), 'the fully supported body is held against the chest before the turn begins');
+      assert.ok(overlapLiftTurnFrames >= (frameDelta === 16 ? 6 : 2), 'the back and thigh stay supported as the rising body flows directly into its turn');
+      assert.ok(pivotFrames >= (frameDelta === 16 ? 12 : 4), 'the actual crown remains the collapse axis from impact through the resting floor pose');
     }
     if (kind === 'clothesline') assert.ok(sharedFallSeen && standingBeforeGrip && ['fall', 'recover', 'ankle-approach', 'ankle-grip', 'drag', 'toss'].every(stage => clotheslineStages.has(stage)), 'the complete collision, rise, ankle pickup, drag and throw can each be seen');
   }

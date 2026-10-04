@@ -100,7 +100,7 @@ test('a real shoulder hit keeps flying in its incoming direction even before the
 test('a reconstructed ram respects the contact side while catches retain their counterthrow direction', () => {
   for (const side of [-1, 1]) {
     const center = { x: side > 0 ? 350 : 650, y: 416 }, actual = { ...round, contactSide: side };
-    const contact = arenaRamTargets(actual, actual.impact, center), run = arenaRamTargets(actual, atPhase(.5), center);
+    const contact = arenaRamTargets(actual, actual.impact, center), run = arenaRamTargets(actual, actual.start + 300, center);
     assert.equal(contact.side, side);
     assert.ok(side * (contact.driver.x - run.driver.x) > 40);
     assert.equal(arenaExitDirection(actual, contact.victim, 0), side);

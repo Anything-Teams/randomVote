@@ -18,7 +18,7 @@ export type ArenaPairRushFrame = {
   aggressor: ArenaPoint; helper: ArenaPoint; victim: ArenaPoint;
   chargerId: string; pairIds: [string, string];
   chargerFacing: 1 | -1; chargeDirection: ArenaPoint;
-  pushDirection: ArenaPoint; pushDistance: number; victimExit?: ArenaPoint; helperExit?: ArenaPoint;
+  pushDirection: ArenaPoint; pushDistance: number; pushSpeed: number; victimExit?: ArenaPoint; helperExit?: ArenaPoint;
   chargerPose?: 'scoop' | 'push'; scoopFacing?: 1 | -1; scoopStroke: number; pushStroke: number;
   chargeStrength: number; pressure: number; rebound: number; groggy: number;
   launchAt: number | null; waitingForGrip: boolean; contactAt: number; requiredImpactAt: number;
@@ -58,10 +58,11 @@ function carrierGround(origin: ArenaPoint, age: number, target: (at: number) => 
 
 /** Real post-contact milliseconds; a long bout never slows down an individual action. */
 export const ARENA_PAIR_COUNTER_TIMING = {
-  rebound: 400, fallStart: 200, grip: 700, load: 900, lift: 1380,
-  overhead: 1380, toss: 1600, release: 1900,
+  rebound: 520, fallStart: 200, grip: 1000, load: 1300, lift: 1900,
+  overhead: 1900, toss: 2200, release: 2600,
 } as const;
 export const ARENA_PAIR_CONTACT_RADIUS = 22;
+export const ARENA_PAIR_PUSH_SPEED = 95;
 
 /** Continue the incoming shoulder drive to the same face of the sand ellipse. */
 function forwardRim(origin: ArenaPoint, direction: ArenaPoint) {
@@ -69,6 +70,34 @@ function forwardRim(origin: ArenaPoint, direction: ArenaPoint) {
   const a = dx * dx + dy * dy, b = 2 * (x * dx + y * dy), c = x * x + y * y - 1;
   const distance = Math.max(0, (-b + Math.sqrt(Math.max(0, b * b - 4 * a * c))) / Math.max(.000001, 2 * a) - 10);
   return { distance, exit: { x: origin.x + direction.x * (distance + 90), y: origin.y + direction.y * (distance + 90) } };
+}
+
+/** Both pushed roots share the same forward motion; each loses footing at its own edge. */
+export function arenaPairPushFlight(age: number, origin: ArenaPoint, landing: ArenaPoint, side = 1, unit = 1, preparation: { speed?: number; angle?: number } = {}) {
+  const ms = Math.max(0, age / Math.max(.001, unit));
+  const dx = landing.x - origin.x, dy = landing.y - origin.y, distance = Math.max(.001, Math.hypot(dx, dy));
+  const direction = { x: dx / distance, y: dy / distance };
+  const duration = Math.max(1100, distance * 1000 / 90), seconds = duration / 1000;
+  const speed = Math.min(118, Math.max(0, (preparation.speed ?? ARENA_PAIR_PUSH_SPEED) * unit));
+  const progress = clamp(ms / duration);
+  const travel = distance * (3 * progress ** 2 - 2 * progress ** 3) + speed * seconds * (progress ** 3 - 2 * progress ** 2 + progress);
+  const rim = forwardRim(origin, direction).distance + 10;
+  let low = 0, high = 1;
+  for (let step = 0; step < 28; step++) {
+    const p = (low + high) / 2, at = distance * (3 * p ** 2 - 2 * p ** 3) + speed * seconds * (p ** 3 - 2 * p ** 2 + p);
+    if (at < rim) low = p; else high = p;
+  }
+  const edgeAt = high * duration, fall = clamp((ms - edgeAt) / Math.max(1, duration - edgeAt));
+  const timing = { duration: duration * unit, edgeAt: edgeAt * unit };
+  const groundX = origin.x + direction.x * travel, groundY = origin.y + direction.y * travel;
+  const initialAngle = preparation.angle ?? 0;
+  if (ms < duration) return { ...timing, x: groundX, y: groundY, groundX, groundY, height: 0, angle: mix(initialAngle, side * Math.PI * .83, ease(fall)), phase: fall, stage: ms < edgeAt ? 'overrun' as const : 'fall' as const };
+  if (ms < duration + 220) return { ...timing, ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: side * Math.PI * (.83 + (ms - duration) / 220 * .06), phase: (ms - duration) / 220, stage: 'land' as const };
+  if (ms < duration + 720) {
+    const p = (ms - duration - 220) / 500;
+    return { ...timing, ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: side * mix(Math.PI * .89, Math.PI * 2, ease(p)), phase: p, stage: 'roll' as const };
+  }
+  return { ...timing, ...landing, groundX: landing.x, groundY: landing.y, height: 0, angle: 0, phase: clamp((ms - duration - 720) / 500), stage: ms < duration + 1220 ? 'recover' as const : 'walk' as const };
 }
 
 /** Enter the near face of the wrestling pair, regardless of the eventual throwing side. */
@@ -154,7 +183,7 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
     aggressor: { x: center.x, y: center.y }, helper: { x: center.x, y: center.y }, victim: { x: center.x, y: center.y },
     chargerId: outcome === 'double-out' ? round.aggressor : round.victim,
     pairIds: outcome === 'double-out' ? [round.victim, round.helper] : [round.aggressor, round.helper],
-    chargerFacing, chargeDirection, pushDirection: chargeDirection, pushDistance: 0,
+    chargerFacing, chargeDirection, pushDirection: chargeDirection, pushDistance: 0, pushSpeed: 0,
     scoopStroke: 0, pushStroke: 0,
     chargeStrength, pressure: 0, rebound: 0, groggy: 0, lift: 0,
     launchAt, waitingForGrip, contactAt, requiredImpactAt, contactPoint: contact, postContactDuration, impactStrength, victimRecoil: 0, helperRecoil: 0, reboundHeight: 0,
@@ -165,20 +194,25 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
     victimAngle: 0, victimSuspension: 0, victimPose: undefined, grip: released ? undefined : 'pair',
   };
   if (outcome === 'double-out') {
-    const progress = clamp(impactAge / Math.max(1, round.impact - contactAt));
-    const shove = drive((progress - .08) / .92), shock = ease(impactAge / (110 * unit));
     const victimStart = carryOrigins?.pair[0] ?? { x: center.x + side * 22, y: center.y + 14 };
     const helperStart = carryOrigins?.pair[1] ?? { x: center.x - side * 22, y: center.y - 14 };
     const victimRim = forwardRim(victimStart, chargeDirection), helperRim = forwardRim(helperStart, chargeDirection);
+    const pushDistance = Math.min(victimRim.distance, helperRim.distance, forwardRim(contact, chargeDirection).distance);
+    const pushDuration = round.rushPushDuration ?? Math.max(700 * unit, pushDistance * 1000 / (ARENA_PAIR_PUSH_SPEED * .9));
+    const progress = clamp(impactAge / pushDuration), shove = drive(progress);
     // Shoulder contact breaks the pair's footing. The charger then drives
     // through both bodies with planted steps, never lifting either wrestler.
-    const victimShock = Math.min(8, victimRim.distance * .15), helperShock = Math.min(6, helperRim.distance * .15);
-    const victimDistance = victimShock * shock + (victimRim.distance - victimShock) * shove;
-    const helperDistance = helperShock * shock + (helperRim.distance - helperShock) * shove;
-    frame.victim = { x: victimStart.x + chargeDirection.x * victimDistance, y: victimStart.y + chargeDirection.y * victimDistance };
-    frame.helper = { x: helperStart.x + chargeDirection.x * helperDistance, y: helperStart.y + chargeDirection.y * helperDistance };
-    frame.pushDistance = Math.min(victimDistance, helperDistance);
-    frame.victimExit = victimRim.exit; frame.helperExit = helperRim.exit;
+    frame.pushDistance = pushDistance * shove;
+    frame.pushSpeed = pushDistance * 1000 / (pushDuration * .9);
+    frame.victim = { x: victimStart.x + chargeDirection.x * frame.pushDistance, y: victimStart.y + chargeDirection.y * frame.pushDistance };
+    frame.helper = { x: helperStart.x + chargeDirection.x * frame.pushDistance, y: helperStart.y + chargeDirection.y * frame.pushDistance };
+    // Keep the original two-body offsets through free motion as well. Their
+    // feet cross the same rim at different instants, without converging onto it.
+    const exitDistance = Math.max(victimRim.distance, helperRim.distance) - pushDistance + 90;
+    frame.victimExit = { x: victimStart.x + chargeDirection.x * (pushDistance + exitDistance), y: victimStart.y + chargeDirection.y * (pushDistance + exitDistance) };
+    frame.helperExit = { x: helperStart.x + chargeDirection.x * (pushDistance + exitDistance), y: helperStart.y + chargeDirection.y * (pushDistance + exitDistance) };
+    frame.requiredImpactAt = contactAt + pushDuration;
+    frame.postContactDuration = pushDuration;
     frame.aggressor = impactAge < 0 ? { x: mix(origin.x, contact.x, approach), y: mix(origin.y, contact.y, approach) }
       : { x: contact.x + chargeDirection.x * frame.pushDistance, y: contact.y + chargeDirection.y * frame.pushDistance };
     frame.chargerPose = impactAge >= 0 ? 'push' : undefined;
@@ -191,8 +225,8 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
     frame.helperPose = impactAge >= 0 ? 'brace' : undefined;
     frame.victimRecoil = -side * impactDeflect * .42;
     frame.helperRecoil = -side * impactDeflect * .32;
-    frame.grip = impactAge < 0 ? 'pair' : undefined;
-    frame.stage = waitingForGrip ? 'wrestle' : released ? 'release' : elapsed < contactAt ? 'charge' : progress < .08 ? 'contact' : 'push';
+    frame.grip = waitingForGrip || elapsed < frame.requiredImpactAt ? 'pair' : undefined;
+    frame.stage = waitingForGrip ? 'wrestle' : elapsed >= frame.requiredImpactAt ? 'release' : elapsed < contactAt ? 'charge' : progress < .08 ? 'contact' : 'push';
     return frame;
   }
   const timing = ARENA_PAIR_COUNTER_TIMING;

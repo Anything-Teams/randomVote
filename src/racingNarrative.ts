@@ -15,10 +15,11 @@ export type RacingIncident = {
 export type RacingStraightSwap = { aheadId: string; behindId: string; start: number; end: number };
 export type RacingStraightWave = { start: number; end: number; beforeOrder: string[]; swaps: RacingStraightSwap[] };
 export type RacingCourseChallenge = { id: string; kind: 'hay-jump' | 'puddle'; actorId: string; distance: number; encounter: number; outcome: 'clear' | 'clip' | 'slip'; impact: number; lowest: number; recovered: number; loss: number; lossCurve?: { at: number; lost: number }[]; catchupStart?: number; catchupEnd?: number };
-export type RacingTrick = { id: string; kind: 'rear-kick' | 'beanbag'; actorId: string; targetId: string; start: number; release: number; impact: number; lowest: number; recovered: number; loss: number };
+export type RacingTrick = { id: string; kind: 'rear-kick' | 'beanbag'; actorId: string; targetId: string; start: number; release: number; impact: number; lowest: number; recovered: number; loss: number; lossCurve?: { at: number; lost: number }[] };
 export type RacingBump = { actorId: string; targetId: string; start: number; impact: number; lowest: number; end: number; loss: number };
 export type RacingLateFall = { actorId: string; impact: number; lowest: number; recovered: number; outcome: 'clip'; approachOrder: string[]; distanceCurve?: { at: number; distance: number }[] };
-export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[]; obstacles: RacingCourseChallenge[]; tricks: RacingTrick[]; bumps: RacingBump[]; lateFall?: RacingLateFall; straight: { start: number; waves: RacingStraightWave[] } };
+type RacingStraightMotion = { start: number; distance: number; speed: number; endSpeed: number; finish: number; effortStart: number; effortEnd: number };
+export type RacingTimeline = { start: number; finish: number; ids: string[]; finishOrder: string[]; finishTimes: Record<string, number>; knots: { at: number; distances: Record<string, number> }[]; incidents: RacingIncident[]; obstacles: RacingCourseChallenge[]; tricks: RacingTrick[]; bumps: RacingBump[]; lateFall?: RacingLateFall; straight: { start: number; waves: RacingStraightWave[]; motion?: Record<string, RacingStraightMotion> } };
 export type RacingStanding = { id: string; distance: number; rank: number; finished: boolean; finishTime: number };
 export type RacingIncidentStatus = { stage: 'setup' | 'action' | 'outcome'; beforeRank: number; currentRank: number; afterRank: number; opponentIds: string[]; overtakenIds: string[]; passedByIds: string[]; nextRivalId?: string };
 export const RACING_STORIES: { kind: RacingIncidentKind; title: string; setup: string; action: string; outcome: string }[] = [
@@ -144,8 +145,91 @@ export function buildRacingTimeline(candidates: Candidate[], order: string[], du
   planFallRecoveries(timeline);
   planLateFall(timeline);
   spaceFallPursuits(timeline);
+  planStraightMotion(timeline);
+  if (timeline.lateFall) planLateFallMotion(timeline);
   planRacingBumps(timeline);
+  // A small bump changes the actual crossing clocks. Replan that bump from
+  // the adjusted effort if its crossing previously formed a three-horse knot.
+  for (let pass = 0; pass < 3 && spaceStraightEfforts(timeline); pass++) {
+    timeline.bumps = [];
+    planRacingBumps(timeline);
+  }
   return timeline;
+}
+
+const smoother = (value: number) => { const p = clamp(value); return p ** 3 * (10 - 15 * p + 6 * p * p); };
+
+/** One broad effort carries the actual incoming distance and speed all the way through the line. */
+function straightDistance(motion: RacingStraightMotion, elapsed: number) {
+  const duration = motion.finish - motion.start, age = Math.max(0, elapsed - motion.start), u = clamp(age / duration);
+  const base = motion.distance + motion.speed * age + (motion.endSpeed - motion.speed) * duration * (u ** 3 - u ** 4 / 2);
+  const remaining = 1 - motion.distance - duration * (motion.speed + motion.endSpeed) / 2;
+  return base + remaining * smoother((age - motion.effortStart) / (motion.effortEnd - motion.effortStart));
+}
+
+function planStraightMotion(timeline: RacingTimeline) {
+  const start = timeline.straight.start, pace = 1 / (timeline.finish - timeline.start);
+  // Capture before installing any profiles: each horse starts from its physical setback, never a rank slot.
+  const incoming = timeline.ids.map((id, index) => ({ id, index, distance: readRacingDistance(timeline, id, start), speed: Math.max(0, (readRacingDistance(timeline, id, start) - readRacingDistance(timeline, id, start - 1)))}));
+  timeline.straight.motion = Object.fromEntries(incoming.map(({ id, index, distance, speed }) => {
+    const finish = timeline.lateFall?.actorId === id ? timeline.finish - 600 * (timeline.finish - timeline.start) / 33500 : timeline.finishTimes[id], duration = finish - start;
+    const remaining = 1 - distance - duration * (speed + pace) / 2;
+    // Different sustained efforts avoid making a reversed field meet at one shared midpoint.
+    const effortStart = remaining > 0 ? duration * (.04 + (index * 7 % 11) * .018) : 0;
+    return [id, { start, distance, speed, endSpeed: pace, finish, effortStart, effortEnd: duration }];
+  }));
+
+}
+
+/** Spread coincident passes by shifting one broad effort, never adding velocity pulses. */
+function spaceStraightEfforts(timeline: RacingTimeline) {
+  const motions = timeline.straight.motion;
+  if (!motions || timeline.ids.length < 3) return false;
+  const crossings = () => {
+    const events: { at: number; ids: [string, string] }[] = [];
+    let previous = timeline.ids.map(id => readRacingDistance(timeline, id, timeline.straight.start));
+    for (let at = timeline.straight.start + 32; at <= timeline.finish; at += 32) {
+      const current = timeline.ids.map(id => readRacingDistance(timeline, id, at));
+      for (let a = 0; a < current.length; a++) for (let b = a + 1; b < current.length; b++) {
+        const initial = previous[a] - previous[b];
+        if (initial * (current[a] - current[b]) >= 0) continue;
+        let left = at - 32, right = at;
+        for (let step = 0; step < 20; step++) {
+          const middle = (left + right) / 2;
+          if ((readRacingDistance(timeline, timeline.ids[a], middle) - readRacingDistance(timeline, timeline.ids[b], middle)) * initial > 0) left = middle; else right = middle;
+        }
+        events.push({ at: (left + right) / 2, ids: [timeline.ids[a], timeline.ids[b]] });
+      }
+      previous = current;
+    }
+    return events.sort((a, b) => a.at - b.at);
+  };
+  const score = (events: ReturnType<typeof crossings>) => events.slice(2).reduce((sum, event, index) => sum + Math.max(0, 32 - (event.at - events[index].at)), 0);
+  let changed = false;
+  for (let pass = 0; pass < 12; pass++) {
+    const events = crossings(), cost = score(events), index = events.findIndex((event, at) => at >= 2 && event.at - events[at - 2].at < 32);
+    if (index < 0) break;
+    const ids = [...new Set(events.slice(index - 2, index + 1).flatMap(event => event.ids))].filter(id => id !== timeline.lateFall?.actorId);
+    let best: { id: string; start: number; cost: number } | undefined;
+    for (const id of ids) {
+      const motion = motions[id], original = motion.effortStart, duration = motion.finish - motion.start;
+      for (const offset of [80, -80, 160, -160, 320, -320, 640, -640]) {
+        const start = Math.max(0, Math.min(duration * .35, original + offset));
+        if (Math.abs(start - original) < .001) continue;
+        motion.effortStart = start;
+        // A delayed slowdown must still move forward throughout its single effort.
+        let forward = true;
+        for (let at = motion.start + 32; at < motion.finish; at += 32) if (readRacingDistance(timeline, id, at) < readRacingDistance(timeline, id, at - 1)) { forward = false; break; }
+        const next = forward ? score(crossings()) : Infinity;
+        if (next < (best?.cost ?? cost) - .001) best = { id, start, cost: next };
+      }
+      motion.effortStart = original;
+    }
+    if (!best) break;
+    motions[best.id].effortStart = best.start;
+    changed = true;
+  }
+  return changed;
 }
 
 function plannedDistance(timeline: RacingTimeline, id: string, elapsed: number): number {
@@ -226,6 +310,8 @@ export function readRacingDistance(timeline: RacingTimeline, id: string, elapsed
     const left = late.distanceCurve[index], right = late.distanceCurve[index + 1];
     return left.distance + (right.distance - left.distance) * clamp((elapsed - left.at) / (right.at - left.at));
   }
+  const motion = timeline.straight.motion?.[id];
+  if (motion && elapsed >= motion.start) return elapsed >= motion.finish ? 1 : straightDistance(motion, elapsed) - timeline.bumps.filter(bump => bump.targetId === id).reduce((sum, bump) => sum + racingBumpLoss(bump, elapsed), 0);
   const lost = timeline.incidents.reduce((sum, incident) => sum + racingIncidentSetback(incident, id, elapsed), 0)
     + timeline.obstacles.filter(obstacle => obstacle.actorId === id).reduce((sum, obstacle) => sum + racingObstacleLoss(obstacle, elapsed), 0)
     + (timeline.tricks ?? []).filter(trick => trick.targetId === id).reduce((sum, trick) => sum + racingTrickLoss(trick, elapsed), 0)
@@ -337,23 +423,43 @@ function planLateFall(timeline: RacingTimeline) {
   timeline.finishTimes[actorId] = timeline.finish + 2200 * scale;
   const late: RacingLateFall = { actorId, impact, lowest, recovered, outcome: 'clip', approachOrder };
   timeline.lateFall = late;
+  planLateFallMotion(timeline);
+}
+
+function planLateFallMotion(timeline: RacingTimeline) {
+  const late = timeline.lateFall!, { actorId, impact } = late;
+  late.distanceCurve = undefined;
+  const scale = (timeline.finish - timeline.start) / 33_500;
   const pace = 1 / (timeline.finish - timeline.start), step = 16;
   const initial = readRacingDistance(timeline, actorId, impact);
+  const incomingSpeed = Math.max(0, initial - readRacingDistance(timeline, actorId, impact - 1));
+  const stoppedDistance = initial + incomingSpeed * 150 * scale;
+  let lastPass = late.lowest - 300 * scale;
+  for (const id of timeline.ids.filter(id => id !== actorId)) {
+    let left = impact, right = timeline.finishTimes[id];
+    for (let iteration = 0; iteration < 32; iteration++) {
+      const middle = (left + right) / 2;
+      if (readRacingDistance(timeline, id, middle) < stoppedDistance) left = middle; else right = middle;
+    }
+    lastPass = Math.max(lastPass, right);
+  }
+  const lowest = late.lowest = lastPass + 300 * scale, recovered = late.recovered = lowest + 700 * scale;
   const positions = [{ at: impact, distance: initial }];
   let distance = initial, previous = impact;
   for (let at = impact + step; at < recovered + step; at += step) {
     const current = Math.min(at, recovered), age = (current + previous) / 2;
-    const speed = age < lowest ? pace * (1 - smooth((age - impact) / (300 * scale))) : pace * smooth((age - lowest) / (recovered - lowest));
+    const speed = age < lowest ? incomingSpeed * (1 - smooth((age - impact) / (300 * scale))) : pace * smooth((age - lowest) / (recovered - lowest));
     distance += speed * (current - previous); positions.push({ at: current, distance }); previous = current;
     if (current === recovered) break;
   }
-  const remaining = 1 - distance, finishTime = timeline.finishTimes[actorId], length = finishTime - recovered;
-  const runner = timeline.finishOrder[1], interval = timeline.finishTimes[runner] - timeline.finish;
-  const endSpeed = RANK_GAP / Math.max(1, interval);
+  const remaining = 1 - distance;
+  const othersFinish = Math.max(...timeline.ids.filter(id => id !== actorId).map(id => timeline.finishTimes[id]));
+  const finishTime = Math.max(othersFinish + 240 * scale, recovered + remaining / pace), length = finishTime - recovered;
+  timeline.finishTimes[actorId] = finishTime;
   const from = distance;
+  const motion: RacingStraightMotion = { start: recovered, distance: from, speed: pace, endSpeed: pace, finish: finishTime, effortStart: 0, effortEnd: length };
   for (let at = recovered + step; at < finishTime + step; at += step) {
-    const current = Math.min(at, finishTime), t = (current - recovered) / length;
-    const position = from + remaining * (-2 * t ** 3 + 3 * t ** 2) + pace * length * (t ** 3 - 2 * t ** 2 + t) + endSpeed * length * (t ** 3 - t ** 2);
+    const current = Math.min(at, finishTime), position = straightDistance(motion, current);
     positions.push({ at: current, distance: position });
     if (current === finishTime) break;
   }
@@ -395,9 +501,15 @@ function planFallRecoveries(timeline: RacingTimeline) {
 }
 
 
-/** A kick or a landed beanbag costs actual ground; recovery stays before the final straight. */
+/** Regaining balance restores normal pace, never the distance already lost to a hit. */
 export function racingTrickLoss(trick: RacingTrick, elapsed: number) {
-  return setbackLoss(elapsed, trick.impact, trick.lowest, trick.recovered, trick.loss, racingTrickRecoveryStart(trick));
+  if (elapsed <= trick.impact) return 0;
+  if (!trick.lossCurve) return trick.loss * smooth((elapsed - trick.impact) / (trick.lowest - trick.impact));
+  if (elapsed >= trick.recovered) return trick.loss;
+  const points = trick.lossCurve, step = points[1].at - points[0].at;
+  const index = Math.min(points.length - 2, Math.max(0, Math.floor((elapsed - trick.impact) / step)));
+  const left = points[index], right = points[index + 1];
+  return left.lost + (right.lost - left.lost) * clamp((elapsed - left.at) / (right.at - left.at));
 }
 
 export function racingTrickRecoveryStart(trick: RacingTrick) {
@@ -426,7 +538,22 @@ function planRacingTricks(timeline: RacingTimeline) {
     let minimumSpeed = Infinity;
     for (let at = impact; at < lowest; at += 16 * scale) minimumSpeed = Math.min(minimumSpeed, (readRacingDistance(timeline, targetId, at + 8 * scale) - readRacingDistance(timeline, targetId, at - 8 * scale)) / (16 * scale));
     const loss = Math.min(.017, Math.max(.002, minimumSpeed * (lowest - impact) / 1.5 * .82));
-    timeline.tricks.push({ id: kind + ':' + index, kind, actorId, targetId, start, release, impact, lowest, recovered, loss });
+    const trick: RacingTrick = { id: kind + ':' + index, kind, actorId, targetId, start, release, impact, lowest, recovered, loss };
+    timeline.tricks.push(trick);
+    const without = { ...timeline, tricks: timeline.tricks.filter(item => item !== trick) };
+    let lost = 0;
+    trick.lossCurve = [{ at: impact, lost: 0 }];
+    for (let previous = impact; previous < recovered;) {
+      const at = Math.min(recovered, previous + 16 * scale), middle = (previous + at) / 2;
+      const slowdown = .82 * smooth((middle - impact) / (180 * scale)) * (1 - smooth((middle - lowest + 500 * scale) / (500 * scale)));
+      lost += Math.max(0, readRacingDistance(without, targetId, at) - readRacingDistance(without, targetId, previous)) * slowdown;
+      trick.lossCurve.push({ at, lost }); previous = at;
+    }
+    // The impact slows the horse briefly; steadying the rider does not keep braking it.
+    // Retain that actual lost ground after normal pace returns, rather than refunding it.
+    const strength = lost > loss ? loss / lost : 1;
+    for (const point of trick.lossCurve) point.lost *= strength;
+    trick.loss = lost * strength;
   }
 }
 

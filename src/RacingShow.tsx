@@ -15,13 +15,14 @@ type RaceView = { phase: RacePhase; standings: RacingStanding[]; headline: strin
 type RaceScene = { camera: RacingCamera; elapsed: number | null };
 const clamp = (value: number, low = 0, high = 1) => Math.max(low, Math.min(high, value));
 const smooth = (value: number) => { const t = clamp(value); return t * t * (3 - 2 * t); };
-function phaseAt(elapsed: number, duration: number, preview: boolean): RacePhase {
+function phaseAt(elapsed: number, duration: number, preview: boolean, timeline?: RacingTimeline): RacePhase {
   if (preview) return 'preview';
   if (elapsed < 3000) return 'paddock';
   if (elapsed < 5500) return 'countdown';
   if (elapsed < 5500 + (duration - 10_500) * 26_500 / 33_500) return 'race';
   if (elapsed < duration - 5000) return 'straight';
-  if (elapsed < duration - 2600) return 'photo';
+  const ceremony = Math.max(duration - 2600, timeline ? Math.max(...Object.values(timeline.finishTimes)) + 200 : 0);
+  if (elapsed < ceremony) return 'photo';
   return 'winner';
 }
 function displayedIncident(timeline: RacingTimeline, elapsed: number) {
@@ -29,7 +30,7 @@ function displayedIncident(timeline: RacingTimeline, elapsed: number) {
   return incident?.kind === 'hay-jump' || incident?.kind === 'puddle' ? undefined : incident;
 }
 function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: number): RaceView {
-  const phase = phaseAt(elapsed, props.duration, props.preview), standings = racingStandings(timeline, elapsed);
+  const phase = phaseAt(elapsed, props.duration, props.preview, timeline), standings = racingStandings(timeline, elapsed);
   const leader = props.candidates.find(candidate => candidate.id === standings[0]?.id), incident = phase === 'race' ? displayedIncident(timeline, elapsed) : undefined;
   const template = RACING_STORIES.find(story => story.kind === incident?.kind), actor = props.candidates.find(candidate => candidate.id === incident?.actorId);
   const names: Record<RacePhase, [string, string, string]> = {
@@ -99,13 +100,13 @@ function viewAt(props: SportsStageProps, timeline: RacingTimeline, elapsed: numb
     const status = racingTrickStatus(timeline, trick, elapsed), kick = trick.kind === 'rear-kick';
     headline = status.stage === 'windup' ? striker + (kick ? ' · 뒷발을 모읍니다' : ' · 모래주머니를 꺼냈습니다')
       : status.stage === 'flight' ? striker + (kick ? ' · 뒤로 한 번 차기!' : ' · 앞 기수를 향해 투척!')
-      : status.stage === 'stunned' ? target + ' · 기수가 잠깐 멍해졌습니다' : status.stage === 'recover' ? target + ' · 고삐를 정리하며 중심을 되찾습니다' : target + ' · 보폭을 늘려 재추격';
+      : status.stage === 'stunned' ? target + ' · 기수가 잠깐 멍해졌습니다' : status.stage === 'recover' ? target + ' · 고삐를 정리하며 중심을 되찾습니다' : target + ' · 안정된 보폭을 되찾습니다';
     detail = status.stage === 'windup' ? (kick ? '바로 뒤에서 붙는 말을 보고 뒷발을 모아 견제합니다.' : '뒤의 기수가 고삐를 한 손으로 잡고 작은 모래주머니를 들어 올립니다.')
       : status.stage === 'flight' ? (kick ? '뒷발이 뒤 기수의 등자 쪽에 닿습니다. 뒤의 말이 고삐를 당깁니다.' : '작은 모래주머니가 포물선을 그려 바로 앞 기수의 헬멧으로 날아갑니다.')
       : status.stage === 'stunned' ? '현재 ' + status.currentRank + '위. 별이 빙글빙글! 기수가 고삐를 잡은 채 휘청여 말의 속도도 줄어듭니다.' + (status.currentRank > status.beforeRank ? ' 뒤의 말이 지나가며 순위가 밀렸습니다.' : ' 그 사이 상대와 간격이 벌어집니다.')
       : status.stage === 'recover' ? '현재 ' + status.currentRank + '위. 잃은 간격을 남겨 둔 채 고개를 바로 세우고 말의 리듬을 맞춥니다. 아직 추격에 힘을 싣지 않습니다.'
-      : '현재 ' + status.currentRank + '위. 고삐를 천천히 풀고 힘을 보탭니다. 잃은 간격을 꾸준히 좁힙니다.';
-    badge = status.stage === 'stunned' ? '기수 일시 기절 · 실제 감속' : status.stage === 'recover' ? '간격 유지 · 중심 회복' : status.stage === 'chase' ? '회복 · 재추격' : kick ? '뒷발차기 견제' : '모래주머니 투척';
+      : '현재 ' + status.currentRank + '위. 고삐를 천천히 풀어 정상 보폭으로 돌아옵니다. 피격으로 잃은 거리는 그대로 남고, 앞말과의 실제 속도 차이만큼 경합이 이어집니다.';
+    badge = status.stage === 'stunned' ? '기수 일시 기절 · 실제 감속' : status.stage === 'recover' ? '간격 유지 · 중심 회복' : status.stage === 'chase' ? '정상 보폭 회복' : kick ? '뒷발차기 견제' : '모래주머니 투척';
     focusId = elapsed < trick.impact ? trick.actorId : trick.targetId;
   }
   const bump = activeRacingBump(timeline, elapsed);
@@ -139,7 +140,7 @@ function horseTag(ctx: CanvasRenderingContext2D, name: string, color: string, x:
   raceLabel(ctx, label, x, top + height / 2, size, '#fff0ce', true);
 }
 function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: SportsStageProps, timeline: RacingTimeline, elapsed: number, clock: number, reduced: boolean, scene: RaceScene, delta: number, reset: boolean) {
-  const phase = phaseAt(elapsed, props.duration, props.preview), standings = racingStandings(timeline, elapsed);
+  const phase = phaseAt(elapsed, props.duration, props.preview, timeline), standings = racingStandings(timeline, elapsed);
   const incident = phase === 'race' ? displayedIncident(timeline, elapsed) : undefined;
   const placements = placeRacingField(scene.camera, props.candidates, timeline, elapsed, w, h, props.paused || reduced ? 0 : delta, reset || reduced);
   drawRaceStadium(ctx, w, h, clock, reduced, true, false, { center: scene.camera.center, pixelsPerLap: w * .65 / scene.camera.span });
@@ -204,7 +205,7 @@ function sideView(ctx: CanvasRenderingContext2D, w: number, h: number, props: Sp
   ctx.save(); ctx.translate(w - mw - 9, 9); drawRacingCourse(ctx, mw, mh, clock, reduced); drawRacingTopView(ctx, mw, mh, props.candidates, standings, clock, reduced, racingFocusIds(timeline, elapsed)); ctx.restore();
 }
 function render(ctx: CanvasRenderingContext2D, w: number, h: number, props: SportsStageProps, timeline: RacingTimeline, elapsed: number, clock: number, reduced: boolean, scene: RaceScene, delta: number) {
-  const phase = phaseAt(elapsed, props.duration, props.preview);
+  const phase = phaseAt(elapsed, props.duration, props.preview, timeline);
   const reset = scene.elapsed === null || elapsed < scene.elapsed - 150 || elapsed - scene.elapsed > 500;
   scene.elapsed = elapsed;
   if (phase === 'preview' || phase === 'paddock' || phase === 'countdown') {
@@ -221,7 +222,7 @@ function render(ctx: CanvasRenderingContext2D, w: number, h: number, props: Spor
     drawRaceStadium(ctx, w, h, clock, reduced, true, false);
     ctx.fillStyle = '#08182acc'; ctx.fillRect(0, 0, w, h);
     if (!winner) return;
-    const age = elapsed - (props.duration - 2600), arrival = reduced ? 1 : smooth(age / 1100);
+    const age = elapsed - Math.max(props.duration - 2600, Math.max(...Object.values(timeline.finishTimes)) + 200), arrival = reduced ? 1 : smooth(age / 1100);
     const scale = clamp(Math.min(w / 310, h / 145), .3, 2.1), y = h * .85, x = w * (.24 + .25 * arrival);
     const spotlight = ctx.createRadialGradient(w * .5, y - 42 * scale, 1, w * .5, y - 42 * scale, w * .5); spotlight.addColorStop(0, '#eccb7b35'); spotlight.addColorStop(1, '#eccb7b00'); ctx.fillStyle = spotlight; ctx.fillRect(0, 0, w, h);
     raceBox(ctx, w * .17, y + 5, w * .66, Math.max(16, h * .1), 4, '#c8aa69', '#f1d99b');
@@ -270,7 +271,7 @@ export default function RacingShow(props: SportsStageProps & { storySeed?: numbe
       const current = latest.current, plan = latestTimeline.current, delta = Math.min(50, Math.max(0, now - previous)); previous = now;
       const elapsed = current.preview || current.paused ? current.elapsed : Math.min(current.duration, current.elapsed + Math.max(0, now - synchronizedAt.current));
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, w, h); render(ctx, w, h, current, plan, elapsed, elapsed, reducedMotion, scene, delta);
-      const incident = displayedIncident(plan, elapsed), phase = phaseAt(elapsed, current.duration, current.preview);
+      const incident = displayedIncident(plan, elapsed), phase = phaseAt(elapsed, current.duration, current.preview, plan);
       const standings = racingStandings(plan, elapsed);
       const immediateKey = phase + ':' + incident?.start + ':' + standings.map(standing => standing.id).join('|') + ':' + current.candidates.map(candidate => candidate.name).join('|');
       if (now - boardAt >= 180 || immediateKey !== viewKey) { boardAt = now; viewKey = immediateKey; setView(viewAt(current, plan, elapsed)); }

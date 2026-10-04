@@ -75,7 +75,7 @@ test('slide story and visible head words wait for the actual slide, ankle hook a
   const round = { ...planned, start, impact: kickAt, resolve: kickAt + 1100, end: kickAt + 1100, timeScale: 1,
     slideTrip: { start, end: kickAt + 1100, launchAt, hookAt, kickAt } };
   const center = { x: 500, y: 416 };
-  for (const [clock, step, stage, word] of [[start, 0, 'approach', '돌진!'], [launchAt + 100, 1, 'slide', '슬라이딩!'], [hookAt, 2, 'hook', '발걸기!'], [hookAt + ARENA_SLIDE_TRIP_TIMING.hook + 1, 3, 'fall', '넘어진다!'], [riseAt, 4, 'rise', '일어서기!'], [kickReady, 5, 'kick', '발차기!'], [kickAt, 6, 'release', '장외로!']]) {
+  for (const [clock, step, stage, word] of [[start, 0, 'approach', '돌진!'], [launchAt + 100, 1, 'slide', '슬라이딩!'], [hookAt, 2, 'hook', '발걸기!'], [hookAt + ARENA_SLIDE_TRIP_TIMING.hook + 1, 3, 'fall', '넘어진다!'], [riseAt, 4, 'rise', undefined], [kickReady, 5, 'kick', '발차기!'], [kickAt, 6, 'release', '장외로!']]) {
     const frame = arenaSlideTripTargets(round.slideTrip, clock, center), story = arenaStoryState(round, clock);
     assert.equal(frame.stage, stage); assert.equal(story.kind, 'slide-trip'); assert.equal(story.step, step);
     assert.deepEqual(story.left, [round.aggressor]); assert.deepEqual(story.right, [round.victim]);
@@ -113,11 +113,12 @@ test('rare slide dodge explanations follow the recorded hop and landing without 
 test('linked story never turns the attacked player into the charger and reads the shared throw from real neck contact', () => {
   const order = ['1', '2', '3', '4', '5'], planned = arenaRounds(order, 44000, 7, 570).find(round => round.linkedRush);
   assert.ok(planned);
-  const start = 1000, launchAt = 2400, contactAt = 4000, impact = contactAt + ARENA_PAIR_COUNTER_TIMING.release;
-  const round = { ...planned, start, impact, resolve: impact + 1100, end: impact + 1100, timeScale: 1, rushLaunchAt: launchAt, rushContactAt: contactAt,
+  const start = 1000, launchAt = 2400, contactAt = 4000, pickupAt = contactAt + ARENA_PAIR_COUNTER_TIMING.grip;
+  const impact = pickupAt + ARENA_PAIR_COUNTER_TIMING.release - ARENA_PAIR_COUNTER_TIMING.grip;
+  const round = { ...planned, start, impact, resolve: impact + 1100, end: impact + 1100, timeScale: 1, rushLaunchAt: launchAt, rushContactAt: contactAt, pairPickupAt: pickupAt,
     linkedRush: { start, end: impact, launchAt, contactAt } };
   const candidates = order.map(id => ({ id, name: id, color: '#ffad72' }));
-  for (const [clock, step, word] of [[start, 0, '팔 뻗기!'], [launchAt, 1, '돌진!'], [contactAt, 2, '목 · 가슴 가격!'], [contactAt + 450, 3, '기절!'], [contactAt + 720, 4, '어깨 잡기!'], [contactAt + 900, 5, '함께 들기!'], [impact - 100, 6, '함께 던지기!']]) {
+  for (const [clock, step, word] of [[start, 0, '팔 뻗기!'], [launchAt, 1, '돌진!'], [contactAt, 2, '목 · 가슴 가격!'], [contactAt + ARENA_PAIR_COUNTER_TIMING.rebound, 3, '기절!'], [pickupAt, 4, '어깨 잡기!'], [contactAt + ARENA_PAIR_COUNTER_TIMING.load + (ARENA_PAIR_COUNTER_TIMING.lift - ARENA_PAIR_COUNTER_TIMING.load) / 2, 5, '함께 들기!'], [impact - 100, 6, '함께 던지기!']]) {
     const story = arenaStoryState(round, clock), words = arenaActionWords(round, clock);
     assert.equal(story.kind, 'linked-rush'); assert.equal(story.step, step);
     assert.deepEqual(story.left, [round.aggressor, round.helper]); assert.deepEqual(story.right, [round.victim]);

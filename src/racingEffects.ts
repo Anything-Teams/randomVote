@@ -184,8 +184,8 @@ export function racingTrickMotion(trick: RacingTrick | undefined, id: string, el
   }
   const recoveryStart = racingTrickRecoveryStart(trick);
   const stun = smooth((elapsed - trick.impact) / (300 * scale)) * (1 - smooth((elapsed - trick.lowest) / (recoveryStart - trick.lowest)));
-  const chase = racingRecoveryEffort(elapsed, recoveryStart, trick.recovered);
-  return { stun, check: stun * .94, stumble: stun * .16, crouch: chase * .85 };
+  const steady = racingRecoveryEffort(elapsed, recoveryStart, trick.recovered);
+  return { stun, check: stun * .94, stumble: stun * .16, crouch: steady * .18 };
 }
 
 /** The same current hand and helmet coordinates drive release, flight and contact. */
