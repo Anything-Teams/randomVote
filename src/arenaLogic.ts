@@ -8,11 +8,13 @@ import { ARENA_RIM_DURATION, arenaRimOutcome, arenaRimTargets, type ArenaRimWind
 import { ARENA_RIM_CHARGE_DURATION, arenaRimChargeOutcome, arenaRimChargeTargets, type ArenaRimChargeWindow } from './arenaRimCharge';
 import { arenaPairDodgeOutcome, arenaPairDodgeTargets, type ArenaPairDodgeWindow } from './arenaPairDodge';
 import { arenaPassingTripOutcome, arenaPassingTripTargets, type ArenaPassingTripWindow } from './arenaPassingTrip';
+import { arenaSlideTripOutcome, arenaSlideTripTargets, type ArenaSlideTripWindow } from './arenaSlideTrip';
+import { arenaLinkedRushOutcome, type ArenaLinkedRushWindow } from './arenaLinkedRush';
 export { arenaTechniqueTargets, arenaTechniqueExit, isArenaFinalTechnique } from './arenaTechniques';
 
 export type ArenaTactic = 'team' | 'bait' | 'catch' | 'ram' | 'spin' | 'shove' | 'double-shove' | 'edge' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final' | 'armspin' | 'trip' | 'suplex' | 'sidekick' | 'elbow';
 export type ArenaChargeSetup = { charger: ArenaPoint; receiver: ArenaPoint; side: 1 | -1 };
-export type ArenaRound = { suplexGripAt?: number | null; id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; secondaryVictim?: string; counterSide?: 'front' | 'back'; counterFailed?: boolean; contactSide?: 1 | -1; chargeSetup?: ArenaChargeSetup; rushOutcome?: ArenaPairRushOutcome; rushContactAt?: number; rushLaunchAt?: number | null; sidekickLaunchAt?: number; pushContactAt?: number | null; timeScale?: number; prepares?: string; escape?: ArenaEscapeWindow; recovery?: ArenaRecoveryWindow; rim?: ArenaRimWindow; rimCharge?: ArenaRimChargeWindow; tripCounter?: boolean; pairDodge?: ArenaPairDodgeWindow & { partnerId: string; allowOut: boolean }; passingTrip?: ArenaPassingTripWindow & { joined?: boolean }; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
+export type ArenaRound = { suplexGripAt?: number | null; id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; secondaryVictim?: string; counterSide?: 'front' | 'back'; counterFailed?: boolean; contactSide?: 1 | -1; chargeSetup?: ArenaChargeSetup; rushOutcome?: ArenaPairRushOutcome; rushContactAt?: number; rushLaunchAt?: number | null; sidekickLaunchAt?: number; pushContactAt?: number | null; timeScale?: number; prepares?: string; escape?: ArenaEscapeWindow; recovery?: ArenaRecoveryWindow; rim?: ArenaRimWindow; rimCharge?: ArenaRimChargeWindow; tripCounter?: boolean; slideTrip?: ArenaSlideTripWindow; linkedRush?: ArenaLinkedRushWindow; pairDodge?: ArenaPairDodgeWindow & { partnerId: string; allowOut: boolean }; passingTrip?: ArenaPassingTripWindow & { joined?: boolean }; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
 export type ArenaPoint = { x: number; y: number };
 export type ArenaMovingBody = ArenaPoint & { facing: number; motorX?: number; motorY?: number };
 export type ArenaPodiumPlace = ArenaPoint & { id: string; rank: 1 | 2 | 3; readyAt: number };
@@ -450,6 +452,16 @@ export function arenaEliminatedIds(round: ArenaRound): string[] {
 /** Brief words follow the same technique stage as the moving bodies. */
 export function arenaActionWords(round: ArenaRound, elapsed: number): { id: string; word: string }[] {
   const unit = round.timeScale ?? (round.final ? round.end / 44000 : round.exchange ? (round.impact - round.start) / 3200 : (round.resolve - round.impact) / 1100);
+  if (round.slideTrip && elapsed >= round.slideTrip.start && elapsed < round.resolve) {
+    const slide = arenaSlideTripTargets(round.slideTrip, elapsed, { x: 500, y: 416 }, undefined, round.contactSide);
+    return slide.stage === 'approach' ? [{ id: round.aggressor, word: '달려들기!' }] : slide.stage === 'slide' ? [{ id: round.aggressor, word: '슬라이딩!' }] : slide.stage === 'hook' ? [{ id: round.aggressor, word: '발걸기!' }] : slide.stage === 'fall' ? [{ id: round.victim, word: '넘어진다!' }] : slide.stage === 'rise' ? [{ id: round.aggressor, word: '일어서기!' }] : slide.stage === 'kick' ? [{ id: round.aggressor, word: '발차기!' }] : [{ id: round.victim, word: '장외로!' }];
+  }
+  if (round.linkedRush && round.helper && elapsed >= round.linkedRush.start && elapsed < round.resolve) {
+    if (round.linkedRush.launchAt == null || elapsed < round.linkedRush.launchAt) return [{ id: round.aggressor, word: '팔 연결!' }, { id: round.helper, word: '함께!' }];
+    if (round.rushContactAt === undefined || elapsed < round.rushContactAt) return [{ id: round.aggressor, word: '연계 돌진!' }, { id: round.helper, word: '함께!' }];
+    const shared = arenaPairRushTargets(round, elapsed, { x: 500, y: 416 });
+    return shared.stage === 'contact' || shared.stage === 'rebound' ? [{ id: round.victim, word: '목에 충돌!' }] : shared.stage === 'groggy' ? [{ id: round.victim, word: '그로기!' }] : shared.stage === 'grip' ? [{ id: round.aggressor, word: '손끝 잡기!' }, { id: round.helper, word: '발끝 잡기!' }] : shared.stage === 'lift' || shared.stage === 'overhead' ? [{ id: round.aggressor, word: '함께 들기!' }, { id: round.helper, word: '머리 위로!' }] : shared.stage === 'toss' || shared.stage === 'release' ? [{ id: round.aggressor, word: '함께 던지기!' }] : [];
+  }
   if (round.pairDodge && elapsed >= round.pairDodge.start && (elapsed < round.pairDodge.end || round.pairDodge.outcome === 'out' && elapsed < round.resolve)) {
     const dodge = arenaPairDodgeTargets(round.pairDodge, elapsed, { x: 500, y: 416 }, undefined, unit);
     const pair = [round.aggressor, round.pairDodge.partnerId];
@@ -578,7 +590,7 @@ export function arenaRounds(order: string[], duration = 44_000, rushRoll = 7, es
   let escapes = 0, recoveries = 0;
   const append = (round: Omit<ArenaRound, 'start' | 'impact' | 'resolve' | 'end'>, salt: number) => {
     const entry = rounds.at(-1)?.resolve ?? 0, escapeRoll = escapeSeed === undefined ? undefined : arenaEscapeRoll(escapeSeed, round.index);
-    const specialStory = !!(round.pairDodge || round.passingTrip || round.tripCounter);
+    const specialStory = !!(round.linkedRush || round.slideTrip || round.pairDodge || round.passingTrip || round.tripCounter);
     const separate = escapeRoll !== undefined && !!(escapeRoll & 16);
     const runnerId = escapeRoll !== undefined && escapeRoll & 4 ? round.aggressor : round.victim;
     const escape: ArenaEscapeWindow | undefined = escapeRoll !== undefined && escapeRoll % 4 === 0 && escapes < 2 && !specialStory && !round.final && !round.helper && !round.rushOutcome && !rounds.at(-1)?.escape
@@ -610,16 +622,32 @@ export function arenaRounds(order: string[], duration = 44_000, rushRoll = 7, es
     const rimCharge: ArenaRimChargeWindow | undefined = chargeOutcome ? { start: entry, end: entry + ARENA_RIM_CHARGE_DURATION, outcome: chargeOutcome } : undefined;
     const pairDodge = round.pairDodge ? { ...round.pairDodge, start: entry, end: entry + 4500, launchAt: undefined } : undefined;
     const passingTrip = round.passingTrip ? { ...round.passingTrip, start: entry, end: entry + 6000, launchAt: undefined } : undefined;
+    const slideTrip = round.slideTrip ? { ...round.slideTrip, start: entry, end: entry + 6000, launchAt: null, hookAt: null, kickAt: null } : undefined;
+    const linkedRush = round.linkedRush ? { ...round.linkedRush, start: entry, end: entry + 9200, launchAt: null, contactAt: undefined } : undefined;
     const start = pairDodge?.end ?? recovery?.end ?? escape?.releasedUntil ?? escape?.end ?? (chargeOutcome === 'resist' ? rimCharge!.end : rimOutcome === 'resist' ? entry + ARENA_RIM_DURATION : entry);
     const special = isArenaFinalTechnique({ ...round, start: 0, impact: 0, resolve: 0, end: 0 });
     const total = round.final ? round.rushOutcome === 'double-out' ? 11_400 : 10_800 : round.rushOutcome === 'counter-throw' ? 8100 : round.rushOutcome === 'double-out' ? 10100 : round.tactic === 'suplex' || round.tactic === 'elbow' ? 8200 : special ? 5800 : 4200 + salt % 5 * 200;
     const impactSpan = chargeOutcome === 'dodge' ? ARENA_RIM_CHARGE_DURATION : round.rushOutcome === 'counter-throw' ? 7000 : round.rushOutcome === 'double-out' ? 9000 : round.tactic === 'suplex' || round.tactic === 'elbow' ? 4100 : round.tactic === 'sidekick' ? 2300 : round.final ? 5000 : total - 1100;
-    const impact = passingTrip?.end ?? start + impactSpan, resolve = impact + (round.tactic === 'suplex' || round.tactic === 'elbow' ? 4100 : 1100);
+    const impact = linkedRush?.end ?? slideTrip?.end ?? passingTrip?.end ?? start + impactSpan, resolve = impact + (round.tactic === 'suplex' || round.tactic === 'elbow' ? 4100 : 1100);
     const rim: ArenaRimWindow | undefined = rimOutcome ? { start: entry, end: rimOutcome === 'resist' ? start : impact, outcome: rimOutcome } : undefined;
-    rounds.push({ ...round, pairDodge, passingTrip, escape, recovery, rim, rimCharge, start, impact, resolve, end: round.final ? start + total : resolve });
+    rounds.push({ ...round, linkedRush, slideTrip, pairDodge, passingTrip, escape, recovery, rim, rimCharge, start, impact, resolve, end: round.final ? start + total : resolve });
   };
   for (let index = 0; index < preliminaries; index++) {
     const living = order.slice(0, order.length - index);
+    const victim = living.at(-1)!;
+    const pool = living.filter(id => id !== victim);
+    const aggressor = pool[(seed + index * 7 + index * index) % pool.length];
+    const helpers = pool.filter(id => id !== aggressor);
+    const possibleHelper = helpers.length ? helpers[((seed >>> 5) + index * 3) % helpers.length] : undefined;
+    const planned = eliminationTactics[(seed + index) % eliminationTactics.length];
+    let tactic = possibleHelper && index === allianceAt ? (seed % 2 ? 'team' : 'betrayal') : planned === 'shove' && !possibleHelper ? 'edge' : planned === 'lift' && ((seed >>> 3) + index) % 5 === 0 ? 'spin' : planned === 'counter' && ((seed >>> 7) + index) % 6 === 1 ? 'ram' : planned;
+    const solo = !['team', 'betrayal', 'shove'].includes(tactic);
+    // This separate cosmetic draw can turn any eligible preliminary into the
+    // linked attack, including a rush slot, without changing its drawn loser.
+    if (solo && possibleHelper && arenaLinkedRushOutcome(arenaEscapeRoll(escapeSeed ?? seed, index + 1009) % 1000)) {
+      append({ id: `arena-${index}`, index, tactic: 'double-shove', aggressor, helper: possibleHelper, victim, rushOutcome: 'counter-throw', linkedRush: { start: 0, end: 0 }, final: false }, seed + index);
+      continue;
+    }
     if (index === rushAt) {
       const cast = arenaPairRushCast(living, rushRoll, seed + index * 7), final = cast.rushOutcome === 'double-out' && living.length === 3;
       const dodgeRoll = arenaEscapeRoll(escapeSeed ?? seed, index + 503) % 1000;
@@ -632,20 +660,14 @@ export function arenaRounds(order: string[], duration = 44_000, rushRoll = 7, es
       if (cast.secondaryVictim) index++;
       continue;
     }
-    const victim = living.at(-1)!;
-    const pool = living.filter(id => id !== victim);
-    const aggressor = pool[(seed + index * 7 + index * index) % pool.length];
-    const helpers = pool.filter(id => id !== aggressor);
-    const possibleHelper = helpers.length ? helpers[((seed >>> 5) + index * 3) % helpers.length] : undefined;
-    const planned = eliminationTactics[(seed + index) % eliminationTactics.length];
-    let tactic = possibleHelper && index === allianceAt ? (seed % 2 ? 'team' : 'betrayal') : planned === 'shove' && !possibleHelper ? 'edge' : planned === 'lift' && ((seed >>> 3) + index) % 5 === 0 ? 'spin' : planned === 'counter' && ((seed >>> 7) + index) % 6 === 1 ? 'ram' : planned;
-    const solo = !['team', 'betrayal', 'shove'].includes(tactic);
     const passingTrip = solo && possibleHelper && arenaPassingTripOutcome(arenaEscapeRoll(escapeSeed ?? seed, index + 809) % 1000) ? { start: 0, end: 0, passerId: possibleHelper } : undefined;
-    const tripCounter = solo && !passingTrip && arenaEscapeRoll(escapeSeed ?? seed, index + 701) % 1000 < 10;
+    const slideTrip = solo && !passingTrip && arenaSlideTripOutcome(arenaEscapeRoll(escapeSeed ?? seed, index + 911) % 1000) ? { start: 0, end: 0 } : undefined;
+    const tripCounter = solo && !passingTrip && !slideTrip && arenaEscapeRoll(escapeSeed ?? seed, index + 701) % 1000 < 10;
     if (passingTrip) tactic = 'lift';
+    else if (slideTrip) tactic = 'trip';
     else if (tripCounter) tactic = 'trip';
     const allianceRoll = Math.imul(seed ^ seed >>> 13 ^ index, 0x9e3779b1) >>> 0;
-    append({ id: `arena-${index}`, index, tactic, tripCounter, passingTrip, aggressor, helper: tactic === 'team' || tactic === 'betrayal' || tactic === 'shove' ? possibleHelper : undefined, counterSide: tactic === 'betrayal' ? allianceRoll >>> 9 & 1 ? 'back' : 'front' : undefined, counterFailed: tactic === 'betrayal' ? (allianceRoll >>> 12) % 3 === 1 : undefined, victim, final: false }, seed + index);
+    append({ id: `arena-${index}`, index, tactic, tripCounter, passingTrip, slideTrip, aggressor, helper: tactic === 'team' || tactic === 'betrayal' || tactic === 'shove' ? possibleHelper : undefined, counterSide: tactic === 'betrayal' ? allianceRoll >>> 9 & 1 ? 'back' : 'front' : undefined, counterFailed: tactic === 'betrayal' ? (allianceRoll >>> 12) % 3 === 1 : undefined, victim, final: false }, seed + index);
   }
   const finishSeed = ((seed >>> 4) ^ seed) >>> 0;
   const mixedTechnique = Math.imul(seed ^ seed >>> 16, 0x7feb352d) >>> 0;
@@ -656,6 +678,8 @@ export function arenaRounds(order: string[], duration = 44_000, rushRoll = 7, es
   const timeScale = duration / Math.max(44_000, nominalEnd);
   const scaled = (time: number) => Math.min(duration, time * timeScale);
   return rounds.map(round => ({ ...round,
+    linkedRush: round.linkedRush ? { ...round.linkedRush, start: scaled(round.linkedRush.start), end: scaled(round.linkedRush.end) } : undefined,
+    slideTrip: round.slideTrip ? { ...round.slideTrip, start: scaled(round.slideTrip.start), end: scaled(round.slideTrip.end) } : undefined,
     pairDodge: round.pairDodge ? { ...round.pairDodge, start: scaled(round.pairDodge.start), end: scaled(round.pairDodge.end) } : undefined,
     passingTrip: round.passingTrip ? { ...round.passingTrip, start: scaled(round.passingTrip.start), end: scaled(round.passingTrip.end) } : undefined,
     escape: round.escape ? { ...round.escape, start: scaled(round.escape.start), end: scaled(round.escape.end), releasedUntil: round.escape.releasedUntil === undefined ? undefined : scaled(round.escape.releasedUntil) } : undefined,
@@ -698,12 +722,12 @@ export function arenaFocusRound(order: string[], elapsed: number, duration = 44_
 
 /** Prepare only partners whose next real appearance is their shared deciding bout. */
 export function arenaMiniExchanges(available: readonly (ArenaPoint & { id: string })[], elapsed: number, duration = 44_000, planned: readonly ArenaRound[] = []): ArenaRound[] {
-  const ids = new Set(available.map(actor => actor.id)), pending = planned.filter(round => elapsed < (round.pairDodge?.start ?? round.passingTrip?.start ?? round.rimCharge?.start ?? round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start)), used = new Set<string>();
+  const ids = new Set(available.map(actor => actor.id)), pending = planned.filter(round => elapsed < (round.linkedRush?.start ?? round.slideTrip?.start ?? round.pairDodge?.start ?? round.passingTrip?.start ?? round.rimCharge?.start ?? round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start)), used = new Set<string>();
   const next = new Map<string, ArenaRound>();
   pending.forEach(round => [round.aggressor, round.victim, round.helper, round.pairDodge?.partnerId].forEach(id => { if (id && !next.has(id)) next.set(id, round); }));
   return pending.flatMap(round => {
-    const unit = round.timeScale ?? duration / 44_000, entry = round.pairDodge?.start ?? round.passingTrip?.start ?? round.rimCharge?.start ?? round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start, start = Math.max(0, entry - 2000 * unit);
-    if (round.rimCharge) return [];
+    const unit = round.timeScale ?? duration / 44_000, entry = round.linkedRush?.start ?? round.slideTrip?.start ?? round.pairDodge?.start ?? round.passingTrip?.start ?? round.rimCharge?.start ?? round.rim?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start, start = Math.max(0, entry - 2000 * unit);
+    if (round.rimCharge || round.slideTrip || round.linkedRush) return [];
     const pair = round.pairDodge ? [round.aggressor, round.pairDodge.partnerId] : round.rushOutcome ? round.rushOutcome === 'double-out' ? [round.victim, round.helper!] : [round.aggressor, round.helper!] : [round.aggressor, round.victim];
     if (elapsed < start || pair.some(id => !ids.has(id) || used.has(id) || next.get(id)?.id !== round.id)) return [];
     pair.forEach(id => used.add(id));
@@ -773,6 +797,25 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
   if (preview) return { title: '장외 난투 · 모두 함께 맞붙습니다', detail: '색 띠와 번호로 구분합니다. 마지막까지 모래판에 남은 참가자가 우승합니다.' };
   if (!round) return { title: '여러 무리가 동시에 힘겨루기', detail: '접근하고 샅바를 잡고, 상대의 힘을 버티며 다음 빈틈을 엿봅니다.' };
   const a = actor(round.aggressor), v = actor(round.victim), h = actor(round.helper);
+  if (round.slideTrip && elapsed >= round.slideTrip.start && elapsed < round.resolve) {
+    const slide = arenaSlideTripTargets(round.slideTrip, elapsed, { x: 500, y: 416 }, undefined, round.contactSide);
+    return slide.stage === 'approach' ? { title: '지지발을 향해 달려든다', detail: `${a}가 ${v}의 지지발을 보고 발을 박차 속도를 붙입니다.` }
+      : slide.stage === 'slide' || slide.stage === 'hook' && round.slideTrip.hookAt == null ? { title: '슬라이딩! 모래 위로 파고든다', detail: `${a}가 발을 앞으로 뻗어 모래 위를 미끄러집니다. ${v}의 지지발에 가까워집니다.` }
+      : slide.stage === 'hook' || slide.stage === 'fall' ? { title: '지지발에 걸렸다!', detail: `${a}의 뻗은 발이 ${v}의 발목에 닿았습니다. ${v}가 중심을 잃고 뒤로 넘어집니다.` }
+      : slide.stage === 'rise' ? { title: '발을 딛고 바로 일어난다', detail: `${a}가 미끄러지던 힘을 멈추고 손과 발로 몸을 일으킵니다. ${v}는 모래 위에 누워 있습니다.` }
+      : slide.stage === 'kick' ? { title: '일어서며 몸통 발차기!', detail: `${a}가 지지발을 딛고 ${v}의 몸통을 발바닥으로 찹니다.` }
+      : { title: '차인 선수만 장외로!', detail: `${v}가 차인 방향으로 모래판 밖으로 나갑니다. ${a}는 안쪽에 발을 딛고 남습니다.` };
+  }
+  if (round.linkedRush && round.helper && elapsed >= round.linkedRush.start && elapsed < round.resolve) {
+    if (round.linkedRush.launchAt == null || elapsed < round.linkedRush.launchAt) return { title: '두 선수의 팔을 이어 맞춘다', detail: `${a} · ${h}가 옆으로 나란히 서서 팔을 연결합니다. ${v}는 두 사람 앞에서 버팁니다.` };
+    if (round.rushContactAt === undefined || elapsed < round.rushContactAt) return { title: '팔을 이어 함께 돌진!', detail: `${a} · ${h}가 발을 맞춰 달립니다. 연결한 팔로 ${v}의 목 앞을 향해 들어갑니다.` };
+    const shared = arenaPairRushTargets(round, elapsed, { x: 500, y: 416 });
+    return shared.stage === 'contact' || shared.stage === 'rebound' ? { title: '연결한 팔이 목에 닿았다!', detail: `${v}가 두 선수의 연결한 팔에 걸려 뒤로 넘어집니다.` }
+      : shared.stage === 'groggy' ? { title: '쓰러져 그로기! 둘이 다시 붙는다', detail: `${v}가 모래 위에 누워 있습니다. ${a} · ${h}가 양쪽 손끝과 발끝으로 접근합니다.` }
+      : shared.stage === 'grip' ? { title: '손끝 · 발끝을 나눠 잡았다', detail: `${a}가 두 손끝을, ${h}가 두 발끝을 잡았습니다. ${v}를 함께 들어 올릴 준비를 합니다.` }
+      : shared.stage === 'lift' || shared.stage === 'overhead' ? { title: '둘이 머리 위로 함께 들기!', detail: `${a} · ${h}가 같은 속도로 무릎을 펴며 ${v}를 머리 위로 들어 올립니다.` }
+      : { title: '함께 던진다! 붙잡힌 선수만 장외', detail: `${a} · ${h}가 손을 놓아 ${v}만 모래판 밖으로 던집니다.` };
+  }
   if (round.pairDodge && elapsed >= round.pairDodge.start && (elapsed < round.pairDodge.end || round.pairDodge.outcome === 'out' && elapsed < round.resolve)) {
     const dodge = arenaPairDodgeTargets(round.pairDodge, elapsed, { x: 500, y: 416 }, undefined, round.timeScale);
     const partner = actor(round.pairDodge.partnerId);

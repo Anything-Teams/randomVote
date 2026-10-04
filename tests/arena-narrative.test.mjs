@@ -71,9 +71,9 @@ test('an occasional rush keeps its exact three-to-seven branch ratio and consume
   for (let variant = 0; variant < 160; variant++) for (let roll = 0; roll < 10; roll++) {
     const order = Array.from({ length: 8 }, (_, i) => `narrative-${variant}-${i}`), living = new Set(order);
     const rounds = arenaRounds(order, 44000, roll); let previousEnd = 0;
-    if (!roll && rounds.some(round => round.rushOutcome)) rushGames++;
+    if (!roll && rounds.some(round => round.rushOutcome && !round.linkedRush)) rushGames++;
     for (const round of rounds) {
-      assert.equal(round.rimCharge?.start ?? round.rim?.start ?? round.pairDodge?.start ?? round.passingTrip?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start, previousEnd); previousEnd = round.end;
+      assert.equal(round.linkedRush?.start ?? round.slideTrip?.start ?? round.rimCharge?.start ?? round.rim?.start ?? round.pairDodge?.start ?? round.passingTrip?.start ?? round.recovery?.start ?? round.escape?.start ?? round.start, previousEnd); previousEnd = round.end;
       assert.ok(living.has(round.aggressor));
       if (round.tactic === 'betrayal') { seen.add(round.counterSide); seen.add(round.counterFailed ? 'failed' : 'succeeded'); }
       const exits = arenaEliminatedIds(round);
@@ -81,7 +81,7 @@ test('an occasional rush keeps its exact three-to-seven branch ratio and consume
         assert.ok(roll >= 3); assert.equal(round.secondaryVictim, undefined);
         assert.equal(round.victim, [...living].at(-1)); dodges++;
       }
-      if (round.rushOutcome) {
+      if (round.rushOutcome && !round.linkedRush) {
         assert.equal(round.rushOutcome, roll < 3 ? 'double-out' : 'counter-throw');
         if (roll >= 3) { counters++; assert.equal(round.secondaryVictim, undefined); }
       }

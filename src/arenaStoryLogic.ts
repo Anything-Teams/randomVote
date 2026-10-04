@@ -7,6 +7,7 @@ import { arenaRimChargeTargets } from './arenaRimCharge';
 import { arenaFloorExitTiming } from './arenaTechniques';
 import { arenaPairDodgeTargets } from './arenaPairDodge';
 import { ARENA_PASSING_TRIP_TIMING } from './arenaPassingTrip';
+import { arenaSlideTripTargets } from './arenaSlideTrip';
 
 export type ArenaStoryState = {
   kind: string;
@@ -26,6 +27,43 @@ export type ArenaStoryState = {
 
 /** The same beat drives the bodies and the explanation of their relationship. */
 export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryState {
+  if (round.slideTrip && elapsed >= round.slideTrip.start && elapsed < round.resolve) {
+    const frame = arenaSlideTripTargets(round.slideTrip, elapsed, { x: 500, y: 416 }, undefined, round.contactSide);
+    const steps = ['달려들기', '모래 위 슬라이딩', '지지발 걸기', '뒤로 넘어졌다', '바로 일어서기', '몸통 발차기', '차인 선수 장외'];
+    const step = Math.max(0, ['approach', 'slide', 'hook', 'fall', 'rise', 'kick', 'release'].indexOf(frame.stage));
+    const hooked = round.slideTrip.hookAt != null && elapsed >= round.slideTrip.hookAt;
+    return { kind: 'slide-trip', label: step === 0 ? '낮게 달려들 틈을 노린다' : step < 3 ? '슬라이딩 발걸기!' : step < 5 ? '걸어 넘어뜨리고 바로 일어서기' : '일어서며 몸통을 찬다!',
+      action: [
+        '상대의 지지발을 보고 발을 박차 속도를 붙입니다. 미끄러져 들어갈 거리를 살핍니다.',
+        '발을 앞으로 뻗고 몸을 낮춰 모래 위로 미끄러집니다. 상대의 지지발에 가까워집니다.',
+        hooked ? '뻗은 발이 상대의 발목에 닿았습니다! 지지발이 풀리고 몸의 중심이 뒤로 무너집니다.' : '뻗은 발로 상대의 지지발을 노립니다. 아직 몸이 넘어지지는 않았습니다.',
+        '발목에 걸린 선수가 뒤로 넘어집니다. 슬라이딩한 선수는 모래에 손을 짚고 속도를 멈춥니다.',
+        '손과 지지발로 모래를 밀고 바로 몸을 일으킵니다. 상대는 누운 자리에서 중심을 고칩니다.',
+        '한 발로 단단히 서서 다른 발바닥을 넘어진 상대의 몸통으로 뻗어 찹니다.',
+        '몸통에 발차기를 맞은 선수만 차인 방향으로 장외로 나갑니다. 공격한 선수는 모래판 안에 남습니다.',
+      ][step], left: [round.aggressor], right: [round.victim], relation: step < 4 ? '↘' : '→',
+      relationLabel: step < 3 ? '모래 위로 접근 · 발목 걸기' : step < 5 ? '넘어뜨리고 일어서기' : '몸통 발차기 · 상대만 장외',
+      leftLabel: '슬라이딩하고 일어서서 차는 선수', rightLabel: '지지발이 걸린 선수', steps, step };
+  }
+  if (round.linkedRush && round.helper && elapsed >= round.linkedRush.start && elapsed < round.resolve) {
+    const launched = round.linkedRush.launchAt != null && elapsed >= round.linkedRush.launchAt;
+    const contacted = round.rushContactAt !== undefined && elapsed >= round.rushContactAt;
+    const shared = contacted ? arenaPairRushTargets(round, elapsed, { x: 500, y: 416 }) : undefined;
+    const step = !launched ? 0 : !contacted ? 1 : shared!.stage === 'contact' || shared!.stage === 'rebound' ? 2 : shared!.stage === 'groggy' ? 3 : shared!.stage === 'grip' ? 4 : shared!.stage === 'lift' || shared!.stage === 'overhead' ? 5 : 6;
+    const steps = ['나란히 팔 연결', '둘이 함께 달리기', '목에 팔이 닿았다', '넘어져 그로기', '손끝 · 발끝 잡기', '둘이 함께 머리 위로', '붙잡힌 선수만 장외'];
+    return { kind: 'linked-rush', label: step < 2 ? '두 선수의 팔 연결 · 연계 돌진' : step < 4 ? '연결한 팔로 목을 걸었다!' : '둘이 손끝 · 발끝 잡아 던지기!',
+      action: [
+        '두 선수가 서로의 팔을 이어 나란히 섭니다. 상대의 앞을 보며 달릴 발을 맞춥니다.',
+        '팔을 연결한 두 선수가 함께 발을 박차 달립니다. 연결한 팔이 상대의 목 앞을 향합니다.',
+        '연결한 팔이 상대의 목에 닿았습니다! 상대가 뒤로 넘어지고 두 선수는 안쪽에 발을 딛습니다.',
+        '팔에 걸린 선수가 모래 위에 누워 그로기 상태입니다. 두 선수가 손끝과 발끝으로 나눠 접근합니다.',
+        '한 선수는 두 손끝을, 다른 선수는 두 발끝을 잡았습니다. 같은 박자로 들어 올릴 힘을 모읍니다.',
+        '손끝과 발끝을 놓지 않고 둘이 무릎을 펴며 머리 위로 함께 들어 올립니다.',
+        '둘이 동시에 손을 놓아 붙잡힌 상대만 모래판 밖으로 던집니다. 두 공격자는 안에 남습니다.',
+      ][step], left: [round.aggressor, round.helper], right: [round.victim], relation: '→',
+      relationLabel: step < 2 ? '팔 연결 · 공동 돌진' : step < 4 ? '목에 연결한 팔 충돌' : step < 6 ? '손끝 · 발끝 나눠 잡아 들기' : '함께 던지기 · 상대만 장외',
+      leftLabel: '팔을 연결해 함께 달려드는 두 선수', rightLabel: step < 2 ? '두 선수의 앞에서 버티는 선수' : '연결한 팔에 걸려 넘어진 선수', steps, step };
+  }
   const pairWindow = round.pairDodge;
   if (pairWindow && elapsed >= pairWindow.start && (elapsed < pairWindow.end || pairWindow.outcome === 'out' && elapsed < round.resolve)) {
     const actual = { ...pairWindow, launchAt: pairWindow.launchAt ?? null };

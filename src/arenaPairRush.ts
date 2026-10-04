@@ -6,6 +6,8 @@ export type ArenaPairRushCast = {
   aggressor: string; victim: string; helper: string;
   secondaryVictim?: string; rushOutcome: ArenaPairRushOutcome;
 };
+/** A linked attack hands the real impact roots to the existing shared lift. */
+export type ArenaPairCarryOrigins = { victim: ArenaPoint; pair: [ArenaPoint, ArenaPoint]; direction: ArenaPoint; facing?: 1 | -1 };
 export type ArenaPairRushFrame = {
   phase: number; side: number; outcome: ArenaPairRushOutcome;
   stage: 'wrestle' | 'charge' | 'contact' | 'scoop' | 'push' | 'rebound' | 'groggy' | 'grip' | 'lift' | 'overhead' | 'toss' | 'release';
@@ -95,21 +97,21 @@ export function arenaPairRushCast(living: readonly string[], roll: number, selec
 }
 
 /** A rushing third fighter either breaks the pair's footing or is caught by both. */
-export function arenaPairRushTargets(round: RushRound, elapsed: number, center: ArenaPoint, chargerOrigin?: ArenaPoint): ArenaPairRushFrame {
+export function arenaPairRushTargets(round: RushRound, elapsed: number, center: ArenaPoint, chargerOrigin?: ArenaPoint, carryOrigins?: ArenaPairCarryOrigins): ArenaPairRushFrame {
   if (!round.helper) throw new RangeError('A pair rush needs its second wrestler');
   const span = Math.max(1, round.impact - round.start);
   const phase = clamp((elapsed - round.start) / span);
   const outcome = round.rushOutcome ?? (round.secondaryVictim ? 'double-out' : 'counter-throw');
   const side = round.contactSide ?? (center.x >= 500 ? 1 : -1);
   const origin = chargerOrigin ?? { x: center.x - side * 220, y: center.y + 43 };
-  const contact = outcome === 'counter-throw' ? arenaPairRushContact(center, origin, side) : { x: center.x - side * 36, y: center.y + 5 };
+  const contact = carryOrigins?.victim ?? (outcome === 'counter-throw' ? arenaPairRushContact(center, origin, side) : { x: center.x - side * 36, y: center.y + 5 });
   // Start where the third fighter actually stands. A longer runway receives
   // more time rather than moving the fighter backwards to a staging mark.
   const distance = Math.hypot(contact.x - origin.x, contact.y - origin.y);
   // The rim side describes the wrestling/throw layout, not the direction a
   // fighter runs. An actual origin may be on either side or above the pair.
-  const chargeDirection = distance > .001 ? { x: (contact.x - origin.x) / distance, y: (contact.y - origin.y) / distance } : { x: side, y: 0 };
-  const chargerFacing: 1 | -1 = Math.abs(chargeDirection.x) > .001 ? chargeDirection.x > 0 ? 1 : -1 : side > 0 ? 1 : -1;
+  const chargeDirection = carryOrigins ? { x: -carryOrigins.direction.x, y: -carryOrigins.direction.y } : distance > .001 ? { x: (contact.x - origin.x) / distance, y: (contact.y - origin.y) / distance } : { x: side, y: 0 };
+  const chargerFacing: 1 | -1 = carryOrigins?.facing ?? (Math.abs(chargeDirection.x) > .001 ? chargeDirection.x > 0 ? 1 : -1 : side > 0 ? 1 : -1);
   const preparation = .04, unit = Math.max(.001, round.timeScale ?? 1);
   // null explicitly reserves the real charger at their current position
   // until both wrestlers have established the actual two-way grip.
@@ -181,8 +183,8 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   // settles. Helpers go to that landing instead of resetting a prone body.
   const pace = 1, deflection = { x: -chargeDirection.x * 30 - chargeDirection.y * 10 * side, y: -chargeDirection.y * 30 + chargeDirection.x * 10 * side };
   const fallenPoint = { x: contact.x + deflection.x, y: contact.y + deflection.y };
-  const chargerX = mix(origin.x, contact.x, approach) + deflection.x * rebound;
-  const chargerY = mix(origin.y, contact.y, approach) + deflection.y * rebound;
+  const chargerX = (carryOrigins ? contact.x : mix(origin.x, contact.x, approach)) + deflection.x * rebound;
+  const chargerY = (carryOrigins ? contact.y : mix(origin.y, contact.y, approach)) + deflection.y * rebound;
   // Keeping the foot-origin marker fixed during suspension slides the entire
   // horizontal rig by its 24-local-pixel pivot. Cancel that marker shift so
   // the actual hips rise above the same patch of sand.
@@ -202,8 +204,8 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
       ? { x: mix(center.x - side * 22, bodyX - side * (mix(85, 89, unfold) - rise * 67.54), approach) + side * 18 * low, y: center.y + mix(-14, mix(6, -2, rise) + carrierShiftY, approach) + 8 * low + 4 * rise }
       : { x: mix(center.x + side * 22, bodyX + side * (mix(24, 121, unfold) + rise * 29.54), approach) - side * 20 * low, y: center.y + mix(14, mix(10, -4, rise) + carrierShiftY, approach) + 4 * low + 6 * rise };
   };
-  frame.aggressor = carrierGround({ x: center.x + side * 22, y: center.y + 14 }, age, at => desired(at, false));
-  frame.helper = carrierGround({ x: center.x - side * 22, y: center.y - 14 }, age, at => desired(at, true));
+  frame.aggressor = carrierGround(carryOrigins?.pair[0] ?? { x: center.x + side * 22, y: center.y + 14 }, age, at => desired(at, false));
+  frame.helper = carrierGround(carryOrigins?.pair[1] ?? { x: center.x - side * 22, y: center.y - 14 }, age, at => desired(at, true));
   frame.rebound = rebound;
   frame.groggy = age >= timing.rebound ? 1 - stretch : 0;
   frame.reboundHeight = age >= 0 && age < timing.rebound ? Math.sin(reboundProgress * Math.PI) ** 2 * 26 * pace : 0;

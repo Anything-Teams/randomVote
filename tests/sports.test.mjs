@@ -18,7 +18,7 @@ const cameraCompiled = await build({ entryPoints: ['src/racingCamera.ts'], bundl
 const { createRacingCamera, racingFocusIds, placeRacingField } = await import(`data:text/javascript;base64,${Buffer.from(cameraCompiled.outputFiles[0].text).toString('base64')}`);
 const participants = Array.from({ length: 10 }, (_, index) => ({ id: `player-${index}`, name: `선수 ${index}`, color: '#f9d56e' }));
 // A physical prelude can start before the later deciding technique.
-const arenaEntry = round => Math.min(round.start, ...[round.pairDodge?.start, round.passingTrip?.start, round.recovery?.start, round.escape?.start, round.rim?.start, round.rimCharge?.start].filter(Number.isFinite));
+const arenaEntry = round => Math.min(round.start, ...[round.linkedRush?.start, round.slideTrip?.start, round.pairDodge?.start, round.passingTrip?.start, round.recovery?.start, round.escape?.start, round.rim?.start, round.rimCharge?.start].filter(Number.isFinite));
 
 test('only arena draws a variable runtime, while election and racing keep their existing length', () => {
   const unused = () => { throw new Error('Fixed modes must not draw a duration'); };
@@ -370,7 +370,7 @@ test('arena bouts begin immediately, connect without filler, and finish at their
         if (['armspin', 'trip', 'sidekick', 'suplex'].includes(round.tactic)) {
           prelimTechniques.add(round.tactic);
           const nominal = (round.end - round.start) / unit;
-          assert.ok(Math.abs(nominal - (round.tactic === 'suplex' ? 8200 : round.tactic === 'sidekick' ? 3400 : 5800)) < 1e-6, 'a quick jump kick keeps its shorter strike and landing window');
+          assert.ok(Math.abs(nominal - (round.slideTrip ? 7100 : round.tactic === 'suplex' ? 8200 : round.tactic === 'sidekick' ? 3400 : 5800)) < 1e-6, 'each technique retains its complete strike and landing window');
           if (round.tactic === 'suplex') assert.ok(Math.abs((round.resolve - round.impact) / unit - 4100) < 1e-6, 'a landed suplex still has time to drag and toss');
         }
       }
