@@ -123,7 +123,7 @@ function game(kind, { mirrored = false, controlled = true, frameDelta = 16 } = {
 for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) test(`${kind} uses real painted contact, a continuous finish and the drawn ranks (${mirrored ? 'mirrored' : 'ordinary'})`, () => {
   for (const frameDelta of [16, 50]) {
     const scene = game(kind, { mirrored, frameDelta });
-    let contactSeen = false, releaseSeen = false, finalSeen = false, fallbackSeen = false, attackerJumped = false, attackerLanded = false;
+    let contactSeen = false, releaseSeen = false, finalSeen = false, fallbackSeen = false, attackerJumped = false, attackerLanded = false, distantLandingSeen = false;
     let actualContactAt, anklesSeen = false, ankleFrames = 0, previousRig, previousDriverRig, previousDriverFacing, previousSpinMatrix, previousSpinWeight, previousTurn, spinFrames = 0, fullTurnSeen = false, runSeen = false, floorSeen = false;
     const scoopStages = new Set();
     const clotheslineStages = new Set();
@@ -367,6 +367,9 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           assert.ok(exit.spinFlight && Math.hypot(exit.spinFlight.velocity.x, exit.spinFlight.velocity.y) > 50, 'the exit inherits the real final mass velocity');
           assert.ok(Math.abs(exit.spinFlight.velocity.x) > Math.abs(exit.spinFlight.velocity.y) * 3, 'the actual final body motion exits left or right instead of downward');
           assert.ok(!inside(exit.landing), 'the inherited tangent carries the body beyond the actual rim');
+          const outward = Math.sign(exit.spinFlight.velocity.x);
+          const rimHalfWidth = 303 * Math.sqrt(Math.max(0, 1 - ((exit.landing.y - 416) / 112) ** 2));
+          assert.ok((exit.landing.x - 500) * outward - rimHalfWidth >= 180, 'the full-turn throw travels well beyond the rim instead of leaving only its root outside');
         }
         if (previousRig) {
           const cap = 15 + frameDelta * .5;
@@ -394,6 +397,11 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         assert.ok(moved.x * velocity.x + moved.y * velocity.y > 0, 'the first free frame continues the measured release tangent');
         assert.ok((moved.x * velocity.x + moved.y * velocity.y) / (Math.hypot(moved.x, moved.y) * Math.hypot(velocity.x, velocity.y)) > .85, 'free flight does not change to an unrelated straight throw direction');
       }
+      if (spinFinish && exit && elapsed - exit.launchedAt >= exit.spinFlight.duration && elapsed - exit.launchedAt < exit.spinFlight.duration + frameDelta) {
+        const outward = Math.sign(exit.spinFlight.velocity.x);
+        assert.ok(paintedPoints(paintedVictim).every(point => (point.x - 500) * outward > 303 + 24), 'at the real landing, the whole head, trunk, arms and feet clear the widest edge of the sand');
+        distantLandingSeen = true;
+      }
       previousRig = structuredClone(paintedVictim); previousDriverRig = structuredClone(paintedDriver); previousDriverFacing = driver.facing;
       previousSpinMatrix = victim.animation.spinSnapshot?.matrix ? [...victim.animation.spinSnapshot.matrix] : undefined;
       previousSpinWeight = victim.spinSuspension?.weight;
@@ -404,7 +412,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
     if (kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam') assert.ok(runSeen, 'the incoming opponent has a visible actual run before the receiver catches');
     if (kind === 'backbodydrop') assert.ok(counterGuardSeen && counterPrepareSeen, 'the receiver stays normal through the first half of the real run, then visibly prepares the counter');
     if (kind === 'backbodydrop' || kind === 'powerbomb') assert.ok(overheadFrames >= 1, 'the real waist visibly clears the receiver\'s head before the flip');
-    if (spinFinish) assert.ok(fullTurnSeen && tangentFrames >= 1, 'one full rotation and its immediate tangent flight both occur in the actual painted Scene');
+    if (spinFinish) assert.ok(fullTurnSeen && tangentFrames >= 1 && distantLandingSeen, 'one full rotation, its immediate tangent flight and the completely outside landing all occur in the actual painted Scene');
     if (kind === 'dropkick') assert.ok(attackerJumped && attackerLanded, 'the attacking jump returns to the sand while only the hit loser exits');
     if (kind === 'spinebuster') assert.ok(spineOverlapFrames >= (frameDelta === 16 ? 6 : 2), 'the received weight starts descending while the continuous lift is still completing');
     if (kind === 'scoopslam') {

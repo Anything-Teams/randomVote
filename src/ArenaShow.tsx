@@ -248,8 +248,11 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     // Its landing clock follows that momentum rather than pulling it to a target.
     const direction = Math.sign(velocity.x) || exit.side;
     const groundY = Math.max(436, exit.origin.y + 40);
-    const rimX = 500 + direction * (303 * Math.sqrt(Math.max(0, 1 - ((groundY - 416) / 112) ** 2)) + 65);
-    const range = Math.max(65, (rimX - exit.origin.x) * direction);
+    // The full ankle revolution sends the whole silhouette well past the sand.
+    // Extend the ballistic flight instead of accelerating the body at release.
+    const clearance = planar ? 200 : 65;
+    const rimX = 500 + direction * (303 * Math.sqrt(Math.max(0, 1 - ((groundY - 416) / 112) ** 2)) + clearance);
+    const range = Math.max(clearance, (rimX - exit.origin.x) * direction);
     const duration = Math.max(650, range / Math.max(1, Math.abs(velocity.x)) * 1000);
     const seconds = duration / 1000;
     exit.landing = { x: exit.origin.x + velocity.x * seconds, y: groundY };
