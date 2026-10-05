@@ -349,7 +349,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
               if (elapsed > window.ankleGripAt) assert.ok(Math.abs(driver.pivotTurn) > 0, 'taking the actual ankle weight flows directly into the beginning of the turn');
             }
           }
-          paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, paintedVictim.feet[arm]) < 8, `both painted toes stay in the palms for the complete preflight stroke (gap ${distance(hand, paintedVictim.feet[arm]).toFixed(2)}px): ${detail(elapsed, frame)}`));
+          paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, paintedVictim.feet[driver.ankleGripReversed ? 1 - arm : arm]) < 8, `both painted toes stay in the palms for the complete preflight stroke (gap ${distance(hand, paintedVictim.feet[driver.ankleGripReversed ? 1 - arm : arm]).toFixed(2)}px): ${detail(elapsed, frame)}`));
         }
       }
       if (exit && !releaseSeen) {
@@ -440,7 +440,7 @@ for (const kind of Object.keys(seeds).filter(kind => kind !== 'dropkick')) for (
       assert.ok(window.ankleGripAt >= frame.pickupReadyAt, 'the actual floor recovery and hand approach precede the two-foot contact');
       const palms = driver.animation.contactPoints, rig = victim.animation.contactPoints, weight = victim.spinSuspension?.weight;
       for (let limb = 0; limb < 2; limb++) {
-        assert.ok(distance(palms.hands[limb], rig.feet[limb]) < 1, `${elapsed}: each live palm stays on its own foot while the lift and turn overlap`);
+        assert.ok(distance(palms.hands[limb], rig.feet[driver.ankleGripReversed ? 1 - limb : limb]) < 1, `${elapsed}: each live palm stays on its own foot while the lift and turn overlap`);
         assert.ok(Math.abs(distance(palms.shoulders[limb], palms.elbows[limb]) - 11 * driver.scale) < .001);
         assert.ok(Math.abs(distance(palms.elbows[limb], palms.hands[limb]) - 10.5 * driver.scale) < .001);
         const skeleton = victim.animation.skeleton;

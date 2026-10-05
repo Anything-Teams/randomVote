@@ -227,7 +227,8 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const floorSide = Math.sin(frame.victimAngle) < 0 ? -1 : 1;
     if (initial.floorVictim) frame.victim = { ...initial.floorVictim };
     const ankles = initial.ankles ?? [{ x: frame.victim.x - floorSide * 84, y: frame.victim.y - 4 }, { x: frame.victim.x - floorSide * 86, y: frame.victim.y - 13 }];
-    const midpoint = blend(ankles[0], ankles[1], .5), ankleGoal = initial.ankleDriver ?? { x: midpoint.x + floorSide * 32, y: frame.victim.y };
+    const pickupSide = kind === 'powerbomb' ? -floorSide : floorSide;
+    const midpoint = blend(ankles[0], ankles[1], .5), ankleGoal = initial.ankleDriver ?? { x: midpoint.x + pickupSide * 32, y: frame.victim.y };
     const approach = travel(initial.pickupDriver ?? frame.driver, ankleGoal, elapsed - pickupReadyAt, 160);
     frame.driver = ankleGripAt !== null && elapsed >= ankleGripAt ? { ...(initial.ankleDriver ?? approach.point) } : approach.point;
     frame.driverVelocity = ankleGripAt !== null && elapsed >= ankleGripAt ? zero() : approach.velocity;

@@ -64,7 +64,7 @@ for (const [kind, seed] of fixtures) for (const mirrored of [false, true]) for (
           assert.ok(inside(sim.bodies.get(planned.aggressor)), 'the loaded feet remain inside the sand');
           if (suspension.planar) assert.ok(distance(rig.head, feet) >= floorLength * .5, `${elapsed}: the horizontal swing keeps a recognizable whole body through its depth turn (${distance(rig.head, feet).toFixed(2)} / ${floorLength.toFixed(2)}px)`);
           for (let arm = 0; arm < 2; arm++) {
-            assert.ok(distance(palms.hands[arm], rig.feet[arm]) < 8, 'both actual ankles stay in their supporting palms');
+            assert.ok(distance(palms.hands[arm], rig.feet[caster.ankleGripReversed ? 1 - arm : arm]) < 8, 'both actual ankles stay in their supporting palms');
             assert.ok(Math.abs(distance(palms.shoulders[arm], palms.elbows[arm]) - 11 * caster.scale) < .001);
             assert.ok(Math.abs(distance(palms.elbows[arm], palms.hands[arm]) - 10.5 * caster.scale) < .001);
           }

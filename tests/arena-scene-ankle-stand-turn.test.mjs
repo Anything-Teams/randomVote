@@ -81,7 +81,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) for
       pickupAt ??= elapsed;
       assert.ok(actual.wrestlingMove.ankleGripAt != null, 'both actual hands establish the toe hold before the raise');
       rig.hands.forEach((palm, arm) => {
-        assert.ok(distance(palm, victimRig.feet[arm]) < 8, `the stand and turn retain the actual toe in its palm: arm ${arm}, ${detail}`);
+        assert.ok(distance(palm, victimRig.feet[actor.ankleGripReversed ? 1 - arm : arm]) < 8, `the stand and turn retain the actual toe in its palm: arm ${arm}, ${detail}`);
         assert.ok(Math.abs(distance(rig.shoulders[arm], rig.elbows[arm]) - 11 * actor.scale) < .001, `the upper arm stays connected with normal length: ${detail}`);
         assert.ok(Math.abs(distance(rig.elbows[arm], palm) - 10.5 * actor.scale) < .001, `the forearm stays connected with normal length: ${detail}`);
       });

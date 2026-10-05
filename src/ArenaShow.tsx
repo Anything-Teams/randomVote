@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Candidate } from './election';
 import type { SportsStageProps } from './sports';
 import { arenaAction, arenaActionWords, arenaApproachSpeed, arenaCatchTargets, arenaChargeFall, arenaChargeTargets, arenaContactRound, arenaDoubleShoveTargets, arenaEliminatedIds, arenaFaceOpponent, arenaInsidePoint, arenaLocalContact, arenaEdgeFall, arenaEdgeTargets, arenaExitDirection, arenaGuardTarget, arenaMiniExchanges, arenaMove as move, arenaNarration, arenaNearbyResponse, arenaPodium, arenaRamTargets, arenaReleaseTarget, arenaRoamingTarget, arenaRounds, arenaShoveTargets, arenaSpinTargets, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
-import { arenaCarryHolderPoint, arenaDrawOrder, arenaReleaseSnapshot, arenaSpinGripPair, arenaSpinSnapshot, arenaWristGripPoint, createArenaFighterAnimation, drawArenaFighter as paintArenaFighter, drawArenaName, sampleArenaFighterContacts, type ArenaActor, type ArenaFighterAnimation, type ArenaPose, type ArenaSpinSnapshot } from './game/ArenaFighter';
+import { arenaCarryHolderPoint, arenaDrawOrder, arenaReleaseSnapshot, arenaSpinGripPair, arenaSpinSnapshot, arenaWristGripPoint, createArenaFighterAnimation, drawArenaCradleSupport, drawArenaFighter as paintArenaFighter, drawArenaName, sampleArenaFighterContacts, type ArenaActor, type ArenaFighterAnimation, type ArenaPose, type ArenaSpinSnapshot } from './game/ArenaFighter';
 import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
 import { arenaTechniqueTargets, arenaTechniqueExit, arenaTechniqueReactionAt, arenaFloorExitTiming, isArenaFloorDrag, isArenaFinalTechnique } from './arenaTechniques';
@@ -29,7 +29,7 @@ type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number;
 type Contact = { center: ArenaPoint; side: number; round: ArenaRound; started?: boolean; metAt?: number; committed?: boolean; chargerOrigin?: ArenaPoint; pairDodgeOrigins?: ArenaPairDodgeOrigins; supermanPunchOrigins?: ArenaSupermanPunchOrigins; kickCatchOrigins?: ArenaKickCatchOrigins; wrestlingMoveOrigins?: ArenaWrestlingMoveOrigins; wrestlingHeadOffset?: ArenaPoint; wrestlingCradleOffset?: ArenaPoint; wrestlingSpinSample?: { at: number; waist: ArenaPoint }; slideTripOrigins?: ArenaSlideTripOrigins; linkedRushOrigins?: ArenaLinkedRushOrigins; pairCarryOrigins?: ArenaPairCarryOrigins; linkedRelease?: { at: number; hands: [ArenaPoint, ArenaPoint]; roots: [ArenaPoint, ArenaPoint]; arms: [0 | 1, 0 | 1]; facings: [number, number] }; pairReachAt?: Map<string, number>; pairGripMap?: Map<string, [number, number]>; pairArmRelease?: Map<string, { hands: [ArenaPoint, ArenaPoint]; elbows: [ArenaPoint, ArenaPoint]; shoulders: [ArenaPoint, ArenaPoint]; root: ArenaPoint; facing: number; stance?: NonNullable<ArenaActor['carrierRelease']>['stance'] }>; pairDodgeFinished?: boolean; passingTripOrigins?: ArenaPassingTripOrigins; passingTripDeclined?: boolean; escapeFinished?: boolean; recoveryFinished?: boolean; recoveryRelease?: { thrower: ArenaPoint; receiver: ArenaPoint; height: number; snapshot?: ArenaSpinSnapshot }; rimFinished?: boolean; rimOrigins?: { aggressor: ArenaPoint; victim: ArenaPoint }; rimChargeOrigins?: ArenaRimChargeOrigins; rimChargeFinished?: boolean; sidekickLaunched?: boolean; elbowFall?: ArenaPoint; elbowApproachOrigin?: ArenaPoint; releases?: Map<string, ArenaPoint> };
 type Exit = { floorThrow?: { driver: ArenaPoint; ankles: [ArenaPoint, ArenaPoint]; orbit: number; facing: 1 | -1 }; floorArms?: { hands: [ArenaPoint, ArenaPoint]; elbows: [ArenaPoint, ArenaPoint]; shoulders: [ArenaPoint, ArenaPoint]; root: ArenaPoint; stance?: NonNullable<ArenaActor['carrierRelease']>['stance'] }; round: ArenaRound; origin: ArenaPoint; landing: ArenaPoint; side: number; bench: ArenaPoint; lift: number; angle: number; velocity: number; heldFacing?: number; launchedAt?: number; dodgeFall?: { center: ArenaPoint; origins: ArenaPairDodgeOrigins }; dragOffset?: ArenaPoint; driverStop?: ArenaPoint; pushRelease?: { hands: [ArenaPoint, ArenaPoint]; elbows: [ArenaPoint, ArenaPoint]; shoulders: [ArenaPoint, ArenaPoint]; root: ArenaPoint; angle: number; lean: number }; spinSnapshot?: ArenaSpinSnapshot; spinFlight?: { velocity: ArenaPoint; angularVelocity: number; center: ArenaPoint; planarOrbit?: number; duration: number; gravity: number } };
 type Simulation = { key: string; elapsed: number; epoch: number; camera: ArenaCamera; bodies: Map<string, Body>; contacts: Map<string, Contact>; exits: Map<string, Exit>; minis: Map<string, ArenaRound> };
-type ChoreographedActor = ArenaActor & { rearExitCutoff?: number };
+type ChoreographedActor = ArenaActor & { rearExitCutoff?: number; paintDepth?: number; paintLayer?: number; scoopSupportActor?: ArenaActor };
 const W = 1000, H = 620;
 const clamp = (p: number, low = 0, high = 1) => Math.max(low, Math.min(high, p));
 const ease = (p: number) => { const n = clamp(p); return n * n * (3 - 2 * n); };
@@ -42,7 +42,11 @@ function clotheslineNeck(rig: ReturnType<typeof sampleArenaFighterContacts>): Ar
 
 /** A rear rim fall disappears behind the sand ledge, rather than falling onto it. */
 function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ChoreographedActor, clock: number) {
-  if (actor.rearExitCutoff === undefined) { paintArenaFighter(ctx, actor, clock); return; }
+  if (actor.rearExitCutoff === undefined) {
+    paintArenaFighter(ctx, actor, clock);
+    if (actor.scoopSupportActor) drawArenaCradleSupport(ctx, actor.scoopSupportActor);
+    return;
+  }
   ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, actor.rearExitCutoff); ctx.clip();
   paintArenaFighter(ctx, actor, clock); ctx.restore();
 }
@@ -493,7 +497,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           if (frame.gripMode === 'ankle' && !contact.wrestlingMoveOrigins.pickupDriver) {
             contact.wrestlingMoveOrigins.pickupDriver = { x: a.x, y: a.y };
             contact.wrestlingMoveOrigins.floorVictim = { x: v.x, y: v.y };
-            if (spinFinish) contact.wrestlingMoveOrigins.ankleFacing = frame.side === 1 ? -1 : 1;
+            if (spinFinish) contact.wrestlingMoveOrigins.ankleFacing = window.kind === 'powerbomb' ? frame.side : frame.side === 1 ? -1 : 1;
             update({});
           }
           const apply = () => {
@@ -547,6 +551,9 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             driver.scoopLoad = frame.scoopLoad; driver.scoopLift = frame.scoopLift; driver.scoopTurn = frame.scoopTurn; driver.scoopDown = frame.scoopDown;
             driver.ankleThrowProgress = frame.ankleThrowProgress; driver.ankleSpinRaise = frame.ankleSpinRaise;
             driver.ankleApproach = frame.ankleApproach;
+            // From the opposite toe side each hand owns the other ankle.
+            // Keep those same contacts through the lift, circle and opening.
+            driver.ankleGripReversed = window.kind === 'powerbomb' && frame.gripMode === 'ankle';
             driver.pivotTurn = frame.pivotTurn; driver.yaw = frame.driverYaw;
             const spinExit = spinFinish ? sim.exits.get(exchange.victim) : undefined, armRelease = contact.pairArmRelease?.get(exchange.aggressor);
             if (spinExit && armRelease) {
@@ -565,19 +572,19 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             }
             if (frame.ankleSpin && frame.gripTargets && victim && !sim.exits.has(exchange.victim)) {
               if (!frame.ankleSpin.planar) { driver.ankleSpinRaise = frame.ankleSpin.weight; victim.pose = 'stunned'; victim.suspension = 0; victim.carryStretch = undefined; victim.carrySupport = undefined; victim.slamProgress = { tuck: 0, slump: 1 }; }
-              driver.gripTarget = frame.gripTargets[1]; driver.secondaryGripTarget = frame.gripTargets[0];
+              driver.gripTarget = frame.gripTargets[driver.ankleGripReversed ? 0 : 1]; driver.secondaryGripTarget = frame.gripTargets[driver.ankleGripReversed ? 1 : 0];
               driver.gripStrength = 1; driver.gripLocked = true; driver.gripMode = 'ankle';
               prepareContactActor(driver);
               let palms = sampleArenaFighterContacts(driver, reduced ? 0 : clock).hands;
               if (!frame.ankleSpin.planar) for (let attempt = 0; attempt < 2; attempt++) {
-                victim.spinSuspension = { ...frame.ankleSpin, grips: [palms[0], palms[1]] };
+                victim.spinSuspension = { ...frame.ankleSpin, grips: driver.ankleGripReversed ? [palms[1], palms[0]] : [palms[0], palms[1]] };
                 const feet = sampleArenaFighterContacts(victim, reduced ? 0 : clock).feet;
                 const center = { x: (frame.gripTargets[0].x + frame.gripTargets[1].x) / 2, y: (frame.gripTargets[0].y + frame.gripTargets[1].y) / 2 };
                 const half = { x: (feet[1].x - feet[0].x) / 2, y: (feet[1].y - feet[0].y) / 2 };
                 driver.gripTarget = { x: center.x + half.x, y: center.y + half.y }; driver.secondaryGripTarget = { x: center.x - half.x, y: center.y - half.y };
                 palms = sampleArenaFighterContacts(driver, reduced ? 0 : clock).hands;
               }
-              victim.spinSuspension = { ...frame.ankleSpin, grips: [palms[0], palms[1]] };
+              victim.spinSuspension = { ...frame.ankleSpin, grips: driver.ankleGripReversed ? [palms[1], palms[0]] : [palms[0], palms[1]] };
               victim.eyesClosed = true;
               const snapshot = arenaSpinSnapshot(victim, reduced ? 0 : clock);
               const depthY = frame.ankleSpin.planar ? a.y + Math.sin(frame.ankleSpin.orbit) * 112 * .20 * frame.ankleSpin.weight : a.y;
@@ -589,7 +596,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             if (frame.gripTargets && victim && !sim.exits.has(exchange.victim)) {
               const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock);
               const thigh = { x: rig.waist.x + ((rig.feet[0].x + rig.feet[1].x) / 2 - rig.waist.x) * .28, y: rig.waist.y + ((rig.feet[0].y + rig.feet[1].y) / 2 - rig.waist.y) * .28 };
-              const targets = frame.gripMode === 'head' ? rig.headSides : frame.gripMode === 'ankle' ? rig.feet : frame.gripMode === 'cradle' ? [rig.back, thigh] : [rig.waist, { x: rig.waist.x + frame.side * 6, y: rig.waist.y + 3 }];
+              const contactTargets = frame.gripMode === 'head' ? rig.headSides : frame.gripMode === 'ankle' ? rig.feet : frame.gripMode === 'cradle' ? [rig.back, thigh] : [rig.waist, { x: rig.waist.x + frame.side * 6, y: rig.waist.y + 3 }];
+              const targets = driver.ankleGripReversed ? [contactTargets[1], contactTargets[0]] : contactTargets;
               driver.gripTarget = targets[1]; driver.secondaryGripTarget = targets[0]; driver.gripStrength = frame.gripStrength; driver.gripLocked = true;
               driver.gripMode = frame.gripMode;
               // A fixed root gap is not a grip: the live chest and thigh can
@@ -637,14 +645,17 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             }
             if (frame.canGrabAnkle || ankleApproach) {
               contact.wrestlingMoveOrigins.ankles = [rig.feet[0], rig.feet[1]];
-              const pickup = arenaAnklePickup({ x: v.x, y: v.y }, rig.feet, frame.side);
-              const predicted = { ...driver, ...pickup.holder, pose: 'drag' as const, facing: contact.wrestlingMoveOrigins.ankleFacing ?? -frame.side, gripMode: 'ankle' as const, gripTarget: rig.feet[1], secondaryGripTarget: rig.feet[0], gripStrength: 1, gripLocked: true, animation: undefined, motionImmediate: true };
-              contact.wrestlingMoveOrigins.ankleDriver = arenaInsidePoint(arenaCarryHolderPoint(predicted, [rig.feet[1], rig.feet[0]], reduced ? 0 : clock, pickup.holder), 12);
+              // A front slam leaves the toes beyond the catcher. Step around
+              // to their outside and look back at them before taking the hold.
+              const pickup = arenaAnklePickup({ x: v.x, y: v.y }, rig.feet, window.kind === 'powerbomb' ? -frame.side : frame.side);
+              const toes: [ArenaPoint, ArenaPoint] = driver.ankleGripReversed ? [rig.feet[0], rig.feet[1]] : [rig.feet[1], rig.feet[0]];
+              const predicted = { ...driver, ...pickup.holder, pose: 'drag' as const, facing: contact.wrestlingMoveOrigins.ankleFacing ?? -frame.side, gripMode: 'ankle' as const, gripTarget: toes[0], secondaryGripTarget: toes[1], gripStrength: 1, gripLocked: true, animation: undefined, motionImmediate: true };
+              contact.wrestlingMoveOrigins.ankleDriver = arenaInsidePoint(arenaCarryHolderPoint(predicted, toes, reduced ? 0 : clock, pickup.holder), 12);
             }
             update({}); apply();
             const attacking = sampleArenaFighterContacts(driver, reduced ? 0 : clock);
             if (frame.canKick && Math.hypot(attacking.feet[1].x - rig.waist.x, attacking.feet[1].y - rig.waist.y) < 7) update({ kickAt: elapsed });
-            if (frame.canGrabAnkle && attacking.hands.every((hand, arm) => Math.hypot(hand.x - rig.feet[arm].x, hand.y - rig.feet[arm].y) < 7)) {
+            if (frame.canGrabAnkle && attacking.hands.every((hand, arm) => Math.hypot(hand.x - rig.feet[driver.ankleGripReversed ? 1 - arm : arm].x, hand.y - rig.feet[driver.ankleGripReversed ? 1 - arm : arm].y) < 7)) {
               // Begin the loaded turn from the pose which actually closed
               // both ankle contacts, rather than the preceding reach frame.
               if (driver.animation) driver.animation.contactPoints = structuredClone(attacking);
@@ -737,7 +748,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             if (frame.ankleSpin) {
               const prior = arenaWrestlingMoveTargets(window, elapsed - 1, contact.center, contact.wrestlingMoveOrigins, exchange.contactSide);
               const targetBefore = (actual: ArenaPoint, arm: number) => ({ x: actual.x + prior.gripTargets![arm].x - frame.gripTargets![arm].x, y: actual.y + prior.gripTargets![arm].y - frame.gripTargets![arm].y });
-              const priorDriver = { ...driver, pose: prior.driverPose, phase: prior.driverPhase, overheadRaise: prior.overheadRaise, ankleThrowProgress: prior.ankleThrowProgress, ankleSpinRaise: frame.ankleSpin.planar ? prior.ankleSpinRaise : prior.ankleSpin?.weight, gripTarget: targetBefore(driver.gripTarget!, 1), secondaryGripTarget: targetBefore(driver.secondaryGripTarget!, 0) };
+              const priorDriver = { ...driver, pose: prior.driverPose, phase: prior.driverPhase, overheadRaise: prior.overheadRaise, ankleThrowProgress: prior.ankleThrowProgress, ankleSpinRaise: frame.ankleSpin.planar ? prior.ankleSpinRaise : prior.ankleSpin?.weight, gripTarget: targetBefore(driver.gripTarget!, driver.ankleGripReversed ? 0 : 1), secondaryGripTarget: targetBefore(driver.secondaryGripTarget!, driver.ankleGripReversed ? 1 : 0) };
               const priorHands = sampleArenaFighterContacts(priorDriver, reduced ? 0 : clock).hands;
               releaseSpin(exit, victim, driver, frame.ankleSpin.orbit, frame.ankleOrbitVelocity ?? frame.ankleAngularVelocity ?? 0, !!frame.ankleSpin.planar, priorHands);
 
@@ -2312,6 +2323,17 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   effects.forEach(draw => draw());
   // Every name is fixed below its owner and sits behind every fighter.
   for (const actor of actors.values()) drawArenaName(ctx, actor);
+  for (const contact of sim.contacts.values()) {
+    const round = contact.round, window = round.wrestlingMove;
+    if (window?.kind !== 'scoopslam' || window.contactAt == null || elapsed < window.contactAt) continue;
+    const caster = actors.get(round.aggressor), carried = actors.get(round.victim);
+    if (!caster || !carried || caster.pose !== 'scoopslam' || caster.gripMode !== 'cradle' || (caster.gripStrength ?? 0) <= .001) continue;
+    // Small stance corrections must not exchange the entire pair's layers.
+    // The body rests above the far support, with the near forearm around it.
+    caster.paintDepth = carried.paintDepth = carried.depthY ?? carried.y;
+    caster.paintLayer = -1; carried.paintLayer = 1;
+    carried.scoopSupportActor = caster;
+  }
   arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
   overlays.forEach(draw => draw());
   const alerted = new Set<string>();

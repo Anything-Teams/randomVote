@@ -93,7 +93,7 @@ for (const [kind, seed] of fixtures) for (const mirrored of [false, true]) for (
           assert.ok(headClearance(palms[arm], rig, caster.scale) >= 1, `${elapsed}: a gripping palm cannot attach to its own head`);
           assert.ok(segmentHeadClearance(rig.shoulders[arm], rig.elbows[arm], rig, caster.scale, 2.8) >= 1, `${elapsed}: an upper arm cannot pass through the painted head`);
           assert.ok(segmentHeadClearance(rig.elbows[arm], palms[arm], rig, caster.scale, 2.5) >= 1, `${elapsed}: a forearm cannot wrap behind the painted head`);
-          const gap = distance(palms[arm], feet[arm]);
+          const gap = distance(palms[arm], feet[caster.ankleGripReversed ? 1 - arm : arm]);
           assert.ok(gap < 1, `${elapsed}: each physical palm keeps its original ankle slot throughout the loading arc (${gap.toFixed(3)}px)`);
           assert.ok(Math.abs(distance(rig.shoulders[arm], rig.elbows[arm]) - 11 * caster.scale) < .001);
           assert.ok(Math.abs(distance(rig.elbows[arm], palms[arm]) - 10.5 * caster.scale) < .001);

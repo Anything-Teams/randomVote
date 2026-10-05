@@ -59,7 +59,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) for
     const legs = actor.ankleThrowProgress !== undefined || exit?.spinFlight ? materialLegs(actor) : undefined, detail = `${kind}/${mirrored}/${delta}ms/${elapsed}`;
     if (actor.ankleThrowProgress !== undefined && !exit) {
       heldFrames++;
-      rig.hands.forEach((palm, arm) => assert.ok(distance(palm, victim.animation.contactPoints.feet[arm]) < 8, `the continuous body turn retains each genuine held toe until hand opening: ${detail}`));
+      rig.hands.forEach((palm, arm) => assert.ok(distance(palm, victim.animation.contactPoints.feet[actor.ankleGripReversed ? 1 - arm : arm]) < 8, `the continuous body turn retains each genuine held toe until hand opening: ${detail}`));
     }
     if (exit?.spinFlight) {
       const first = releaseAt === undefined;
