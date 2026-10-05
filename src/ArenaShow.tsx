@@ -599,7 +599,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             if (frame.gripTargets && victim && !sim.exits.has(exchange.victim)) {
               const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock);
               const thigh = { x: rig.waist.x + ((rig.feet[0].x + rig.feet[1].x) / 2 - rig.waist.x) * .28, y: rig.waist.y + ((rig.feet[0].y + rig.feet[1].y) / 2 - rig.waist.y) * .28 };
-              const contactTargets = frame.gripMode === 'head' ? rig.headSides : frame.gripMode === 'ankle' ? rig.feet : frame.gripMode === 'cradle' ? [rig.back, thigh] : [rig.waist, { x: rig.waist.x + frame.side * 6, y: rig.waist.y + 3 }];
+              const contactTargets = frame.gripMode === 'head' ? rig.headSides : frame.gripMode === 'ankle' ? rig.feet : frame.gripMode === 'cradle' ? [rig.back, thigh] : window.kind === 'powerbomb' ? rig.waistSides : [rig.waist, { x: rig.waist.x + frame.side * 6, y: rig.waist.y + 3 }];
               const targets = driver.ankleGripReversed ? [contactTargets[1], contactTargets[0]] : contactTargets;
               driver.gripTarget = targets[1]; driver.secondaryGripTarget = targets[0]; driver.gripStrength = frame.gripStrength; driver.gripLocked = true;
               driver.gripMode = frame.gripMode;
@@ -685,7 +685,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             const innerArm = { x: attacking.elbows[1].x + (attacking.hands[1].x - attacking.elbows[1].x) * .25, y: attacking.elbows[1].y + (attacking.hands[1].y - attacking.elbows[1].y) * .25 };
             let touched = window.kind === 'clothesline' ? frame.clotheslineStrength > .75 && segmentGap(contact.wrestlingMoveOrigins.target!, attacking.elbows[1], innerArm) < 8 && pointGap(contact.wrestlingMoveOrigins.target!, attacking.hands[1]) > 12
               : window.kind === 'dropkick' ? frame.feetStrength > .9 && attacking.feet.every((foot, leg) => pointGap(foot, frame.footTargets![leg]) < 7)
-                : window.kind === 'powerbomb' ? attacking.hands.every((hand, arm) => pointGap(hand, arm === 0 ? defending.waist : { x: defending.waist.x + frame.side * 6, y: defending.waist.y + 3 }) < 7)
+                : window.kind === 'powerbomb' ? attacking.hands.every((hand, arm) => pointGap(hand, defending.waistSides[arm]) < 7)
                   : window.kind === 'scoopslam' ? attacking.hands.every((hand, arm) => pointGap(hand, arm === 0 ? defending.back : { x: defending.waist.x + ((defending.feet[0].x + defending.feet[1].x) / 2 - defending.waist.x) * .28, y: defending.waist.y + ((defending.feet[0].y + defending.feet[1].y) / 2 - defending.waist.y) * .28 }) < 6)
                     : attacking.hands.some(hand => pointGap(hand, defending.waist) < 6);
             let strikeFrame = frame;

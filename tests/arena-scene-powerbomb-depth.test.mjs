@@ -35,8 +35,8 @@ function context() {
 
 const midpoint = points => ({ x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-const contactSide = contact => contact.round.contactSide;
-
+const paintedPoints = rig => [rig.head, ...rig.headSides, rig.back, rig.waist, ...rig.shoulders, ...rig.elbows, ...rig.hands, ...rig.feet];
+const angleDifference = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 
 for (const controlled of [false, true]) for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`powerbomb: continuous waist support wraps the near forearm above the raised body without exchanging the whole pair's layers (${controlled ? 'controlled' : 'natural'}, ${mirrored ? 'mirrored' : 'ordinary'}, ${delta}ms)`, () => {
   const order = ['2', '1'], duration = 44000, seed = 4, planned = arenaRounds(order, duration, 7, seed)[0];
@@ -48,7 +48,7 @@ for (const controlled of [false, true]) for (const mirrored of [false, true]) fo
     if (controlled) { Object.assign(sim.bodies.get(planned.aggressor), { x: 525, y: 416 }); Object.assign(sim.bodies.get(planned.victim), { x: 300, y: 416 }); }
     if (mirrored) for (const body of sim.bodies.values()) { body.x = 1000 - body.x; body.facing *= -1; body.animation = undefined; }
   });
-  let frames = 0, releaseSeen = false; const stages = new Set();
+  let frames = 0, releaseSeen = false, startingWaistAngle, maxWaistTurn = 0, previous; const stages = new Set();
   for (let elapsed = 0; elapsed < 20000; elapsed += delta) {
     ctx.paints = []; ctx.supports = [];
     render(ctx, props, elapsed, elapsed, sim, delta, false);
@@ -64,7 +64,23 @@ for (const controlled of [false, true]) for (const mirrored of [false, true]) fo
       assert.equal(ctx.supports.length, 1, `only the wrapping forearm is repainted, once: ${detail}`);
       assert.equal(ctx.supports[0].id, planned.aggressor); assert.equal(ctx.supports[0].after, planned.victim);
       assert.ok(ctx.supports[0].rects >= 8, 'the actual foreground pass paints its connected elbow, forearm and palm');
-      const rig = caster.animation.contactPoints, forearm = caster.animation.cradleForearm;
+      const rig = caster.animation.contactPoints, body = victim.animation.contactPoints, forearm = caster.animation.cradleForearm;
+      assert.equal(body.waistSides?.length, 2, `the raised and rotating opponent has two anatomical waist grips: ${detail}`);
+      assert.ok(distance(midpoint(body.waistSides), body.waist) < .01, `both material waist grips stay centered on the actual painted waist: ${detail}`);
+      const across = { x: body.waistSides[1].x - body.waistSides[0].x, y: body.waistSides[1].y - body.waistSides[0].y };
+      const trunk = { x: body.back.x - body.waist.x, y: body.back.y - body.waist.y };
+      const width = Math.hypot(across.x, across.y), trunkLength = Math.hypot(trunk.x, trunk.y);
+      assert.ok(width / victim.scale >= 8 - .01 && width / victim.scale <= 18 + victim.index % 3 + .01, `the grips span a normal visible waist instead of sharing its center or stretching the body: ${detail}/${width / victim.scale}`);
+      assert.ok(Math.abs(across.x * trunk.x + across.y * trunk.y) / (width * trunkLength) < .001, `the two palms follow the rotating torso rather than a fixed screen diagonal: ${detail}`);
+      assert.equal(Math.sign(across.x * trunk.y - across.y * trunk.x), -Math.sign(victim.facing), `the material waist sides never exchange while the opponent is lifted and turned: ${detail}`);
+      const waistAngle = Math.atan2(across.y, across.x);
+      startingWaistAngle ??= waistAngle;
+      maxWaistTurn = Math.max(maxWaistTurn, Math.abs(angleDifference(waistAngle, startingWaistAngle)));
+      const current = [paintedPoints(rig), paintedPoints(body)];
+      if (previous) current.forEach((joints, person) => joints.forEach((joint, index) => {
+        assert.ok(distance(joint, previous[person][index]) <= 8 + delta * .9, `the connected ${person ? 'received' : 'receiving'} body cannot jump joints between depth passes: ${detail}/${index}/${distance(joint, previous[person][index])}`);
+      }));
+      previous = current.map(joints => joints.map(point => ({ ...point })));
       const project = point => {
         const c = Math.cos(forearm.lean), s = Math.sin(forearm.lean), x = forearm.hip.x + c * point.x - s * point.y, y = forearm.hip.y + s * point.x + c * point.y, m = forearm.matrix;
         return { x: m[0] * x + m[2] * y + m[4], y: m[1] * x + m[3] * y + m[5] };
@@ -74,10 +90,12 @@ for (const controlled of [false, true]) for (const mirrored of [false, true]) fo
         assert.ok(Math.abs(distance(rig.shoulders[arm], rig.elbows[arm]) - caster.scale * 11) < .001);
         assert.ok(Math.abs(distance(rig.elbows[arm], rig.hands[arm]) - caster.scale * 10.5) < .001);
       }
-      if (caster.gripStrength > .995 && elapsed > window.contactAt) {
-        const body = victim.animation.contactPoints;
-        const targets = [body.waist, { x: body.waist.x + contactSide(sim.contacts.get(planned.id)) * 6, y: body.waist.y + 3 }];
-        rig.hands.forEach((hand, arm) => assert.ok(distance(hand, targets[arm]) < 8, `the two live waist palms keep their real contact while painting their correct side: ${detail}/${arm}`));
+      if (caster.gripStrength > .995 && elapsed > window.contactAt || elapsed === window.contactAt) {
+        rig.hands.forEach((hand, arm) => {
+          const own = distance(hand, body.waistSides[arm]), opposite = distance(hand, body.waistSides[1 - arm]);
+          assert.ok(own < 7, `the actual contact gate and full support keep each live palm on its anatomical waist side: ${detail}/${arm}/${own}`);
+          assert.ok(own < opposite, `the two physical arms cannot silently swap their near/far material grips: ${detail}/${arm}/${own}/${opposite}`);
+        });
       }
       if (caster.powerbombLoad > .2 && caster.powerbombLift < .01) stages.add('load'); if (caster.powerbombLift > .2) stages.add('lift'); if (caster.powerbombLift > .99 && caster.powerbombDown < .001) stages.add('apex'); if (caster.powerbombDown > .2) stages.add('down');
       frames++;
@@ -85,4 +103,5 @@ for (const controlled of [false, true]) for (const mirrored of [false, true]) fo
     if (sim.exits.has(planned.victim)) { releaseSeen = true; break; }
   }
   assert.ok(releaseSeen && frames >= (delta === 16 ? 100 : 30) && stages.size === 4, 'the continuous real incoming catch, load, lift, apex, descent and full revolution finish are exercised');
+  assert.ok(maxWaistTurn > .6, 'the actual descent rotates both waist grips with the slammed torso through a meaningful angle');
 });

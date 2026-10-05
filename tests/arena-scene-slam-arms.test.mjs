@@ -61,7 +61,7 @@ for (const [kind, seed] of [['scoopslam', 40], ['powerbomb', 4]]) for (const mir
       assert.ok([...bodyPoints(driverRig), ...bodyPoints(victimRig)].every(point => Number.isFinite(point.x) && Number.isFinite(point.y)), `complete finite bodies: ${detail}`);
       if (driver.gripStrength > .995 && elapsed > window.contactAt) {
         heldFrames++;
-        const targets = kind === 'powerbomb' ? [victimRig.waist, { x: victimRig.waist.x + frame.side * 6, y: victimRig.waist.y + 3 }]
+        const targets = kind === 'powerbomb' ? victimRig.waistSides
           : [victimRig.back, { x: victimRig.waist.x + ((victimRig.feet[0].x + victimRig.feet[1].x) / 2 - victimRig.waist.x) * .28, y: victimRig.waist.y + ((victimRig.feet[0].y + victimRig.feet[1].y) / 2 - victimRig.waist.y) * .28 }];
         driverRig.hands.forEach((hand, arm) => assert.ok(distance(hand, targets[arm]) < 8, `both actual palms retain their weight-bearing contacts: ${detail}/${arm}`));
       }

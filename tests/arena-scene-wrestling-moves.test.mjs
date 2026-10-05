@@ -232,7 +232,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         } else if (kind === 'powerbomb') {
           assert.ok(runSeen, 'the actual opponent runs into the planted powerbomb receiver before the lift');
           assert.ok(distance(frame.victim, contact.wrestlingMoveOrigins.launchVictim) > 70, 'the incoming opponent covers a visible runway before the powerbomb catch');
-          paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, arm === 0 ? paintedVictim.waist : { x: paintedVictim.waist.x + frame.side * 6, y: paintedVictim.waist.y + 3 }) < 8, `both hands receive the actual waist before the powerbomb: ${detail(elapsed, frame)}`));
+          paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, paintedVictim.waistSides[arm]) < 8, `both hands receive the actual waist before the powerbomb: ${detail(elapsed, frame)}`));
         }
         else if (kind === 'scoopslam') paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, cradleTargets(paintedVictim)[arm]) < 7, `the scoop accepts the actual back and thigh in separate hands: ${detail(elapsed, frame)}`));
         else assert.ok(paintedDriver.hands.some(hand => distance(hand, paintedVictim.waist) < 7), `receiver touches the real incoming waist (gap ${Math.min(...paintedDriver.hands.map(hand => distance(hand, paintedVictim.waist))).toFixed(2)}px): ${detail(elapsed, frame)}`);
@@ -242,7 +242,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         if (window.launchAt != null && elapsed >= frame.landingAt && frame.driverHeight === 0) attackerLanded = true;
       }
       if (kind === 'powerbomb' && contactSeen && frame.gripMode === 'waist' && frame.gripStrength > .95) {
-        const targets = [paintedVictim.waist, { x: paintedVictim.waist.x + frame.side * 6, y: paintedVictim.waist.y + 3 }];
+        const targets = paintedVictim.waistSides;
         paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, targets[arm]) < 8, `both actual waist contacts remain attached through the folded load and seated lift: ${detail(elapsed, frame)}`));
         if (frame.powerbombLift === 1 && frame.powerbombDown === 0) {
           overheadFrames++;
