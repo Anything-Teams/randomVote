@@ -522,7 +522,12 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock);
               const head = { x: (rig.headSides[0].x + rig.headSides[1].x) / 2, y: (rig.headSides[0].y + rig.headSides[1].y) / 2 };
               const shoulders = { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 };
-              driver.clotheslineTarget = { x: head.x + (shoulders.x - head.x) * .65, y: head.y + (shoulders.y - head.y) * .65 };
+              const liveNeck = { x: head.x + (shoulders.x - head.x) * .65, y: head.y + (shoulders.y - head.y) * .65 };
+              // The flying inside elbow bears down on the neckline. A small
+              // upward arc of the victim's turning head must not pull the
+              // striking arm back up through the neck after contact.
+              const caughtNeck = contact.wrestlingMoveOrigins?.target;
+              driver.clotheslineTarget = { x: liveNeck.x, y: caughtNeck ? Math.max(liveNeck.y, caughtNeck.y) : liveNeck.y };
             }
             driver.dropkickProgress = frame.dropkickProgress; driver.footTargets = frame.footTargets; driver.feetStrength = frame.feetStrength;
             driver.bulldogProgress = frame.bulldogProgress; driver.backBodyProgress = frame.backBodyProgress;
@@ -632,6 +637,9 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             const attacking = sampleArenaFighterContacts(driver, reduced ? 0 : clock);
             if (frame.canKick && Math.hypot(attacking.feet[1].x - rig.waist.x, attacking.feet[1].y - rig.waist.y) < 7) update({ kickAt: elapsed });
             if (frame.canGrabAnkle && attacking.hands.every((hand, arm) => Math.hypot(hand.x - rig.feet[arm].x, hand.y - rig.feet[arm].y) < 7)) {
+              // Begin the loaded turn from the pose which actually closed
+              // both ankle contacts, rather than the preceding reach frame.
+              if (driver.animation) driver.animation.contactPoints = structuredClone(attacking);
               contact.wrestlingMoveOrigins.ankleDriver = { x: a.x, y: a.y };
               if (spinFinish) {
                 const midpoint = { x: (rig.feet[0].x + rig.feet[1].x) / 2, y: (rig.feet[0].y + rig.feet[1].y) / 2 };

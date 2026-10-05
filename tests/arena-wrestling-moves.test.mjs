@@ -410,7 +410,7 @@ test('a flying clothesline falls in opposite orientations, rises before the ankl
     assert.ok(falling.driverSlam.slump > .8 && falling.victimSlam.slump > .8);
     const floor = arenaWrestlingMoveTargets(values.actual, falling.floorAt, center, values.initial, side);
     assert.equal(floor.victimEyesClosed, true); assert.equal(floor.slamImpact, 1);
-    assert.ok(Math.abs(distance(floor.driver, floor.victim) - 32) < .001, 'the collision leaves the fallen driver visibly ahead of the opponent');
+    assert.ok(Math.abs(distance(floor.driver, floor.victim) - 68) < .001, 'the flying collision carries the fallen driver well past the opponent');
     const standing = arenaWrestlingMoveTargets(values.actual, falling.pickupReadyAt, center, values.initial, side);
     assert.equal(standing.driverAngle, 0); assert.equal(standing.driverSlam, undefined);
     assert.equal(standing.victimPose, 'stunned'); assert.equal(standing.victimHeight, 0);

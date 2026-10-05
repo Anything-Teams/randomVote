@@ -102,10 +102,13 @@ function ankleCasterPlane(actor: ArenaActor, turn = actor.yaw ?? actor.pivotTurn
   if (actor.pivotTurn === undefined || actor.gripMode !== 'ankle' || actor.ankleThrowProgress === undefined) return undefined;
   const recover = actor.carrierRelease ? ease((actor.carrierRelease.progress - .24) / .76) : 0;
   const weight = clamp(actor.ankleThrowProgress) * (1 - recover);
+  const viewTurn = clamp((actor.ankleThrowProgress - .55) / .45) * (1 - recover);
   const projection = arenaAnkleSwingCasterProjection(turn - Math.PI / 2);
   return {
     across: { x: -projection.across.x, y: mix(Math.sin(turn) * .42, -actor.facing * projection.across.y, weight) },
-    faceDirection: mix(Math.cos(turn), projection.faceDirection, weight),
+    // Gather the ankles and rise before the chest turns away. Using the
+    // lifting weight as the view turn hid the face while still bent down.
+    faceDirection: mix(Math.cos(turn), projection.faceDirection, viewTurn),
   };
 }
 
@@ -340,7 +343,6 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const personality = index % 4, breath = Math.sin((clock + index * 719) / (580 + personality * 65));
   const speed = Math.hypot(actor.velocityX, actor.velocityY), air = !!slam || carrying || superman || dropkick || bulldog && ((actor.suspension ?? 0) > .001 || Math.abs(actor.angle) > .2) || pose === 'elbow' && (actor.suspension ?? 0) > 0 || ['airborne', 'held', 'roll', 'land', 'sidekick', 'stunned'].includes(pose) || pose === 'recover' && !slideRise;
   const state = actor.animation ?? createArenaFighterAnimation();
-  const backwardSlamAnkles = actor.spinebusterProgress !== undefined || actor.backBodyProgress !== undefined;
   const plantedGrip = actor.grappleEffort !== undefined && !!actor.gripTarget;
   const scoopStance = pose === 'scoopslam' && actor.gripMode === 'cradle';
   const moving = speed > (state.moving ? 3 : 8) && !air && !plantedGrip && !pairLift && !scoopStance && !actor.carrierRelease?.stance && actor.ankleThrowProgress === undefined && !sliding, backward = actor.velocityX * facing < -5;
@@ -856,7 +858,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const front = spin ? Math.sin(spin.orbit + .001) >= 0 : released && releaseWeight > 0 ? released.snapshot.front : (casterPlane?.faceDirection ?? Math.cos(yaw)) >= 0;
   const turningWithAnkles = feetSpin || actor.pivotTurn !== undefined && actor.gripMode === 'ankle';
   const faceDirection = feetSpin ? Math.sin(spin!.orbit) : casterPlane?.faceDirection ?? Math.cos(yaw);
-  const frontAlpha = turningWithAnkles ? ease((faceDirection + .25) / .5) : Number(front);
+  const frontAlpha = turningWithAnkles ? anklePivot && (actor.ankleThrowProgress ?? 1) < 1 ? ease((faceDirection + 1) / 2) : ease((faceDirection + .25) / .5) : Number(front);
   const hipOffsets = [-4.5, 4.5].map(offset => ({ x: offset * across.x, y: offset * across.y }));
   if (!air) {
     // A turn takes a short replacement step before a heel can pull the pelvis down.
@@ -884,11 +886,11 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
         memory.to = { ...memory.replant.to };
       }
       if (!memory.replant) return foot;
-      // The shared fall can leave a heel on the far side of the new ankle
+      // A fall can leave a heel on the far side of the new ankle
       // stance. Give that longer real step its own fixed duration; a 135 ms
       // replacement cannot move a normal sole sixty pixels smoothly.
-      const clotheslineStep = (actor.bulldogProgress ?? 0) > 0 && actor.gripMode === 'ankle';
-      const replacementTime = clotheslineStep ? Math.max(replacementBase,
+      const ankleStep = actor.gripMode === 'ankle' && ((actor.bulldogProgress ?? 0) > 0 || actor.ankleApproach !== undefined || actor.ankleThrowProgress !== undefined);
+      const replacementTime = ankleStep ? Math.max(replacementBase,
         1.5 * Math.hypot(memory.replant.to.x - memory.replant.from.x, memory.replant.to.y - memory.replant.from.y) / 450 * 1000) : replacementBase;
       const p = clamp((clock - memory.replant.at) / replacementTime);
       memory.ground = pointMix(memory.replant.from, memory.replant.to, ease(p));
@@ -1067,10 +1069,10 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     // the load below it. Bending both elbows underneath crossed one forearm
     // through the opposite upper arm as the horizontal body rose.
     if (pairLift) return knee(shoulders[arm], hand, upperArm, lowerArm, arm === 0 ? 1 : -1);
-    if (backwardSlamAnkles && state.ankleReach && actor.ankleApproach !== undefined && actor.pivotTurn === undefined && !actor.carrierRelease) {
-      // Reach down around the chest. Inheriting the slam's nearest elbow
-      // kept the forearm bent back behind the shoulder at the ankle grip.
-      return knee(shoulders[arm], hand, upperArm, lowerArm, 1);
+    if (state.ankleReach && actor.ankleApproach !== undefined && actor.pivotTurn === undefined && !actor.carrierRelease) {
+      // Reach below the chest on either side of the fallen body. The same
+      // IK sign lifts an elbow toward the head when the ankles are ahead.
+      return knee(shoulders[arm], hand, upperArm, lowerArm, actor.clotheslineInner ? -1 : 1);
     }
     if (state.scoopAnkleMotion && actor.ankleApproach !== undefined && actor.gripMode === 'ankle' && !reset && state.contactPoints) {
       const choices = [1, -1].map(bend => knee(shoulders[arm], hand, upperArm, lowerArm, bend));
@@ -1194,6 +1196,18 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     const arc = (from: number, to: number) => from + Math.atan2(Math.sin(to - from), Math.cos(to - from)) * slump;
     hands = hands.map((_, arm) => {
       const restShoulder = { x: (actor.spineDown ?? 0) > 0 ? (arm ? shoulderWidth : -shoulderWidth) * turnWidth : shoulders[arm].x, y: -20 }, restHand = { x: arm ? 12 : -11, y: -2 }, restElbow = knee(restShoulder, restHand, 11, 10.5, -1);
+      if (pose === 'recover' && (actor.spineDown ?? 0) > 0 && actor.gripMode === 'waist') {
+        // Recover from the floor with bent arms in front of the chest.
+        // Reversing the slam blend restored the old overhead support and
+        // stretched both palms behind the shoulders before the ankle reach.
+        const rise = ease(phase), from = { x: restHand.x - restShoulder.x, y: restHand.y - restShoulder.y };
+        const guard = { x: (arm ? 13 : 3) - shoulders[arm].x, y: (arm ? -13 : -10) - shoulders[arm].y };
+        const start = Math.atan2(from.y, from.x), angle = start + Math.atan2(Math.sin(Math.atan2(guard.y, guard.x) - start), Math.cos(Math.atan2(guard.y, guard.x) - start)) * rise;
+        const radius = mix(Math.hypot(from.x, from.y), Math.hypot(guard.x, guard.y), rise);
+        const palm = { x: shoulders[arm].x + Math.cos(angle) * radius, y: shoulders[arm].y + Math.sin(angle) * radius };
+        elbows[arm] = knee(shoulders[arm], palm, upperArm, lowerArm, -1);
+        return palm;
+      }
       const upperAngle = arc(Math.atan2(source.elbows[arm].y - source.shoulders[arm].y, source.elbows[arm].x - source.shoulders[arm].x), Math.atan2(restElbow.y - restShoulder.y, restElbow.x - restShoulder.x));
       const lowerAngle = arc(Math.atan2(source.hands[arm].y - source.elbows[arm].y, source.hands[arm].x - source.elbows[arm].x), Math.atan2(restHand.y - restElbow.y, restHand.x - restElbow.x));
       elbows[arm] = { x: shoulders[arm].x + Math.cos(upperAngle) * upperArm, y: shoulders[arm].y + Math.sin(upperAngle) * upperArm };
@@ -1436,10 +1450,10 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     hands = hands.map((hand, arm) => {
       const targetShoulder = worldPoint(bodyPoint(shoulders[arm])), targetElbow = worldPoint(bodyPoint(elbows[arm])), targetHand = worldPoint(bodyPoint(hand));
       const startUpper = Math.atan2(source.elbows[arm].y - source.shoulders[arm].y, source.elbows[arm].x - source.shoulders[arm].x), startLower = Math.atan2(source.hands[arm].y - source.elbows[arm].y, source.hands[arm].x - source.elbows[arm].x);
-      if (state.pairReach || backwardSlamAnkles && state.ankleReach && actor.ankleApproach !== undefined && actor.pivotTurn === undefined && !actor.carrierRelease) {
+      if (state.pairReach || state.ankleReach && actor.ankleApproach !== undefined && actor.pivotTurn === undefined && !actor.carrierRelease) {
         // Reach with one connected palm path. Separate upper/forearm angle
         // blends could fold the forearm back through the upper arm while
-        // picking up either a body or its ankles after a backward slam.
+        // picking up either a body or its ankles after a slam.
         const from = { x: source.hands[arm].x - source.shoulders[arm].x, y: source.hands[arm].y - source.shoulders[arm].y };
         let to = { x: targetHand.x - targetShoulder.x, y: targetHand.y - targetShoulder.y };
         const fromElbow = { x: source.elbows[arm].x - source.shoulders[arm].x, y: source.elbows[arm].y - source.shoulders[arm].y };
@@ -1454,7 +1468,9 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
           if (ankle) {
             const palm = reachable(targetShoulder, ankle, armReach * scale, (Math.abs(upperArm - lowerArm) + .02) * scale);
             to = { x: palm.x - targetShoulder.x, y: palm.y - targetShoulder.y };
-            toBend = facing;
+            // The floorward elbow stays below the neckline whether the
+            // ankle lies ahead of the chest or behind its turned shoulder.
+            toBend = actor.clotheslineInner ? -facing : facing;
           }
           // Keep the same route around the shoulder as the moving ankle
           // crosses the half-turn boundary; choosing a fresh shortest arc
@@ -1588,7 +1604,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     hands[arm] = { x: elbows[arm].x + Math.cos(lowerAngle) * lowerArm, y: elbows[arm].y + Math.sin(lowerAngle) * lowerArm };
     state.clotheslineAngles = { free, strike };
   } else state.clotheslineAngles = undefined;
-  if (actor.clotheslineInner && !reset && state.contactPoints) {
+  if (actor.clotheslineInner && actor.gripMode !== 'ankle' && !reset && state.contactPoints) {
     // Opening behind the shoulder passes close to the arm's inner radius.
     // Rotate both complete bones from the painted arm instead of allowing
     // the free-hand IK to switch its elbow across the torso in one frame.
