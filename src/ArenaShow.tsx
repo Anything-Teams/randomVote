@@ -570,7 +570,11 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               const targets = frame.gripMode === 'head' ? rig.headSides : frame.gripMode === 'ankle' ? rig.feet : frame.gripMode === 'cradle' ? [rig.back, thigh] : [rig.waist, { x: rig.waist.x + frame.side * 6, y: rig.waist.y + 3 }];
               driver.gripTarget = targets[1]; driver.secondaryGripTarget = targets[0]; driver.gripStrength = frame.gripStrength; driver.gripLocked = true;
               driver.gripMode = frame.gripMode;
-              if (frame.gripMode === 'ankle' && window.ankleGripAt != null || (frame.gripMode === 'head' || frame.gripMode === 'cradle') && window.contactAt != null && frame.gripStrength > 0) {
+              // A fixed root gap is not a grip: the live chest and thigh can
+              // sit beyond normal arm reach after a diagonal run. Step the
+              // receiver into both reach disks before recording contact.
+              const receiving = window.contactAt === null && frame.canContact && (frame.gripMode === 'cradle' || frame.gripMode === 'waist');
+              if (receiving || frame.gripMode === 'ankle' && window.ankleGripAt != null || (frame.gripMode === 'head' || frame.gripMode === 'cradle') && window.contactAt != null && frame.gripStrength > 0) {
                 const prior = before.get(exchange.aggressor) ?? a;
                 let goal = { x: a.x, y: a.y };
                 for (let attempt = 0; attempt < 3; attempt++) {
@@ -589,6 +593,17 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             prepareContactActor(driver);
           };
           apply();
+          if (window.contactAt === null && victim && !sim.exits.has(exchange.victim) && (window.kind === 'clothesline' || window.kind === 'dropkick')) {
+            // The preceding bout can leave a lean in the live rig. Aim at the
+            // current neck/chest after this frame's pose settles, rather than
+            // at the point captured before the victim changed into its guard.
+            const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock);
+            const target = window.kind === 'clothesline' ? { x: rig.head.x, y: rig.head.y + victim.scale * 20 }
+              : { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 + victim.scale * 5 };
+            contact.wrestlingMoveOrigins.target = target;
+            contact.wrestlingMoveOrigins.contactTargets = [{ x: target.x, y: target.y - 6 }, { x: target.x, y: target.y + 6 }];
+            update({}); apply();
+          }
           const ankleApproach = (spinFinish || dragFinish) && frame.gripMode === 'ankle' && window.ankleGripAt === null;
           if ((frame.frontKick !== undefined || frame.canGrabAnkle || ankleApproach) && victim && !sim.exits.has(exchange.victim)) {
             const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock);
@@ -651,7 +666,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               }
               if (window.kind === 'backbodydrop') {
                 contact.wrestlingMoveOrigins.backBodyWaist = { ...defending.waist };
-                const floor = { x: contact.wrestlingMoveOrigins.driver.x - frame.side * 70, y: v.y };
+                const floor = { x: a.x - frame.side * 70, y: v.y };
                 const flat = sampleArenaFighterContacts({ ...victim, ...floor, pose: 'stunned', angle: -frame.side * Math.PI * .53, suspension: 0, slamProgress: { tuck: 0, slump: 1 }, jumpTuck: 0, animation: undefined, motionImmediate: true }, reduced ? 0 : clock);
                 contact.wrestlingMoveOrigins.backBodyFloorWaist = flat.waist;
               }
@@ -1537,7 +1552,12 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           else if (elbowPickup) {
             // The existing motor supplies normal acceleration from the actual
             // landing root. Moving this goal slowly would delay the first step.
-            target = arenaInsidePoint(elbowPickup.holder, 8);
+            // At a tapered rim, clipping the guessed holder point alone can
+            // leave one ankle out of reach. Project the real two-foot pickup
+            // onto a reachable planted stance before approaching it.
+            const feet = elbowPickup.feet.map(foot => ({ x: contact.elbowFall!.x + foot.x, y: contact.elbowFall!.y + foot.y }));
+            const holder = { ...actor, ...elbowPickup.holder, pose: 'drag' as const, facing: -technique.side, gripMode: 'ankle' as const, gripTarget: feet[0], secondaryGripTarget: feet[1], gripStrength: 1, gripLocked: true, animation: undefined, motionImmediate: true };
+            target = arenaInsidePoint(arenaCarryHolderPoint(holder, feet, reduced ? 0 : clock, arenaInsidePoint(elbowPickup.holder, 8)), 8);
           }
         }
         if (action.stage === 'approach' && !rush && !ram) target = arenaGuardTarget(target, actor.index, elapsed);
@@ -2119,7 +2139,11 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         exit.dragOffset = pickup.offset;
         const atRim = age >= floorTiming.dragUntil;
         const rimFrame = atRim ? arenaTechniqueExit(exit.round, floorTiming.dragUntil, exit.origin, exit.landing, exit.side, unit, { lift: exit.lift, angle: exit.angle }) : undefined;
-        const target = arenaInsidePoint(atRim ? exit.driverStop ?? { x: rimFrame!.groundX + pickup.offset.x, y: rimFrame!.groundY + pickup.offset.y } : { x: flight.groundX + pickup.offset.x, y: flight.groundY + pickup.offset.y });
+        const preferred = arenaInsidePoint(atRim ? exit.driverStop ?? { x: rimFrame!.groundX + pickup.offset.x, y: rimFrame!.groundY + pickup.offset.y } : { x: flight.groundX + pickup.offset.x, y: flight.groundY + pickup.offset.y }, 8);
+        const holder = { ...driver, ...preferred, pose: 'drag' as const, facing: -exit.side, yaw: 0, gripMode: 'ankle' as const, gripTarget: contacts.feet[1], secondaryGripTarget: contacts.feet[0], gripStrength: 1, gripLocked: true, animation: undefined, motionImmediate: true };
+        // Keep the reachable pickup through the handoff to the shared drag.
+        // Re-clipping only its root would separate the palms from the ankles.
+        const target = arenaInsidePoint(arenaCarryHolderPoint(holder, [contacts.feet[1], contacts.feet[0]], reduced ? 0 : clock, preferred), 8);
         if (!exit.floorThrow) {
           if (reset || reduced || flight.stage === 'drag') { driverBody.x = target.x; driverBody.y = target.y; driverBody.motorX = 0; driverBody.motorY = 0; }
           else move(driverBody, target, seconds, 165);

@@ -327,7 +327,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const fall = ease(age / timing.clotheslineFall), rise = ease((age - timing.clotheslineFall) / ARENA_CLOTHESLINE_FINISH_TIMING.rise);
     frame.driver = { x: base.x + side * 24 * fall, y: base.y };
     frame.driverVelocity = contacted ? zero() : entry.velocity;
-    frame.driverPose = contacted ? age < timing.clotheslineFall ? 'bulldog' : rise < 1 ? 'recover' : 'guard' : launched ? 'run' : 'guard';
+    frame.driverPose = contacted && fall > 0 ? age < timing.clotheslineFall ? 'bulldog' : rise < 1 ? 'recover' : 'guard' : launched ? 'run' : 'guard';
     frame.driverPhase = contacted ? age < timing.clotheslineFall ? fall : rise : clamp((elapsed - launch) / Math.max(1, run.duration));
     frame.clotheslineTarget = { ...target }; frame.clotheslineInner = true;
     frame.clotheslineStrength = launched ? contacted ? 1 - ease(age / 100) : ease((frame.driverPhase - .55) / .3) : 0;
@@ -340,7 +340,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
       frame.victimPhase = fall; frame.bulldogProgress = fall;
       frame.victimSlam = fall > 0 ? { tuck: .2 * Math.sin(fall * Math.PI), slump: fall } : undefined;
       frame.driverAngle = side * Math.PI * .47 * fall * (1 - rise);
-      frame.driverSlam = rise < 1 ? { tuck: .2 * Math.sin(fall * Math.PI) * (1 - rise), slump: fall * (1 - rise) } : undefined;
+      frame.driverSlam = fall > 0 && rise < 1 ? { tuck: .2 * Math.sin(fall * Math.PI) * (1 - rise), slump: fall * (1 - rise) } : undefined;
       frame.stage = fall < 1 ? 'fall' : rise < 1 ? 'recover' : 'groggy';
     }
     return finishDraggedAnkles();
@@ -524,7 +524,10 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   const preparationAge = contacted ? Math.min(elapsed, contactAt!) : elapsed;
   const counterPreparation = launched ? ease((preparationAge - counterReadyAt) / Math.max(1, plannedContactAt - counterReadyAt)) : 0;
   const victimOrigin = initial.contactVictim ?? goal;
-  frame.victim = contacted ? blend(victimOrigin, behind, over) : runner.point;
+  const driverOrigin = initial.contactDriver ?? initial.driver;
+  const caughtBehind = { x: driverOrigin.x - side * 70, y: driverOrigin.y };
+  frame.driver = { ...driverOrigin };
+  frame.victim = contacted ? blend(victimOrigin, caughtBehind, over) : runner.point;
   frame.victimVelocity = contacted ? zero() : runner.velocity;
   frame.counterPreparation = counterPreparation;
   frame.driverPose = counterPreparation > 0 || contacted ? 'backbodydrop' : 'guard'; frame.victimPose = contacted && flip > 0 ? 'airborne' : launched ? 'run' : 'guard';
@@ -540,10 +543,10 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   frame.gripStrength = launched ? ease(counterPreparation / .60) * (1 - ease((flip - .50) / .14)) : 0; frame.gripMode = 'waist';
   if (contacted) {
     const start = initial.backBodyWaist ?? { x: victimOrigin.x + target.x - initial.victim.x, y: victimOrigin.y + target.y - initial.victim.y };
-    const above = { x: initial.driver.x, y: initial.driver.y - 146 };
-    const floor = initial.backBodyFloorWaist ?? { x: behind.x - side * 25, y: behind.y - 19 };
-    const lifting = curve(start, { x: initial.driver.x + side * 10, y: initial.driver.y - 100 }, above, raise);
-    const falling = curve(above, { x: initial.driver.x - side * 38, y: initial.driver.y - 130 }, floor, descend);
+    const above = { x: driverOrigin.x, y: driverOrigin.y - 146 };
+    const floor = initial.backBodyFloorWaist ?? { x: caughtBehind.x - side * 25, y: caughtBehind.y - 19 };
+    const lifting = curve(start, { x: driverOrigin.x + side * 10, y: driverOrigin.y - 100 }, above, raise);
+    const falling = curve(above, { x: driverOrigin.x - side * 38, y: driverOrigin.y - 130 }, floor, descend);
     frame.backBodySupport = { x: lifting.x + falling.x - above.x, y: lifting.y + falling.y - above.y };
   }
   frame.canContact = launched && !contacted && counterPreparation >= .60 && elapsed >= plannedContactAt - 120;
