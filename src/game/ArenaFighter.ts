@@ -1532,7 +1532,12 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     rect(hand.x - 2.5, hand.y - 1.7, 5, 4, palette.base); rect(hand.x - 1.1, hand.y - 1.1, 2.2, .8, palette.light); rect(hand.x + 1.1, hand.y + 1, 1.1, .9, palette.shade);
   };
   const farArm = casterPlane ? worldPoint(bodyPoint(shoulders[0])).y <= worldPoint(bodyPoint(shoulders[1])).y : true;
+  const ankleGripTurn = actor.pivotTurn !== undefined && actor.gripMode === 'ankle';
   arm(farArm);
+  // Both gripping arms reach in front of the chest. From behind, the back
+  // hides them; the nearest shoulder does not make its entire arm visible.
+  // Keep the exposed silhouette opaque while the chest overlay fades in.
+  if (ankleGripTurn) arm(!farArm);
   ctx.save(); ctx.scale(turnWidth, 1);
   rect(-bodyWidth / 2, -23, bodyWidth, 23, palette.base);
   rect(-bodyWidth / 2 + 2, -21, 5, 2, palette.light); rect(-bodyWidth / 2 + 3, -15, 3, 2, palette.light);
@@ -1581,7 +1586,11 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   if (slam) leg(false, true);
   ctx.save(); ctx.translate(hip.x, hip.y); ctx.rotate(lean);
   if (motion.applause > .01) { ctx.save(); ctx.globalAlpha = actor.alpha * motion.applause; arm(true, true); ctx.restore(); }
-  arm(!farArm); ctx.restore(); ctx.restore();
+  if (!ankleGripTurn || frontAlpha > 0) {
+    ctx.save(); if (ankleGripTurn) ctx.globalAlpha *= frontAlpha;
+    arm(!farArm); ctx.restore();
+  }
+  ctx.restore(); ctx.restore();
   state.clock = clock; state.signature = signature; state.epoch = actor.motionEpoch; state.facing = facing; state.distance = actor.gaitDistance; state.moving = moving; state.airborne = air; state.pose = pose; state.carrierReleasing = !!actor.carrierRelease;
 }
 

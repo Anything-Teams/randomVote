@@ -24,16 +24,25 @@ const { render, createArenaCamera, arenaRounds, capture, setInitialize } = modul
 const noop = () => {};
 function context() {
   let currentId;
-  const stack = [], eyeAlphas = new Map();
+  const stack = [], eyeAlphas = new Map(), paintRecords = new Map(), actorOrder = [];
   const target = {
-    globalAlpha: 1, fillStyle: '#000', eyeAlphas,
+    globalAlpha: 1, fillStyle: '#000', eyeAlphas, paintRecords, actorOrder,
     measureText: value => ({ width: String(value).length * 8 }),
     createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }),
     save() { stack.push({ alpha: target.globalAlpha, color: target.fillStyle }); },
     restore() { const saved = stack.pop(); if (saved) { target.globalAlpha = saved.alpha; target.fillStyle = saved.color; } },
-    fighterStart(actor) { currentId = actor.candidate.id; eyeAlphas.set(currentId, []); },
+    fighterStart(actor) {
+      currentId = actor.candidate.id; eyeAlphas.set(currentId, []);
+      paintRecords.set(currentId, { sequence: 0, palms: [], torsos: [] }); actorOrder.push(currentId);
+    },
     fighterEnd() { currentId = undefined; },
-    fillRect(_x, _y, width) { if (currentId && target.fillStyle === '#172b37' && Math.abs(width - 1.8) < 1e-6) eyeAlphas.get(currentId).push(target.globalAlpha); },
+    fillRect(_x, _y, width, height) {
+      if (!currentId || target.globalAlpha <= 0) return;
+      const record = paintRecords.get(currentId), sequence = record.sequence++;
+      if (width === 5 && height === 4) record.palms.push({ sequence, alpha: target.globalAlpha });
+      if (width >= 18 && width <= 20 && height === 23) record.torsos.push(sequence);
+      if (target.fillStyle === '#172b37' && Math.abs(width - 1.8) < 1e-6) eyeAlphas.get(currentId).push(target.globalAlpha);
+    },
   };
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
@@ -69,8 +78,10 @@ for (const [kind, seed] of fixtures) for (const mirrored of [false, true]) for (
       for (const body of sim.bodies.values()) { body.x = 1000 - body.x; body.facing *= -1; body.vx = 0; body.vy = 0; body.motorX = 0; body.motorY = 0; body.animation = undefined; }
     });
     let held = 0, loading = 0, released = false, completed = false, minDepth = Infinity, maxDepth = -Infinity, previous;
+    let frontPaints = 0, backPaints = 0, profilePaints = 0;
     for (let elapsed = 0; elapsed < 25000; elapsed += delta) {
-      ctx.eyeAlphas.clear(); render(ctx, props, elapsed, elapsed, sim, delta, false);
+      ctx.eyeAlphas.clear(); ctx.paintRecords.clear(); ctx.actorOrder.length = 0;
+      render(ctx, props, elapsed, elapsed, sim, delta, false);
       const { actors, ranks } = capture(), caster = actors.get(planned.aggressor), victim = actors.get(planned.victim), exit = sim.exits.get(planned.victim);
       if (ranks[planned.victim]) { assert.deepEqual(ranks, { '1': 2, '2': 1 }); completed = true; break; }
       const rig = caster.animation.contactPoints, suspension = victim.spinSuspension;
@@ -104,6 +115,33 @@ for (const [kind, seed] of fixtures) for (const mirrored of [false, true]) for (
           assert.equal(alphas.length, 2, 'the loaded turn draws both eyes when the body faces the camera');
           assert.ok(alphas.every(alpha => Math.abs(alpha / caster.alpha - expectedAlpha) < .001), 'the actual face alpha follows the direction toward the held body');
         } else assert.equal(alphas.length, 0, 'the caster shows its back when its held body points away from the camera');
+        const faceAlpha = alphas.length ? alphas[0] / caster.alpha : 0;
+        const paint = ctx.paintRecords.get(planned.aggressor);
+        assert.equal(paint.torsos.length, 1, 'the actual body rectangle separates rear and foreground arm painting');
+        const before = paint.palms.filter(palm => palm.sequence < paint.torsos[0]);
+        const after = paint.palms.filter(palm => palm.sequence > paint.torsos[0]);
+        assert.equal(before.length, 2, `${elapsed}: both outside hand silhouettes remain opaque behind the body`);
+        assert.ok(before.every(palm => Math.abs(palm.alpha - caster.alpha) < .001));
+        if (faceAlpha === 0) {
+          backPaints++;
+          assert.equal(after.length, 0, `${elapsed}: a hand reaching away cannot be painted on top of the caster's back`);
+        } else {
+          if (faceAlpha === 1) frontPaints++; else profilePaints++;
+          assert.equal(after.length, 1, 'only the nearer arm overlays the visible chest');
+          assert.ok(Math.abs(after[0].alpha / caster.alpha - faceAlpha) < .001, 'the profile arm overlay fades with the actual painted face');
+        }
+        // Compare physical projected body direction and actual actor order;
+        // this does not reuse the Scene's sin(orbit) depth expectation.
+        const victimRig = victim.animation.contactPoints;
+        const bodyDepth = midpoint(victimRig.headSides).y - midpoint(victimRig.feet).y;
+        const groundDepth = victim.depthY - caster.depthY;
+        if (Math.abs(bodyDepth) > 3 && Math.abs(groundDepth) > 3) {
+          assert.ok(bodyDepth * groundDepth > 0, "the held body's projected depth agrees with its ground plane");
+          const drawnAfter = ctx.actorOrder.indexOf(planned.victim) > ctx.actorOrder.indexOf(planned.aggressor);
+          assert.equal(drawnAfter, bodyDepth > 0, 'the held body is painted on the same depth side as its actual projection');
+        }
+        if (bodyDepth > 20) assert.equal(faceAlpha, 1, 'the caster faces a body held toward the camera');
+        if (bodyDepth < -20) assert.equal(faceAlpha, 0, 'the caster shows its back toward a body held away from the camera');
       }
       if (caster.carrierRelease) released = true;
       if (previous && (suspension?.planar || caster.carrierRelease)) {
@@ -113,6 +151,7 @@ for (const [kind, seed] of fixtures) for (const mirrored of [false, true]) for (
       previous = [...rig.shoulders, ...rig.elbows, ...rig.hands].map(point => ({ ...point }));
     }
     assert.ok(loading >= 5 && held >= 8 && minDepth < -5 && maxDepth > 5, 'the real loading arc precedes both front and rear depth halves');
+    assert.ok(frontPaints > 2 && backPaints > 2 && profilePaints > 0, 'the real circle exercises front, back and a partially faded profile layer');
     assert.ok(released && completed, 'the physical turn, release and unchanged drawn result complete');
   });
 }
