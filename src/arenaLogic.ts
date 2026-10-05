@@ -17,7 +17,7 @@ export { arenaTechniqueTargets, arenaTechniqueExit, isArenaFinalTechnique } from
 
 export type ArenaTactic = 'team' | 'bait' | 'catch' | 'ram' | 'spin' | 'shove' | 'double-shove' | 'edge' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final' | 'armspin' | 'trip' | 'suplex' | 'sidekick' | 'elbow';
 export type ArenaChargeSetup = { charger: ArenaPoint; receiver: ArenaPoint; side: 1 | -1; contactAt?: number | null; contactCharger?: ArenaPoint; contactReceiver?: ArenaPoint; loadDuration?: number; turnDuration?: number };
-export type ArenaRound = { floorFinish?: { dragUntil: number; throwAt?: number | null; releaseAt?: number | null }; suplexGripAt?: number | null; elbowGripAt?: number | null; id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; secondaryVictim?: string; counterSide?: 'front' | 'back'; counterFailed?: boolean; contactSide?: 1 | -1; chargeSetup?: ArenaChargeSetup; rushOutcome?: ArenaPairRushOutcome; rushContactAt?: number; rushPushDuration?: number; pairPickupAt?: number | null; rushLaunchAt?: number | null; sidekickLaunchAt?: number; pushContactAt?: number | null; timeScale?: number; prepares?: string; escape?: ArenaEscapeWindow; recovery?: ArenaRecoveryWindow; rim?: ArenaRimWindow; rimCharge?: ArenaRimChargeWindow; rimPushRoll?: number; rimPush?: boolean; wrestlingMove?: ArenaWrestlingMoveWindow; kickCatch?: ArenaKickCatchWindow; tripCounter?: boolean; supermanPunch?: ArenaSupermanPunchWindow; slideTrip?: ArenaSlideTripWindow; linkedRush?: ArenaLinkedRushWindow; pairDodge?: ArenaPairDodgeWindow & { partnerId: string; allowOut: boolean }; passingTrip?: ArenaPassingTripWindow & { joined?: boolean }; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
+export type ArenaRound = { floorFinish?: { dragUntil: number; throwAt?: number | null; releaseAt?: number | null }; suplexGripAt?: number | null; elbowGripAt?: number | null; id: string; index: number; tactic: ArenaTactic; aggressor: string; helper?: string; victim: string; secondaryVictim?: string; counterSide?: 'front' | 'back'; counterFailed?: boolean; contactSide?: 1 | -1; chargeSetup?: ArenaChargeSetup; spinPreparationFraction?: number; rushOutcome?: ArenaPairRushOutcome; rushContactAt?: number; rushPushDuration?: number; pairPickupAt?: number | null; rushLaunchAt?: number | null; sidekickLaunchAt?: number; pushContactAt?: number | null; timeScale?: number; prepares?: string; escape?: ArenaEscapeWindow; recovery?: ArenaRecoveryWindow; rim?: ArenaRimWindow; rimCharge?: ArenaRimChargeWindow; rimPushRoll?: number; rimPush?: boolean; wrestlingMove?: ArenaWrestlingMoveWindow; kickCatch?: ArenaKickCatchWindow; tripCounter?: boolean; supermanPunch?: ArenaSupermanPunchWindow; slideTrip?: ArenaSlideTripWindow; linkedRush?: ArenaLinkedRushWindow; pairDodge?: ArenaPairDodgeWindow & { partnerId: string; allowOut: boolean }; passingTrip?: ArenaPassingTripWindow & { joined?: boolean }; start: number; impact: number; resolve: number; end: number; final: boolean; exchange?: boolean };
 export type ArenaPoint = { x: number; y: number };
 export type ArenaMovingBody = ArenaPoint & { facing: number; motorX?: number; motorY?: number };
 export type ArenaPodiumPlace = ArenaPoint & { id: string; rank: 1 | 2 | 3; readyAt: number };
@@ -38,6 +38,18 @@ export type ArenaChargeFallFrame = Omit<ArenaThrowFrame, 'stage'> & { stage: 'ov
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
 const ease = (n: number) => { const t = clamp(n); return t * t * (3 - 2 * t); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
+const ARENA_SPIN_PREPARATION = .52;
+const ARENA_SPIN_TURN_DURATION_SCALE = .80;
+
+/** Preserve the first grip/lift beats while speeding up the shared rotation clock. */
+function arenaSpinClock(round: ArenaRound, elapsed: number) {
+  const span = Math.max(1, round.impact - round.start);
+  const preparation = span * (round.spinPreparationFraction ?? ARENA_SPIN_PREPARATION);
+  const turnDuration = Math.max(1, span - preparation), age = Math.max(0, elapsed - round.start);
+  const progress = age < preparation ? age / Math.max(1, preparation) * ARENA_SPIN_PREPARATION
+    : ARENA_SPIN_PREPARATION + (age - preparation) / turnDuration * (1 - ARENA_SPIN_PREPARATION);
+  return { progress: clamp(progress), turnDuration };
+}
 export const arenaSoloFinalTactics: readonly ArenaTactic[] = ['bait', 'catch', 'ram', 'spin', 'edge', 'counter', 'brace', 'lift', 'final', 'armspin', 'trip', 'suplex', 'sidekick'];
 const eliminationTactics: ArenaTactic[] = ['bait', 'catch', 'edge', 'shove', 'counter', 'brace', 'lift', 'armspin', 'trip', 'suplex', 'sidekick'];
 
@@ -66,7 +78,7 @@ export function arenaFaceOpponent(body: ArenaMovingBody, opponent: ArenaPoint): 
 
 /** Shared by the actors and commentary, so a label describes the visible action. */
 export function arenaBeat(round: ArenaRound, elapsed: number): ArenaBeat {
-  const progress = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
+  const progress = round.tactic === 'spin' ? arenaSpinClock(round, elapsed).progress : clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
   const stage: ArenaBeatStage = elapsed >= round.impact ? round.exchange || elapsed >= round.resolve ? 'result' : 'impact' : progress < .30 ? 'approach' : progress < .52 ? 'hold' : 'turn';
   return { stage, progress, weightProgress: ease((progress - .52) / .20), liftProgress: ease((progress - .72) / .28) };
 }
@@ -157,7 +169,7 @@ export function arenaRamTargets(round: ArenaRound, elapsed: number, center: Aren
 
 /** The first lift fails before its defender plants, changes the grip and turns once around the vertical axis. */
 export function arenaSpinTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
-  const p = clamp((elapsed - round.start) / Math.max(1, round.impact - round.start));
+  const { progress: p, turnDuration } = arenaSpinClock(round, elapsed);
   const side = round.contactSide ?? (center.x >= 500 ? 1 : -1);
   const lift = ease((p - .26) / .12) * (1 - ease((p - .38) / .06));
   const turnProgress = clamp((p - .52) / .48), ramp = .12;
@@ -166,7 +178,7 @@ export function arenaSpinTargets(round: ArenaRound, elapsed: number, center: Are
   const turn = (turnProgress < ramp ? turnProgress ** 2 / (2 * ramp) : turnProgress - ramp / 2) / (1 - ramp / 2);
   const angle = turn * Math.PI * 2;
   const reversal = ease((p - .38) / .14);
-  const turningRadius = Math.min(38, (round.impact - round.start) / 1000 * .48 * (1 - ramp / 2) * 150 / (Math.PI * 2));
+  const turningRadius = Math.min(38, turnDuration / 1000 * (1 - ramp / 2) * 150 / (Math.PI * 2));
   const radius = mix(48, turningRadius, reversal);
   const defender = { x: center.x - side * 22, y: center.y };
   const attacker = { x: defender.x + side * radius * Math.cos(angle), y: defender.y + radius * Math.sin(angle) * .42 };
@@ -847,9 +859,13 @@ export function arenaRounds(order: string[], duration = 44_000, rushRoll = 7, es
     const special = isArenaFinalTechnique({ ...round, start: 0, impact: 0, resolve: 0, end: 0 });
     const total = round.final ? round.rushOutcome === 'double-out' ? 11_400 : 10_800 : round.rushOutcome === 'counter-throw' ? 8100 : round.rushOutcome === 'double-out' ? 10100 : round.tactic === 'suplex' || round.tactic === 'elbow' ? 8200 : special ? 5800 : 4200 + salt % 5 * 200;
     const impactSpan = chargeOutcome === 'dodge' ? ARENA_RIM_CHARGE_DURATION : round.rushOutcome === 'counter-throw' ? 7000 : round.rushOutcome === 'double-out' ? 9000 : round.tactic === 'suplex' || round.tactic === 'elbow' ? 4100 : round.tactic === 'sidekick' ? 2300 : round.final ? 5000 : total - 1100;
-    const impact = wrestlingMove?.end ?? kickCatch?.end ?? supermanPunch?.end ?? linkedRush?.end ?? slideTrip?.end ?? passingTrip?.end ?? start + impactSpan, resolve = impact + (round.tactic === 'suplex' || round.tactic === 'elbow' ? 4100 : 1100);
+    // Release immediately after the quicker revolution, keeping the initial
+    // grip/lift duration and the normal airborne/landing duration intact.
+    const spinSaved = round.tactic === 'spin' ? impactSpan * (1 - ARENA_SPIN_PREPARATION) * (1 - ARENA_SPIN_TURN_DURATION_SCALE) : 0;
+    const spinPreparationFraction = round.tactic === 'spin' ? impactSpan * ARENA_SPIN_PREPARATION / (impactSpan - spinSaved) : undefined;
+    const impact = wrestlingMove?.end ?? kickCatch?.end ?? supermanPunch?.end ?? linkedRush?.end ?? slideTrip?.end ?? passingTrip?.end ?? start + impactSpan - spinSaved, resolve = impact + (round.tactic === 'suplex' || round.tactic === 'elbow' ? 4100 : 1100);
     const rim: ArenaRimWindow | undefined = rimOutcome ? { start: entry, end: rimOutcome === 'resist' ? start : impact, outcome: rimOutcome } : undefined;
-    rounds.push({ ...round, rimPushRoll: arenaEscapeRoll(escapeSeed ?? seed, round.index + 1301) % 1000, wrestlingMove, kickCatch, supermanPunch, linkedRush, slideTrip, pairDodge, passingTrip, escape, recovery, rim, rimCharge, start, impact, resolve, end: round.final ? start + total : resolve });
+    rounds.push({ ...round, spinPreparationFraction, rimPushRoll: arenaEscapeRoll(escapeSeed ?? seed, round.index + 1301) % 1000, wrestlingMove, kickCatch, supermanPunch, linkedRush, slideTrip, pairDodge, passingTrip, escape, recovery, rim, rimCharge, start, impact, resolve, end: round.final ? start + total - spinSaved : resolve });
   };
   for (let index = 0; index < preliminaries; index++) {
     const living = order.slice(0, order.length - index);

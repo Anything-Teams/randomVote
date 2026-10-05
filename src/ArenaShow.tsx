@@ -2074,7 +2074,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         const continuation = exchange.prepares ? sim.contacts.get(exchange.prepares) : undefined;
         if (continuation) continuation.metAt ??= elapsed;
       }
-      const contactPhase = technique ? .08 : .30;
+      const contactPhase = technique ? .08 : spin ? .30 * (exchange.spinPreparationFraction ?? .52) / .52 : .30;
       if (!ordinaryRecoveryPrelude && !contact.committed && contact.metAt !== undefined && !rush && !exchange.prepares && !charge && !caught && !ram && elapsed >= exchange.start) {
         contact.committed = true;
         if (elapsed < exchange.start + (exchange.impact - exchange.start) * contactPhase) contact.round = { ...contact.round, start: (elapsed - contactPhase * exchange.impact) / (1 - contactPhase) };

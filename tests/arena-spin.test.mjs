@@ -47,9 +47,42 @@ test('a defender is briefly lifted, plants fully, changes the grip and then coun
   assert.match(arenaStoryState(round, round.start + 3800).action, /한 바퀴|함께 회전/);
 });
 
+test('scheduled waist counters shorten only the revolution by twenty percent and release at its end', () => {
+  let finals = 0, preliminaries = 0;
+  for (const duration of [44000, 62000]) for (const count of [2, 6]) for (let seed = 0; seed < 80; seed++) {
+    const order = Array.from({ length: count }, (_, index) => `quicker-waist-${seed}-${index}`);
+    for (const bout of arenaRounds(order, duration, 7, seed).filter(bout => bout.tactic === 'spin')) {
+      bout.final ? finals++ : preliminaries++;
+      const span = bout.impact - bout.start, preparation = span * bout.spinPreparationFraction;
+      const oldSpan = preparation / .52, oldTurnDuration = oldSpan * .48, turnDuration = span - preparation;
+      assert.ok(oldSpan / bout.timeScale >= 3100 - 1e-7 && oldSpan / bout.timeScale <= 5000 + 1e-7);
+      assert.ok(Math.abs(turnDuration / oldTurnDuration - .80) < 1e-10, 'only the one-turn section is twenty percent shorter');
+      assert.ok(Math.abs((bout.resolve - bout.impact) / bout.timeScale - 1100) < 1e-7, 'the flight/landing interval retains its normal pace');
+      const original = { ...bout, spinPreparationFraction: undefined, impact: bout.start + oldSpan };
+      for (const phase of [.10, .21, .37, .439, .49]) {
+        const at = bout.start + oldSpan * phase;
+        const before = arenaAction(original, at), after = arenaAction(bout, at);
+        assert.equal(after.stage, before.stage, 'the earlier contact/lift/plant beats retain their original timing');
+        assert.equal(after.liftedId, before.liftedId); assert.deepEqual(after.attackers, before.attackers);
+        assert.ok(Math.abs(after.lift - before.lift) < 1e-7);
+        assert.deepEqual(after.actors.map(actor => actor.pose), before.actors.map(actor => actor.pose));
+      }
+      const target = at => arenaSpinTargets(bout, at, { x: 500, y: 425 });
+      assert.ok(target(bout.start + preparation).turn < 1e-20, 'rotation begins after the same preparation time');
+      assert.ok(target(bout.impact - 16).turn < 1, 'the turn does not finish early and wait for the throw');
+      assert.ok(Math.abs(target(bout.impact).angle - Math.PI * 2) < 1e-8);
+      const fastVelocity = (target(bout.impact).angle - target(bout.impact - 16).angle) / 16;
+      const oldVelocity = (arenaSpinTargets(original, original.impact, { x: 500, y: 425 }).angle - arenaSpinTargets(original, original.impact - 16, { x: 500, y: 425 }).angle) / 16;
+      assert.ok(Math.abs(fastVelocity / oldVelocity - 1.25) < 1e-8);
+      assert.ok(arenaAction(bout, bout.impact).actors.every(actor => !actor.gripId), 'both hands release on the completed revolution');
+    }
+  }
+  assert.ok(finals > 0 && preliminaries > 0, 'both final and earlier waist counters are exercised');
+});
+
 test('the vertical-axis turn makes one complete local orbit with reachable contact and continuous release', () => {
-  for (const span of [2068, 3136, 3450, 5000, 7045]) {
-    const bout = { ...round, impact: round.start + span }, center = { x: 500, y: 425 };
+  for (const span of [2068, 3136, 3450, 5000, 7045]) for (const spinPreparationFraction of [undefined, .52 / .904]) {
+    const bout = { ...round, spinPreparationFraction, impact: round.start + span }, center = { x: 500, y: 425 };
     const begin = arenaSpinTargets(bout, bout.start, center);
     const bodies = { defender: { ...begin.defender, facing: 1 }, attacker: { ...begin.attacker, facing: -1 } };
     let prior = begin;
@@ -77,8 +110,8 @@ test('the vertical-axis turn makes one complete local orbit with reachable conta
 });
 
 test('a completed spin keeps angular momentum and releases directly into flight without a contact hold', () => {
-  for (const span of [2068, 3450, 5000]) {
-    const bout = { ...round, impact: round.start + span }, center = { x: 500, y: 425 };
+  for (const span of [2068, 3450, 5000]) for (const spinPreparationFraction of [undefined, .52 / .904]) {
+    const bout = { ...round, spinPreparationFraction, impact: round.start + span }, center = { x: 500, y: 425 };
     const at = time => arenaSpinTargets(bout, time, center);
     const almost = at(bout.impact - 32), last = at(bout.impact - 16), end = at(bout.impact);
     const previousVelocity = (last.angle - almost.angle) / 16, releaseVelocity = (end.angle - last.angle) / 16;
