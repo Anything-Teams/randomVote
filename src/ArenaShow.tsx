@@ -246,6 +246,10 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     const landingDistance = Math.max(110, rimDistance + 65);
     exit.landing = { x: exit.origin.x + direction.x * landingDistance, y: exit.origin.y + direction.y * landingDistance };
   };
+  const spinFollowThrough = (exit: Exit) => {
+    const velocity = exit.spinFlight?.velocity, speed = velocity && Math.hypot(velocity.x, velocity.y);
+    return velocity && speed && speed > .001 ? { x: velocity.x / speed, y: velocity.y / speed } : undefined;
+  };
   // A direct skip or paused fixture seek creates every eliminated actor as well.
   if (!props.preview) resolvedRounds(rounds, elapsed).forEach(round => arenaEliminatedIds(round).forEach(id => {
     if (sim.exits.has(id)) return;
@@ -526,7 +530,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             const spinExit = (spinFinish || dragFinish) ? sim.exits.get(exchange.victim) : undefined, armRelease = contact.pairArmRelease?.get(exchange.aggressor);
             if (spinExit && armRelease) {
               const translated = (points: [ArenaPoint, ArenaPoint]) => points.map(point => ({ x: point.x + driver.x - armRelease.root.x, y: point.y + driver.y - armRelease.root.y })) as [ArenaPoint, ArenaPoint];
-              driver.carrierRelease = { hands: translated(armRelease.hands), elbows: translated(armRelease.elbows), shoulders: translated(armRelease.shoulders), progress: clamp((elapsed - spinExit.launchedAt!) / 650), direction: driver.facing, stance: armRelease.stance };
+              const followThrough = spinFollowThrough(spinExit);
+              driver.carrierRelease = { hands: translated(armRelease.hands), elbows: translated(armRelease.elbows), shoulders: translated(armRelease.shoulders), progress: clamp((elapsed - spinExit.launchedAt!) / 650), direction: Math.sign(followThrough?.x ?? 0) || driver.facing, followThrough, stance: armRelease.stance };
             }
             driver.frontKick = frame.frontKick; driver.footTarget = frame.driverFootTarget; driver.footStrength = frame.footStrength; driver.kickLeg = 1;
             const waistSupport = frame.gripMode === 'cradle' ? frame.scoopSupport : frame.gripMode === 'waist' ? frame.powerbombSupport ?? frame.backBodySupport ?? frame.spineSupport : undefined;
@@ -695,7 +700,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             exit.launchedAt = elapsed; exit.heldFacing = victim.facing; sim.exits.set(exchange.victim, exit);
             driver.gripTarget = undefined; driver.secondaryGripTarget = undefined; driver.gripStrength = 0; driver.gripLocked = false;
             const releasedArms = contact.pairArmRelease?.get(exchange.aggressor);
-            if (releasedArms) driver.carrierRelease = { ...releasedArms, progress: 0, direction: driver.facing };
+            if (releasedArms) { const followThrough = spinFollowThrough(exit); driver.carrierRelease = { ...releasedArms, progress: 0, direction: Math.sign(followThrough?.x ?? 0) || driver.facing, followThrough }; }
             const resolve = Math.max(elapsed + 1100 * unit, frame.requiredEndAt);
             contact.round = { ...exchange, wrestlingMove: { ...window, end: resolve }, impact: elapsed, resolve, end: resolve }; exchange = contact.round;
           }
@@ -2173,7 +2178,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         const driverBody = sim.bodies.get(exit.round.aggressor)!; driverBody.x = source.root.x; driverBody.y = source.root.y; driverBody.motorX = 0; driverBody.motorY = 0;
         driver.x = source.root.x; driver.y = source.root.y; driver.depthY = source.root.y; driver.facing = exit.floorThrow!.facing;
         driver.gripTarget = undefined; driver.secondaryGripTarget = undefined; driver.gripStrength = 0; driver.gripLocked = false;
-        driver.carrierRelease = { ...source, progress: ease((elapsed - exit.launchedAt) / (650 * unit)), direction: exit.side };
+        const followThrough = spinFollowThrough(exit);
+        driver.carrierRelease = { ...source, progress: ease((elapsed - exit.launchedAt) / (650 * unit)), direction: Math.sign(followThrough?.x ?? 0) || exit.side, followThrough };
       }
     }
     if (flight.stage === 'flight' || flight.stage === 'rim-toss') effects.push(() => { ctx.fillStyle = '#27332e40'; ctx.beginPath(); ctx.ellipse(flight.groundX, flight.groundY + 4, 32, 7, 0, 0, Math.PI * 2); ctx.fill(); });

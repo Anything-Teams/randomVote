@@ -44,6 +44,33 @@ test('approach and preparation cannot announce a selected wrestling finish befor
   }
 });
 
+test('the incoming player owns the powerbomb rush while the planted opponent owns the lift and slam', () => {
+  for (const side of [-1, 1]) {
+    const opening = { kind: 'powerbomb', start: 0, end: 15000, launchAt: null, contactAt: null, ankleGripAt: null, releaseAt: null };
+    const planned = arenaWrestlingMoveTargets(opening, 0, { x: 500, y: 416 }, undefined, side);
+    const actual = { ...opening, launchAt: planned.plannedLaunchAt, plannedLaunchAt: planned.plannedLaunchAt, plannedContactAt: planned.plannedContactAt, counterReadyAt: planned.counterReadyAt };
+    const round = { ...base, contactSide: side, wrestlingMove: actual };
+    for (const elapsed of [actual.launchAt + 100, planned.counterReadyAt + 80, planned.plannedContactAt - 20]) {
+      const frame = arenaWrestlingMoveTargets(actual, elapsed, { x: 500, y: 416 }, undefined, side);
+      assert.deepEqual(frame.driverVelocity, { x: 0, y: 0 }); assert.equal(frame.driverPose === 'run', false);
+      assert.equal(frame.victimPose, 'run'); assert.ok(Math.hypot(frame.victimVelocity.x, frame.victimVelocity.y) > 1);
+      const words = arenaActionWords(round, elapsed);
+      assert.ok(words.some(value => value.id === 'v' && value.word === '돌진!'));
+      assert.ok(!words.some(value => value.id === 'a' && value.word === '돌진!'));
+      const story = arenaStoryState(round, elapsed);
+      assert.equal(story.leftLabel, '돌진을 받아내는 선수'); assert.equal(story.rightLabel, '달려오는 선수');
+    }
+    const held = { ...round, wrestlingMove: { ...actual, contactAt: planned.plannedContactAt } };
+    const liftAt = planned.plannedContactAt + ARENA_POWERBOMB_TIMING.load + ARENA_POWERBOMB_TIMING.lift / 2;
+    const words = arenaActionWords(held, liftAt);
+    assert.ok(words.some(value => value.id === 'a' && value.word === '들어올리기!'));
+    const presentation = arenaWrestlingPresentation(held, liftAt, { aggressor: '받는 선수', victim: '돌진한 선수' });
+    assert.equal(presentation.reverse, true); assert.equal(presentation.steps[0], '상대 돌진');
+    assert.match(presentation.detail, /받는 선수가 두 손으로 돌진한 선수의 허리를 받쳐/);
+    assert.match(arenaWrestlingPresentation(held, liftAt).detail, /받아낸 선수가 두 손으로 달려온 선수의 허리를 받쳐/);
+  }
+});
+
 test('a surviving somersault shows its throw call when the opponent really rises, after the grounded hold', () => {
   const round = { ...base, start: 7600, recovery: { start: 0, throwAt: 5000, end: 7600 } };
   for (const elapsed of [1600, 2700, 3500]) {

@@ -11,7 +11,8 @@ function paint(body, clock) {
   const skeleton = structuredClone(body.animation.skeleton), contacts = structuredClone(body.animation.contactPoints), feet = structuredClone(body.animation.feet);
   for (let leg = 0; leg < 2; leg++) {
     const thigh = distance(skeleton.hips[leg], skeleton.knees[leg]), shin = distance(skeleton.knees[leg], skeleton.feet[leg]);
-    const minimum = Math.abs(body.velocityY) > Math.hypot(body.velocityX, body.velocityY) * .5 ? 2.5 : 6;
+    const depth = Math.max(Math.abs(body.velocityY) / Math.max(1, Math.hypot(body.velocityX, body.velocityY)), body.animation.depthStride ?? 0);
+    const minimum = depth > .5 ? 2.5 : 6;
     assert.ok(thigh <= 11.001 && shin <= 11.001 && thigh > minimum && shin > minimum, `depth projection may shorten the visible bend but neither normal leg bone stretches or collapses: ${JSON.stringify({ clock, leg, thigh, shin, vx: body.velocityX, vy: body.velocityY, foot: feet[leg], hip: skeleton.hips[leg], knee: skeleton.knees[leg], ankle: skeleton.feet[leg] })}`);
     assert.ok(Number.isFinite(skeleton.footAngles[leg]) && Math.abs(skeleton.footAngles[leg]) < .35, 'ankle flex is small rather than a detached spinning foot');
     assert.ok(rotations.some(angle => Math.abs(angle - skeleton.footAngles[leg]) < 1e-8), 'the actual painted foot uses the recorded ankle angle');
@@ -95,5 +96,40 @@ test('the final running feet enter the scoop preparation without stretching or r
     }
     assert.ok(before.feet.some(foot => foot.swinging), 'the fixture exercises a real unfinished running step');
     assert.ok(frame.feet.every(foot => foot.lift < .001), 'both recovery feet reach the sand for the planted scoop load');
+  }
+});
+
+test('a charge keeps full-height supporting legs through acceleration, braking and reversals in every heading', () => {
+  const headings = [[165, 0], [-165, 0], [0, 165], [0, -165], [117, 117], [-117, 117], [117, -117], [-117, -117]];
+  for (const [vx, vy] of headings) for (const step of [16, 50]) {
+    const body = actor({ pose: 'guard', facing: vx < 0 ? -1 : 1 });
+    let previousClock = 0, supportFrames = 0, turns = 0;
+    for (let clock = 0; clock <= 3500; clock += step) {
+      const amount = clock < 400 ? 0 : clock < 1000 ? (clock - 400) / 600 : clock < 1400 ? 1
+        : clock < 1700 ? (1700 - clock) / 300 : clock < 1900 ? 0 : clock < 2400 ? -(clock - 1900) / 500
+          : clock < 3000 ? -1 : 0;
+      const sideTurn = clock >= 3000 ? (clock - 3000) / 500 : 0;
+      body.pose = clock < 400 ? 'guard' : 'run';
+      body.chargePreparation = clock < 400 ? clock / 400 : 0;
+      body.chargeStrength = clock < 400 ? 0 : 1;
+      body.velocityX = vx * amount - vy * sideTurn; body.velocityY = vy * amount + vx * sideTurn;
+      body.x += body.velocityX * (clock - previousClock) / 1000;
+      body.y += body.velocityY * (clock - previousClock) / 1000;
+      body.depthY = body.y;
+      body.gaitDistance += Math.hypot(body.velocityX, body.velocityY) * (clock - previousClock) / 1000;
+      if (Math.abs(body.velocityX) > 5) body.facing = Math.sign(body.velocityX);
+      const frame = paint(body, clock);
+      const detail = `${vx}/${vy}/${step}ms/${clock}ms`;
+      assert.ok(body.animation.supportHip.y + 20 < 4, `the actual support pelvis remains upright when a stopped or reversed charge resumes: ${detail}/${body.animation.supportHip.y + 20}`);
+      for (let leg = 0; leg < 2; leg++) if (!frame.feet[leg].swinging && frame.feet[leg].lift < .001) {
+        supportFrames++;
+        assert.equal(frame.skeleton.footAngles[leg], 0, 'a braking support sole stays flat');
+        const heel = { x: frame.feet[leg].ground.x, y: frame.feet[leg].ground.y - body.scale * 2 };
+        assert.ok(distance(frame.contacts.feet[leg], heel) < .001, 'changing direction does not move a material supporting heel');
+      }
+      if (clock >= 1900 && clock < 2400) turns++;
+      previousClock = clock;
+    }
+    assert.ok(supportFrames > 10 && turns > 5, `the regression includes real material support and a restarted reverse charge: ${vx}/${vy}/${step}ms`);
   }
 });

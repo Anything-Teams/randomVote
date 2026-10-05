@@ -31,8 +31,7 @@ for (const kind of Object.keys(seeds)) test(`${kind}: the actual ankle throw kee
     const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
     setInitialize((current, reset) => {
       if (current !== sim || !reset) return;
-      const roots = kind === 'powerbomb' ? [{ x: 470, y: 416 }, { x: 530, y: 416 }]
-        : kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam' ? [{ x: 525, y: 416 }, { x: 300, y: 416 }] : [{ x: 320, y: 416 }, { x: 520, y: 416 }];
+      const roots = ['powerbomb', 'backbodydrop', 'spinebuster', 'scoopslam'].includes(kind) ? [{ x: 525, y: 416 }, { x: 300, y: 416 }] : [{ x: 320, y: 416 }, { x: 520, y: 416 }];
       Object.assign(sim.bodies.get(planned.aggressor), roots[0]); Object.assign(sim.bodies.get(planned.victim), roots[1]);
       for (const body of sim.bodies.values()) {
         if (mirrored) { body.x = 1000 - body.x; body.facing *= -1; }

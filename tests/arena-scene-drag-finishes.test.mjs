@@ -71,8 +71,7 @@ const segmentGap = (point, from, to) => {
   return distance(point, { x: from.x + dx * t, y: from.y + dy * t });
 };
 function roots(kind) {
-  return kind === 'powerbomb' ? { driver: { x: 470, y: 416 }, victim: { x: 530, y: 416 } }
-    : kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam' ? { driver: { x: 525, y: 416 }, victim: { x: 300, y: 416 } }
+  return ['powerbomb', 'backbodydrop', 'spinebuster', 'scoopslam'].includes(kind) ? { driver: { x: 525, y: 416 }, victim: { x: 300, y: 416 } }
       : { driver: { x: 320, y: 416 }, victim: { x: 520, y: 416 } };
 }
 function game(kind, { mirrored = false, controlled = true, frameDelta = 16 } = {}) {

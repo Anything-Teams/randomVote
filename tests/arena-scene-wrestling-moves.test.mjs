@@ -71,8 +71,7 @@ const segmentGap = (point, from, to) => {
   return distance(point, { x: from.x + dx * t, y: from.y + dy * t });
 };
 function roots(kind) {
-  return kind === 'powerbomb' ? { driver: { x: 470, y: 416 }, victim: { x: 530, y: 416 } }
-    : kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam' ? { driver: { x: 525, y: 416 }, victim: { x: 300, y: 416 } }
+  return ['powerbomb', 'backbodydrop', 'spinebuster', 'scoopslam'].includes(kind) ? { driver: { x: 525, y: 416 }, victim: { x: 300, y: 416 } }
       : { driver: { x: 320, y: 416 }, victim: { x: 520, y: 416 } };
 }
 function game(kind, { mirrored = false, controlled = true, frameDelta = 16 } = {}) {
@@ -127,7 +126,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       }
       const window = actual.wrestlingMove, frame = arenaWrestlingMoveTargets(window, elapsed, contact.center, contact.wrestlingMoveOrigins, actual.contactSide);
       assert.ok(inside(scene.sim.bodies.get(actual.aggressor)), `caster stays inside: ${detail(elapsed, frame)}`);
-      if ((kind === 'scoopslam' || kind === 'clothesline' || kind === 'spinebuster' || (kind === 'backbodydrop' && elapsed >= frame.pickupReadyAt)) && window.launchAt != null && (!exit || spinFinish && elapsed - exit.launchedAt <= 750) && previousDriverRig) {
+      if ((kind === 'powerbomb' || kind === 'scoopslam' || kind === 'clothesline' || kind === 'spinebuster' || (kind === 'backbodydrop' && elapsed >= frame.pickupReadyAt)) && window.launchAt != null && (!exit || spinFinish && elapsed - exit.launchedAt <= 750) && previousDriverRig) {
         const cap = 8 + frameDelta * .9;
         for (const [point, prior] of paintedPoints(paintedDriver).map((point, index) => [point, paintedPoints(previousDriverRig)[index]])) assert.ok(distance(point, prior) < cap, `receiving the back or reaching for the ankles cannot reverse a caster joint by ${distance(point, prior).toFixed(2)}px in one frame: ${detail(elapsed, frame)}`);
       }
@@ -174,7 +173,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         assert.equal(exit, undefined, 'a planned collision cannot create a premature exit');
         assert.equal(capturedRanks()[actual.victim], undefined);
         if (kind === 'clothesline') runSeen ||= driver.pose === 'run' && Math.hypot(driver.velocityX, driver.velocityY) > 80;
-        if ((kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam') && window.launchAt != null) {
+        if (['powerbomb', 'backbodydrop', 'spinebuster', 'scoopslam'].includes(kind) && window.launchAt != null) {
           assert.ok(distance(frame.driver, contact.wrestlingMoveOrigins.driver) < .001, 'the receiver waits in place while the drawn loser runs toward the waist catch');
           runSeen ||= victim.pose === 'run' && Math.hypot(victim.velocityX, victim.velocityY) > 80;
           if (kind === 'backbodydrop' && frame.counterPreparation === 0 && elapsed > window.launchAt) {
@@ -202,7 +201,11 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           assert.ok(Math.abs(driver.angle) > 1.45, 'the wrestler kicks from an almost horizontal airborne body');
           assert.ok(Math.abs(paintedDriver.head.x - paintedDriver.waist.x) > Math.abs(paintedDriver.head.y - paintedDriver.waist.y) * 2, 'the actual head and hips are laid out horizontally');
           assert.ok((driver.depthY ?? scene.sim.bodies.get(actual.aggressor).y) - driver.y > 20, 'the two-foot strike takes place in the actual jump');
-        } else if (kind === 'powerbomb') paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, arm === 0 ? paintedVictim.waist : { x: paintedVictim.waist.x + frame.side * 6, y: paintedVictim.waist.y + 3 }) < 8, `both hands receive the actual waist before the powerbomb: ${detail(elapsed, frame)}`));
+        } else if (kind === 'powerbomb') {
+          assert.ok(runSeen, 'the actual opponent runs into the planted powerbomb receiver before the lift');
+          assert.ok(distance(frame.victim, contact.wrestlingMoveOrigins.launchVictim) > 70, 'the incoming opponent covers a visible runway before the powerbomb catch');
+          paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, arm === 0 ? paintedVictim.waist : { x: paintedVictim.waist.x + frame.side * 6, y: paintedVictim.waist.y + 3 }) < 8, `both hands receive the actual waist before the powerbomb: ${detail(elapsed, frame)}`));
+        }
         else if (kind === 'scoopslam') paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, cradleTargets(paintedVictim)[arm]) < 7, `the scoop accepts the actual back and thigh in separate hands: ${detail(elapsed, frame)}`));
         else assert.ok(paintedDriver.hands.some(hand => distance(hand, paintedVictim.waist) < 7), `receiver touches the real incoming waist (gap ${Math.min(...paintedDriver.hands.map(hand => distance(hand, paintedVictim.waist))).toFixed(2)}px): ${detail(elapsed, frame)}`);
       }

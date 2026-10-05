@@ -1,6 +1,8 @@
 import type { ArenaPoint } from './arenaLogic';
 
 export type ArenaWrestlingMoveKind = 'clothesline' | 'dropkick' | 'powerbomb' | 'backbodydrop' | 'spinebuster' | 'scoopslam';
+/** The survivor receives the other player's rush rather than running the slam in. */
+export const arenaWrestlingMoveIsCounter = (kind: ArenaWrestlingMoveKind) => kind === 'powerbomb' || kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam';
 export type ArenaWrestlingMoveWindow = {
   kind: ArenaWrestlingMoveKind; start: number; end: number;
   launchAt?: number | null; contactAt?: number | null; releaseAt?: number | null;
@@ -148,18 +150,15 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   const kind = window.kind, timing = ARENA_WRESTLING_MOVE_TIMING;
   const dragFinish = kind === 'clothesline' || kind === 'spinebuster';
   const ankleFinish = dragFinish || kind === 'backbodydrop' || kind === 'scoopslam' || kind === 'powerbomb';
-  const catching = kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam';
-  const closeMove = kind === 'powerbomb';
+  const catching = arenaWrestlingMoveIsCounter(kind);
   const ankleSpinFinish = kind === 'backbodydrop' || kind === 'scoopslam' || kind === 'powerbomb';
   const initial = origins ?? {
-    driver: { x: center.x - layoutSide * (closeMove ? 30 : catching ? -25 : 180), y: center.y },
-    victim: { x: center.x + layoutSide * (closeMove ? 30 : catching ? -200 : 20), y: center.y },
+    driver: { x: center.x - layoutSide * (catching ? -25 : 180), y: center.y },
+    victim: { x: center.x + layoutSide * (catching ? -200 : 20), y: center.y },
   };
   const side = (Math.abs(initial.victim.x - initial.driver.x) > 1 ? initial.victim.x >= initial.driver.x ? 1 : -1 : layoutSide < 0 ? -1 : 1) as 1 | -1;
   const gap = distance(initial.driver, initial.victim);
-  const closeGap = 24;
   const goal: ArenaPoint = kind === 'dropkick' ? { x: initial.victim.x - side * 144, y: initial.victim.y }
-    : closeMove ? { x: Math.abs(initial.victim.x - initial.driver.x) > closeGap ? initial.victim.x - side * closeGap : initial.driver.x, y: initial.victim.y }
     : catching ? { x: initial.driver.x + side * 42, y: initial.driver.y }
     : { x: initial.victim.x - side * 36, y: initial.victim.y };
   const movingOrigin = catching ? initial.victim : initial.driver;
@@ -168,11 +167,11 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   const landingGoal = kind === 'dropkick' ? { x: initial.victim.x - side * 12, y: initial.victim.y } : goal;
   const behind = { x: initial.driver.x - side * 70, y: initial.driver.y };
   const canPerform = inside(initial.driver) && inside(initial.victim) && inside(goal)
-    && (closeMove ? inside({ x: initial.victim.x + side * 38, y: initial.victim.y }) : kind === 'dropkick' ? gap >= 170 && inside(landingGoal) : catching ? gap >= 130 && (kind !== 'backbodydrop' || inside(behind)) : gap >= 130 && inside({ x: initial.victim.x + side * 24, y: initial.victim.y }));
+    && (kind === 'dropkick' ? gap >= 170 && inside(landingGoal) : catching ? gap >= 130 && (kind !== 'backbodydrop' || inside(behind)) : gap >= 130 && inside({ x: initial.victim.x + side * 24, y: initial.victim.y }));
   const launchAt = !canPerform || window.launchAt === null ? null : Math.max(window.start, window.launchAt ?? plannedLaunchAt);
   const launch = launchAt ?? plannedLaunchAt;
   const plannedContactAt = window.plannedContactAt === undefined
-    ? kind === 'dropkick' ? launch + timing.jump * .67 : closeMove ? launch : launch + run.duration
+    ? kind === 'dropkick' ? launch + timing.jump * .67 : launch + run.duration
     : window.plannedContactAt + launch - plannedLaunchAt;
   const contactAt = !canPerform || launchAt === null || window.contactAt === null ? null : Math.max(launchAt, window.contactAt ?? plannedContactAt);
   const contact = contactAt ?? plannedContactAt;
@@ -205,7 +204,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   const launched = launchAt !== null && elapsed >= launchAt;
   const contacted = contactAt !== null && elapsed >= contactAt;
   const released = releaseAt !== null && elapsed >= releaseAt;
-  const target = initial.target ?? { x: initial.victim.x, y: initial.victim.y - (kind === 'dropkick' ? 80 : catching || kind === 'powerbomb' ? 42 : 90) };
+  const target = initial.target ?? { x: initial.victim.x, y: initial.victim.y - (kind === 'dropkick' ? 80 : catching ? 42 : 90) };
   const targets = initial.contactTargets ?? [{ x: target.x, y: target.y - 6 }, { x: target.x, y: target.y + 6 }];
   const frame: ArenaWrestlingMoveFrame = {
     kind, stage: !launched ? elapsed < plannedLaunchAt - timing.load ? 'approach' : 'load' : contacted ? released ? 'release' : 'contact' : 'attack',
@@ -364,13 +363,17 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const lift = contacted ? ease((age - power.load) / power.lift) : 0;
     const down = contacted ? ease((age - power.load - power.lift - power.hold) / power.slam) : 0;
     const rise = contacted ? ease((elapsed - floorAt) / power.recover) : 0;
-    const driverOrigin = initial.contactDriver ?? goal, victimOrigin = initial.contactVictim ?? initial.victim;
+    const driverOrigin = initial.contactDriver ?? initial.driver, victimOrigin = initial.contactVictim ?? goal;
+    const runner = rush(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0);
+    const preparationAge = contacted ? Math.min(elapsed, contactAt!) : elapsed;
+    const preparation = launched ? ease((preparationAge - counterReadyAt) / Math.max(1, plannedContactAt - counterReadyAt)) : 0;
+    frame.counterPreparation = preparation;
     const floorRoot = initial.powerbombFloorVictim ?? { x: driverOrigin.x + side * 62, y: victimOrigin.y };
-    frame.driver = contacted ? { ...driverOrigin } : run.point;
-    frame.victim = contacted ? blend(victimOrigin, floorRoot, down) : { ...initial.victim };
-    frame.driverVelocity = contacted ? zero() : run.velocity;
-    frame.driverPose = !launched ? elapsed < plannedLaunchAt - timing.load ? 'run' : 'guard' : contacted && elapsed >= floorAt ? rise < 1 ? 'recover' : 'guard' : 'powerbomb';
-    frame.victimPose = !contacted || age === 0 ? 'guard' : down === 1 ? 'stunned' : 'carried';
+    frame.driver = contacted ? { ...driverOrigin } : { ...initial.driver };
+    frame.victim = contacted ? blend(victimOrigin, floorRoot, down) : runner.point;
+    frame.driverVelocity = zero(); frame.victimVelocity = contacted ? zero() : runner.velocity;
+    frame.driverPose = !contacted ? preparation > 0 ? 'powerbomb' : 'guard' : elapsed >= floorAt ? rise < 1 ? 'recover' : 'guard' : 'powerbomb';
+    frame.victimPose = !contacted || age === 0 ? launched ? 'run' : 'guard' : down === 1 ? 'stunned' : 'carried';
     frame.driverPhase = contacted ? age < power.load + power.lift + power.hold + power.slam ? clamp(age / (power.load + power.lift + power.hold + power.slam)) : rise : 0;
     frame.victimPhase = down; frame.powerbombLoad = load; frame.powerbombLift = lift; frame.powerbombDown = down;
     frame.powerbombVictim = contacted && age > 0 && elapsed < floorAt;
@@ -387,14 +390,17 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
       const gathered = { x: driverOrigin.x + side * 16, y: driverOrigin.y - 45 };
       const raised = { x: driverOrigin.x + side * 10, y: driverOrigin.y - 140 };
       const floor = initial.powerbombFloorWaist ?? { x: floorRoot.x + side * 25, y: floorRoot.y - 19 };
-      const lifted = curve(gathered, { x: driverOrigin.x + side * 8, y: driverOrigin.y - 84 }, raised, lift);
+      // First lift the received waist in front of the chest, then curl it over
+      // the shoulders. Passing straight through a shoulder collapses the
+      // folded arm's joint pole even while both waist grips stay connected.
+      const lifted = curve(gathered, { x: driverOrigin.x + side * 35, y: driverOrigin.y - 84 }, raised, lift);
       const dropped = curve(raised, { x: driverOrigin.x + side * 46, y: driverOrigin.y - 82 }, floor, down);
       frame.powerbombSupport = { x: start.x + (gathered.x - start.x) * load + lifted.x - gathered.x + dropped.x - raised.x, y: start.y + (gathered.y - start.y) * load + lifted.y - gathered.y + dropped.y - raised.y };
     }
     frame.gripTargets = targets; frame.gripMode = 'waist';
-    frame.gripStrength = launched ? contacted ? 1 - ease((down - .45) / .40) : ease((elapsed - launch) / timing.load) : 0;
+    frame.gripStrength = contacted ? 1 - ease((down - .45) / .40) : ease(preparation / .60);
     frame.canContact = frame.canContact && frame.gripStrength > .95;
-    frame.stage = !launched ? frame.stage : !contacted ? 'attack' : age < power.load ? 'contact' : lift < 1 ? 'lift' : age < power.load + power.lift + power.hold ? 'turn' : down < 1 ? 'fall' : rise < 1 ? 'recover' : 'groggy';
+    frame.stage = !contacted && preparation === 0 ? 'approach' : !contacted ? 'attack' : age < power.load ? 'contact' : lift < 1 ? 'lift' : age < power.load + power.lift + power.hold ? 'turn' : down < 1 ? 'fall' : rise < 1 ? 'recover' : 'groggy';
     return finishAnkles();
   }
   if (kind === 'scoopslam') {
