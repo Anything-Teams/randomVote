@@ -40,7 +40,9 @@ const clamp = (n: number) => Math.max(0, Math.min(1, n));
 const ease = (n: number) => { const t = clamp(n); return t * t * (3 - 2 * t); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
 const ARENA_SPIN_PREPARATION = .52;
-const ARENA_SPIN_TURN_DURATION_SCALE = .80;
+// The existing revolution already used 80% of its original time; shorten
+// that turn by a further 40% without advancing the grip/lift preparation.
+const ARENA_SPIN_TURN_DURATION_SCALE = .80 * .60;
 
 /** Preserve the first grip/lift beats while speeding up the shared rotation clock. */
 function arenaSpinClock(round: ArenaRound, elapsed: number) {
@@ -525,7 +527,7 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
   const steps = window.kind === 'clothesline' ? ['달려들기', '목에 팔을 감아 지나치기', '머리를 맞대며 함께 넘어짐', '자세 회복', '발목으로 접근', '양발목 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
     : window.kind === 'dropkick' ? ['달려들기', '발 딛고 도약', '두 발 뻗기', '가슴에 실제 접촉', '공격자 착지', '공격자 자세 회복', '상대만 장외']
     : window.kind === 'spinebuster' ? ['상대 돌진', '허리 받아내기', '무게 받아 들기', '뒤로 누우며 메치기', '기절', '발목으로 접근', '두 발목 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
-    : window.kind === 'powerbomb' ? ['상대 돌진', '달려온 허리 받아 잡기', '어깨 위로 들어 올리기', '무게를 받쳐 버티기', '등부터 모래에 내려찍기', '자세 회복', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
+    : window.kind === 'powerbomb' ? ['상대 돌진', '달려온 허리 받아 잡기', '머리 위로 들어 올리기', '두 팔로 무게 받치기', '등·어깨부터 모래에 내려찍기', '자세 회복', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
     : window.kind === 'scoopslam' ? ['상대 돌진', '발 딛고 준비', '상체와 허벅지 받치기', '머리 위까지 안아 들기', '높이 받쳐 몸 돌리기', '힘을 실어 등부터 내려찍기', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
     : ['거리 좁히기', '발 딛고 준비', labels[window.kind], '머리 위로 들어 넘기기', '모래 위에 넘어졌다', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외'];
   const stage = frame.stage as string;
@@ -560,15 +562,15 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
     word = '안아 메치기!'; title = stage === 'lift' ? '머리 위까지 안아 들어 올리기' : '머리 위에서 몸을 돌린다';
     detail = stage === 'lift' ? `${a}가 ${v}의 상체와 허벅지를 받쳐 자기 머리 위까지 안아 올립니다.` : `${a}가 두 발로 무게를 받으며 골반과 상체를 함께 돌립니다. 안긴 ${v}의 몸도 잡은 팔을 따라 돌아갑니다.`;
   } else if (window.kind === 'powerbomb' && (stage === 'lift' || stage === 'turn')) {
-    word = '들어올리기!'; title = stage === 'lift' ? '어깨 위로 들어 올리기!' : '어깨 위에서 무게를 받친다';
-    detail = `${a}가 두 손으로 ${v}의 허리를 받쳐 어깨 위까지 들어 올립니다. ${v}는 아직 눈을 뜬 채 균형을 잡으려 합니다.`;
+    word = '들어올리기!'; title = stage === 'lift' ? '머리 위로 들어 올리기!' : '머리 위에서 무게를 받친다';
+    detail = `${a}가 두 손으로 ${v}의 허리를 받쳐 머리 위로 들어 올립니다. ${v}는 아직 눈을 뜬 채 균형을 잡으려 합니다.`;
   } else if (stage === 'attack' || stage === 'contact' || stage === 'fall') {
     const contact = window.contactAt != null && elapsed >= window.contactAt;
     if (window.kind === 'clothesline') detail = contact ? `${a}의 팔꿈치 안쪽이 ${v}의 목에 감겼습니다. 상대를 지나쳐 부딪친 두 선수가 머리를 맞대며 모래 위로 넘어집니다.` : `${a}가 달려들며 한 팔을 ${v}의 목과 윗가슴 앞으로 뻗습니다.`;
     else if (window.kind === 'dropkick') detail = contact ? `${a}의 두 발바닥이 ${v}의 가슴에 닿았습니다. ${a}는 다리를 거두며 모래판 안에 착지할 준비를 합니다.` : `${a}가 도약해 두 발바닥을 ${v}의 가슴 앞으로 뻗습니다.`;
     else if (window.kind === 'powerbomb') {
       word = stage === 'fall' ? '내려찍기!' : '잡기!'; title = stage === 'fall' ? '등부터 모래에 내려찍기!' : '허리를 두 손으로 감싸 잡는다';
-      detail = stage === 'fall' ? `${a}가 어깨 위에 받친 ${v}를 등부터 모래에 내려찍습니다. 몸이 모래에 닿는 순간 ${v}가 기절합니다.` : `${a}가 달려온 ${v}의 허리를 두 손으로 감싸 돌진하던 무게를 받아냅니다.`;
+      detail = stage === 'fall' ? `${a}가 머리 위로 든 ${v}를 등과 어깨부터 모래에 강하게 내려찍습니다. 몸이 모래에 닿는 순간 ${v}가 기절합니다.` : `${a}가 달려온 ${v}의 허리를 두 손으로 감싸 돌진하던 무게를 받아냅니다.`;
     }
     else if (window.kind === 'backbodydrop') detail = contact ? `${a}가 달려온 ${v}의 허리를 받아 머리 위로 들어 올립니다. 잡은 몸을 등 너머로 넘겨 모래 위에 메칩니다.` : `${a}가 달려오는 ${v}의 허리를 받아 돌진을 되칠 틈을 봅니다.`;
     else if (window.kind === 'spinebuster') {

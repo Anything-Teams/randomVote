@@ -583,13 +583,14 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               if (actor === victim) {
                 actor.eyesClosed = frame.victimEyesClosed;
                 actor.carryStretch = frame.victimCarryStretch; actor.carrySupport = frame.victimCarryStretch !== undefined ? window.kind === 'scoopslam' && frame.gripMode !== 'ankle' ? 'cradle' : 'shoulder' : undefined;
-                actor.carryEntry = (window.kind === 'scoopslam' || window.kind === 'powerbomb') && frame.gripMode !== 'ankle';
+                actor.carryEntry = window.kind === 'scoopslam' && frame.gripMode !== 'ankle';
                 actor.scoopVictim = frame.scoopVictim; actor.scoopLoad = frame.scoopLoad; actor.scoopLift = frame.scoopLift; actor.scoopTurn = frame.scoopTurn; actor.scoopDown = frame.scoopDown; actor.scoopRecover = frame.scoopRecover;
                 actor.powerbombVictim = frame.powerbombVictim; actor.powerbombLoad = frame.powerbombLoad; actor.powerbombLift = frame.powerbombLift; actor.powerbombDown = frame.powerbombDown;
                 actor.spineCarry = window.kind === 'spinebuster' && frame.victimCarryStretch !== undefined && frame.gripMode === 'waist';
                 if (actor.spineCarry) actor.carryEntry = true;
                 actor.bulldogProgress = window.kind === 'clothesline' && frame.gripMode !== 'ankle' ? frame.bulldogProgress : undefined;
-                actor.slamEntry = slam !== undefined && frame.gripMode !== 'ankle';
+                actor.slamEntry = window.kind !== 'powerbomb' && slam !== undefined && frame.gripMode !== 'ankle';
+                actor.overheadSlam = window.kind === 'powerbomb' && slam !== undefined && frame.gripMode !== 'ankle';
               }
               if (actor === driver && (window.kind === 'clothesline' || window.kind === 'spinebuster')) actor.slamEntry = slam !== undefined;
               actor.gripTarget = undefined; actor.secondaryGripTarget = undefined; actor.gripStrength = 0;
@@ -654,7 +655,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             if (frame.gripTargets && victim && !sim.exits.has(exchange.victim)) {
               const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock);
               const thigh = { x: rig.waist.x + ((rig.feet[0].x + rig.feet[1].x) / 2 - rig.waist.x) * .28, y: rig.waist.y + ((rig.feet[0].y + rig.feet[1].y) / 2 - rig.waist.y) * .28 };
-              const contactTargets = frame.gripMode === 'head' ? rig.headSides : frame.gripMode === 'ankle' ? rig.feet : frame.gripMode === 'cradle' ? [rig.back, thigh] : window.kind === 'powerbomb' ? rig.waistSides : [rig.waist, { x: rig.waist.x + frame.side * 6, y: rig.waist.y + 3 }];
+              const contactTargets = frame.gripMode === 'head' ? rig.headSides : frame.gripMode === 'ankle' ? rig.feet : frame.gripMode === 'cradle' ? [rig.back, thigh] : window.kind === 'powerbomb' ? [{ x: rig.waist.x - frame.side * 6, y: rig.waist.y + 3 }, rig.waist] : [rig.waist, { x: rig.waist.x + frame.side * 6, y: rig.waist.y + 3 }];
               const targets = driver.ankleGripReversed ? [contactTargets[1], contactTargets[0]] : contactTargets;
               driver.gripTarget = targets[1]; driver.secondaryGripTarget = targets[0]; driver.gripStrength = frame.gripStrength; driver.gripLocked = true;
               driver.gripMode = frame.gripMode;
@@ -747,7 +748,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             };
             let touched = window.kind === 'clothesline' ? frame.clotheslineStrength > .75 && extendedArmTouches(attacking)
               : window.kind === 'dropkick' ? frame.feetStrength > .9 && attacking.feet.every((foot, leg) => pointGap(foot, frame.footTargets![leg]) < 7)
-                : window.kind === 'powerbomb' ? attacking.hands.every((hand, arm) => pointGap(hand, defending.waistSides[arm]) < 7)
+                : window.kind === 'powerbomb' ? pointGap(attacking.hands[1], defending.waist) < 7 && pointGap(attacking.hands[0], { x: defending.waist.x - frame.side * 6, y: defending.waist.y + 3 }) < 7
                   : window.kind === 'scoopslam' ? attacking.hands.every((hand, arm) => pointGap(hand, arm === 0 ? defending.back : { x: defending.waist.x + ((defending.feet[0].x + defending.feet[1].x) / 2 - defending.waist.x) * .28, y: defending.waist.y + ((defending.feet[0].y + defending.feet[1].y) / 2 - defending.waist.y) * .28 }) < 6)
                     : attacking.hands.some(hand => pointGap(hand, defending.waist) < 6);
             let strikeFrame = frame;
@@ -781,13 +782,6 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
                 const flat = sampleArenaFighterContacts({ ...victim, ...floor, pose: 'stunned', angle: frame.side * Math.PI / 2, suspension: 0, slamProgress: { tuck: 0, slump: 1 }, carryStretch: undefined, carrySupport: undefined, scoopVictim: false, animation: undefined, motionImmediate: true }, reduced ? 0 : clock);
                 contact.wrestlingMoveOrigins.scoopFloorWaist = flat.waist;
 
-              }
-              if (window.kind === 'powerbomb') {
-                contact.wrestlingMoveOrigins.powerbombWaist = { ...defending.waist };
-                const floor = arenaInsidePoint({ x: a.x + frame.side * 62, y: v.y }, 12);
-                contact.wrestlingMoveOrigins.powerbombFloorVictim = floor;
-                const flat = sampleArenaFighterContacts({ ...victim, ...floor, pose: 'stunned', angle: frame.side * Math.PI * .47, suspension: 0, slamProgress: { tuck: 0, slump: 1 }, powerbombVictim: false, carryStretch: undefined, animation: undefined, motionImmediate: true }, reduced ? 0 : clock);
-                contact.wrestlingMoveOrigins.powerbombFloorWaist = flat.waist;
               }
               if (window.kind === 'backbodydrop') {
                 contact.wrestlingMoveOrigins.backBodyWaist = { ...defending.waist };
@@ -1775,7 +1769,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           if (part.id === exchange.victim && technique.victimPose) actor.pose = technique.victimPose;
           if (exchange.tripCounter && technique.stage === 'probe') actor.pose = part.id === exchange.victim ? 'push' : 'brace';
           if (part.id === exchange.victim && (exchange.tactic === 'trip' || exchange.tactic === 'suplex')) actor.suspension = technique.victimSuspension;
-          if (part.id === exchange.victim && exchange.tactic === 'suplex') actor.slamProgress = technique.victimSlam;
+          if (part.id === exchange.victim && exchange.tactic === 'suplex') { actor.slamProgress = technique.victimSlam; actor.overheadSlam = technique.victimSlam !== undefined; }
           if (part.id === exchange.victim && exchange.tactic === 'elbow') { actor.suspension = technique.victimSuspension; actor.gripMode = technique.victimGrip; }
           if (part.id === exchange.aggressor) {
             if (technique.aggressorPose) actor.pose = technique.aggressorPose;
@@ -2440,16 +2434,15 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   for (const actor of actors.values()) drawArenaName(ctx, actor);
   for (const contact of sim.contacts.values()) {
     const round = contact.round, window = round.wrestlingMove;
-    if (!window || !['scoopslam', 'powerbomb'].includes(window.kind) || window.contactAt == null || elapsed < window.contactAt) continue;
+    if (!window || window.kind !== 'scoopslam' || window.contactAt == null || elapsed < window.contactAt) continue;
     const caster = actors.get(round.aggressor), carried = actors.get(round.victim);
-    const holding = window.kind === 'scoopslam' ? caster?.pose === 'scoopslam' && caster.gripMode === 'cradle' : caster?.pose === 'powerbomb' && caster.gripMode === 'waist';
+    const holding = caster?.pose === 'scoopslam' && caster.gripMode === 'cradle';
     if (!caster || !carried || !holding || (caster.gripStrength ?? 0) <= .001) continue;
     // Small stance corrections must not exchange the entire pair's layers.
     // The body rests above the far support, with the near forearm around it.
     caster.paintDepth = carried.paintDepth = carried.depthY ?? carried.y;
     caster.paintLayer = -1; carried.paintLayer = 1;
     carried.scoopSupportActor = caster;
-    if (window.kind === 'powerbomb') { carried.powerbombSplit = true; caster.powerbombRearActor = carried; }
   }
   arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
   overlays.forEach(draw => draw());

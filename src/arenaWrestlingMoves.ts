@@ -1,6 +1,7 @@
 import type { ArenaPoint } from './arenaLogic';
 import { ARENA_CHARGE_SPEED, arenaChargeDuration, arenaChargePath } from './arenaCharge';
 import { arenaAnkleSwingProjection, arenaAnkleSwingCasterProjection } from './arenaAnkleSwing';
+import { arenaOverheadSlamMotion } from './arenaOverheadSlam';
 export { arenaAnkleSwingProjection } from './arenaAnkleSwing';
 
 export type ArenaWrestlingMoveKind = 'clothesline' | 'dropkick' | 'powerbomb' | 'backbodydrop' | 'spinebuster' | 'scoopslam';
@@ -30,7 +31,7 @@ export type ArenaWrestlingMoveFrame = {
   driver: ArenaPoint; victim: ArenaPoint; driverVelocity: ArenaPoint; victimVelocity: ArenaPoint;
   driverFacing: 1 | -1; victimFacing: 1 | -1;
   driverPose: 'run' | 'walk' | 'guard' | 'grapple' | 'overhead' | 'dropkick' | 'powerbomb' | 'bulldog' | 'backbodydrop' | 'spinebuster' | 'scoopslam' | 'land' | 'recover' | 'trip' | 'drag' | 'throw';
-  victimPose: 'run' | 'guard' | 'airborne' | 'roll' | 'stunned' | 'carried' | 'recover';
+  victimPose: 'run' | 'guard' | 'brace' | 'airborne' | 'roll' | 'stunned' | 'carried' | 'recover';
   driverPhase: number; victimPhase: number; driverHeight: number; victimHeight: number;
   driverAngle: number; victimAngle: number; driverSuspension: number; victimSuspension: number;
   driverJumpTuck: number; victimJumpTuck: number; driverSlam?: Slam; victimSlam?: Slam;
@@ -358,47 +359,38 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   if (kind === 'powerbomb') {
     const power = ARENA_POWERBOMB_TIMING, age = contacted ? Math.max(0, elapsed - contactAt!) : 0;
     const load = contacted ? ease(age / power.load) : 0;
-    const lift = contacted ? ease((age - power.load) / power.lift) : 0;
-    const down = contacted ? ease((age - power.load - power.lift - power.hold) / power.slam) : 0;
     const rise = contacted ? ease((elapsed - floorAt) / power.recover) : 0;
+    // Keep the incoming catch clock, then use the original overhead slam's
+    // complete body, arm raise, falling rotation and floor relaxation.
+    const phase = !contacted ? .20 : age < power.load ? .20 + .14 * clamp(age / power.load)
+      : age < power.load + power.lift ? .34 + .30 * clamp((age - power.load) / power.lift)
+        : age < power.load + power.lift + power.hold ? .64 + .12 * clamp((age - power.load - power.lift) / power.hold)
+          : age < power.load + power.lift + power.hold + power.slam ? .76 + .12 * clamp((age - power.load - power.lift - power.hold) / power.slam)
+            : .88 + .06 * clamp((elapsed - floorAt) / power.recover);
+    const slam = arenaOverheadSlamMotion(phase, side);
+    const lift = contacted ? slam.lift : 0, down = contacted ? slam.slam : 0;
     const driverOrigin = initial.contactDriver ?? initial.driver, victimOrigin = initial.contactVictim ?? goal;
     const runner = arenaChargePath(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0);
     const preparationAge = contacted ? Math.min(elapsed, contactAt!) : elapsed;
     const preparation = launched ? ease((preparationAge - counterReadyAt) / Math.max(1, plannedContactAt - counterReadyAt)) : 0;
     frame.counterPreparation = preparation;
-    const floorRoot = initial.powerbombFloorVictim ?? { x: driverOrigin.x + side * 62, y: victimOrigin.y };
     frame.driver = contacted ? { ...driverOrigin } : { ...initial.driver };
-    frame.victim = contacted ? blend(victimOrigin, floorRoot, down) : runner.point;
+    frame.victim = contacted ? { x: mix(victimOrigin.x, driverOrigin.x + side * 43, load) + side * (slam.victimOffsetX - 43), y: mix(victimOrigin.y, driverOrigin.y, load) + slam.victimOffsetY } : runner.point;
     frame.driverVelocity = zero(); frame.victimVelocity = contacted ? zero() : runner.velocity;
-    frame.driverPose = !contacted ? preparation > 0 ? 'powerbomb' : 'guard' : elapsed >= floorAt ? rise < 1 ? 'recover' : 'guard' : 'powerbomb';
-    frame.victimPose = !contacted || age === 0 ? launched ? 'run' : 'guard' : down === 1 ? 'stunned' : 'carried';
-    frame.driverPhase = contacted ? age < power.load + power.lift + power.hold + power.slam ? clamp(age / (power.load + power.lift + power.hold + power.slam)) : rise : 0;
-    frame.victimPhase = down; frame.powerbombLoad = load; frame.powerbombLift = lift; frame.powerbombDown = down;
-    frame.powerbombVictim = contacted && age > 0 && elapsed < floorAt;
-    frame.victimHeight = 116 * lift * (1 - down); frame.victimAngle = side * Math.PI * .47 * down;
-    frame.victimSuspension = lift * (1 - down);
-    if (contacted && age > 0 && elapsed < floorAt) frame.victimCarryStretch = Math.max(load, lift) * (1 - down);
-    if (down > 0) frame.victimSlam = { tuck: .15 * Math.sin(down * Math.PI), slump: down };
+    frame.driverPose = !contacted ? preparation > 0 ? 'overhead' : 'guard' : elapsed < floorAt ? 'overhead' : 'guard';
+    frame.victimPose = !contacted || age === 0 ? launched ? 'run' : 'guard' : elapsed >= floorAt ? 'stunned' : phase >= .34 ? 'airborne' : 'brace';
+    frame.driverPhase = contacted ? phase : .20;
+    frame.victimPhase = phase; frame.powerbombLoad = load; frame.powerbombLift = lift; frame.powerbombDown = down;
+    frame.overheadRaise = elapsed < floorAt || !contacted ? contacted ? slam.overheadRaise : 0 : undefined;
+    frame.victimHeight = contacted ? slam.height : 0; frame.victimAngle = contacted ? slam.angle : 0;
+    frame.victimSuspension = contacted ? slam.suspension : 0;
+    frame.victimSlam = contacted ? slam.victimSlam : undefined;
     frame.victimEyesClosed = contacted && elapsed >= floorAt;
     frame.slamImpactAt = floorAt;
-    const impactAge = elapsed - floorAt;
-    frame.slamImpact = contacted ? ease(impactAge / 28) * (1 - ease((impactAge - 110) / 570)) : 0;
-    if (contacted) {
-      const start = initial.powerbombWaist ?? { x: victimOrigin.x, y: victimOrigin.y - 42 };
-      const gathered = { x: driverOrigin.x + side * 16, y: driverOrigin.y - 45 };
-      const raised = { x: driverOrigin.x + side * 10, y: driverOrigin.y - 140 };
-      const floor = initial.powerbombFloorWaist ?? { x: floorRoot.x + side * 25, y: floorRoot.y - 19 };
-      // First lift the received waist in front of the chest, then curl it over
-      // the shoulders. Passing straight through a shoulder collapses the
-      // folded arm's joint pole even while both waist grips stay connected.
-      const lifted = curve(gathered, { x: driverOrigin.x + side * 35, y: driverOrigin.y - 84 }, raised, lift);
-      const dropped = curve(raised, { x: driverOrigin.x + side * 46, y: driverOrigin.y - 82 }, floor, down);
-      frame.powerbombSupport = { x: start.x + (gathered.x - start.x) * load + lifted.x - gathered.x + dropped.x - raised.x, y: start.y + (gathered.y - start.y) * load + lifted.y - gathered.y + dropped.y - raised.y };
-    }
-    frame.gripTargets = targets; frame.gripMode = 'waist';
-    // Follow the downward weight through one continuous release instead of
-    // squeezing the whole elbow return into the middle of the floor stroke.
-    frame.gripStrength = contacted ? 1 - ease((down - .30) / .70) : ease(preparation / .60);
+    frame.slamImpact = contacted ? slam.impact : 0;
+    const gripping = !contacted || phase < .34 || slam.gripping;
+    frame.gripTargets = targets; frame.gripMode = gripping ? 'waist' : undefined;
+    frame.gripStrength = contacted ? gripping ? 1 : 0 : ease(preparation / .60);
     frame.canContact = frame.canContact && frame.gripStrength > .95;
     frame.stage = !contacted && preparation === 0 ? 'approach' : !contacted ? 'attack' : age < power.load ? 'contact' : lift < 1 ? 'lift' : age < power.load + power.lift + power.hold ? 'turn' : down < 1 ? 'fall' : rise < 1 ? 'recover' : 'groggy';
     return finishAnkles();

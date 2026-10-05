@@ -61,13 +61,14 @@ for (const [kind, seed] of [['scoopslam', 40], ['powerbomb', 4]]) for (const mir
       assert.ok([...bodyPoints(driverRig), ...bodyPoints(victimRig)].every(point => Number.isFinite(point.x) && Number.isFinite(point.y)), `complete finite bodies: ${detail}`);
       if (driver.gripStrength > .995 && elapsed > window.contactAt) {
         heldFrames++;
-        const targets = kind === 'powerbomb' ? victimRig.waistSides
+        const targets = kind === 'powerbomb' ? [{ x: victimRig.waist.x - frame.side * 6, y: victimRig.waist.y + 3 }, victimRig.waist]
           : [victimRig.back, { x: victimRig.waist.x + ((victimRig.feet[0].x + victimRig.feet[1].x) / 2 - victimRig.waist.x) * .28, y: victimRig.waist.y + ((victimRig.feet[0].y + victimRig.feet[1].y) / 2 - victimRig.waist.y) * .28 }];
         driverRig.hands.forEach((hand, arm) => assert.ok(distance(hand, targets[arm]) < 8, `both actual palms retain their weight-bearing contacts: ${detail}/${arm}`));
       }
-      if (driver.gripStrength < .995 && driver.gripStrength > .005) releaseFrames++;
+      if (kind === 'powerbomb' ? frame.stage === 'fall' && driver.gripStrength === 0 : driver.gripStrength < .995 && driver.gripStrength > .005) releaseFrames++;
       for (const [role, actor, rig] of [['caster', driver, driverRig], ['received', victim, victimRig]]) for (let arm = 0; arm < 2; arm++) {
-        assert.ok(Math.abs(distance(rig.shoulders[arm], rig.elbows[arm]) / actor.scale - 11) < .001 && Math.abs(distance(rig.elbows[arm], rig.hands[arm]) / actor.scale - 10.5) < .001, `normal connected upper and lower arm bones: ${detail}/${role}/${arm}`);
+        const raised = role === 'caster' && kind === 'powerbomb' && actor.pose === 'overhead' ? actor.overheadRaise : 0;
+        assert.ok(Math.abs(distance(rig.shoulders[arm], rig.elbows[arm]) / actor.scale - (11 + 3 * raised)) < .001 && Math.abs(distance(rig.elbows[arm], rig.hands[arm]) / actor.scale - (10.5 + 3.5 * raised)) < .001, `connected upper and lower bones match the existing overhead rig: ${detail}/${role}/${arm}`);
         assert.ok(bend(rig, arm) > (role === 'caster' ? .40 : .30), `the forearm cannot fold through its upper arm: ${detail}/${role}/${arm}`);
         if (previous && role === 'caster') {
           const prior = previous.driverRig;
@@ -79,10 +80,10 @@ for (const [kind, seed] of [['scoopslam', 40], ['powerbomb', 4]]) for (const mir
       }
       const skeleton = victim.animation.skeleton;
       for (let leg = 0; leg < 2; leg++) assert.ok(distance(skeleton.hips[leg], skeleton.knees[leg]) <= 11.02 && distance(skeleton.knees[leg], skeleton.feet[leg]) <= 11.02, `received thighs and shins retain their full normal proportions: ${detail}/${leg}`);
-      if (previous) for (const [point, prior] of bodyPoints(victimRig).map((point, index) => [point, bodyPoints(previous.victimRig)[index]])) assert.ok(distance(point, prior) < 8 + step * .9, `the received torso, arms and feet descend as one continuous body: ${detail}`);
+      if (previous) for (const [index, point] of bodyPoints(victimRig).entries()) assert.ok(distance(point, bodyPoints(previous.victimRig)[index]) < 8 + step * .9, `the received torso, arms and feet descend as one continuous body: ${detail}/joint${index}/${distance(point, bodyPoints(previous.victimRig)[index]).toFixed(2)}px`);
       assert.equal(victim.eyesClosed, elapsed >= frame.floorAt, `unconsciousness begins at the sand impact: ${detail}`);
       previous = { driverRig: structuredClone(driverRig), victimRig: structuredClone(victimRig) };
     }
-    assert.ok(runSeen && heldFrames > 10 && releaseFrames > 2 && peakSeen && floorSeen && stages.has('lift') && stages.has('fall') && stages.has('recover'), 'the test exercises the complete incoming run, supported lift, release, fall and recovery');
+    assert.ok(runSeen && heldFrames > 10 && releaseFrames > 2 && peakSeen && floorSeen && stages.has('lift') && stages.has('fall') && stages.has(kind === 'powerbomb' ? 'groggy' : 'recover'), `the test exercises the complete incoming run, supported lift, release, fall and grounded recovery: ${JSON.stringify({kind,runSeen,heldFrames,releaseFrames,peakSeen,floorSeen,stages:[...stages]})}`);
   });
 }

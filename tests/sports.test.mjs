@@ -382,7 +382,7 @@ test('arena bouts begin immediately, connect without filler, and finish at their
     }
     assert.equal(arenaPlaybackEnd(order, duration), final.end);
     assert.ok(final.end <= duration && final.end > final.resolve);
-    const nominalFinal = final.tactic === 'spin' ? 10_320 : 10_800;
+    const nominalFinal = final.tactic === 'spin' ? 9_552 : 10_800;
     assert.ok(Math.abs((final.end - final.start) / unit - nominalFinal) < 1e-6, 'the final keeps its result/celebration interval after the quicker waist turn');
     if (size === 2) assert.ok(final.end < duration * .26, 'a single bout no longer waits for the full 40–62 second baseline');
     assert.equal(arenaFocusRound(order, final.resolve, duration), undefined);

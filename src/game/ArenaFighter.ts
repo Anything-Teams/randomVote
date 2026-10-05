@@ -13,8 +13,8 @@ export type ArenaSpinSnapshot = { origin: Point; matrix: Matrix; motion: Motion;
 type PowerbombRearLeg = { matrix: Matrix; hip: Point; knee: Point; foot: Point; footAngle: number; shorts: Point[]; cuffDirection: Point };
 type LandingArms = { at: number; root: Point; shoulders: Point[]; elbows: Point[]; hands: Point[]; angles: [number, number][]; reachAngles?: number[] };
 type FootMemory = { anchor: Point; from: Point; to: Point; ground: Point; lift: number; swinging: boolean; swingStart: number; swingStrength?: number; settleAt: number; settleFrom: Point; settleTo: Point; settleLift: number; replant?: { at: number; from: Point; to: Point } };
-export type ArenaFighterAnimation = { powerbombRearLeg?: PowerbombRearLeg; cradleForearm?: { shoulder?: Point; matrix: Matrix; hip: Point; lean: number; elbow: Point; hand: Point }; ankleMaterialFacing?: number; ankleRimAngles?: [number, number][]; clock: number | null; signature: string; epoch?: number | string; facing?: number; supportHip?: Point; motion: Motion | null; gait: number; distance: number; moving: boolean; airborne: boolean; feet: [FootMemory, FootMemory] | null; localFeet: [Point, Point] | null; grip?: Point; secondaryGrip?: Point; headGripArms?: { free: [number, number]; held: [number, number]; bend: number }[]; clotheslineAngles?: { free: [number, number]; strike: [number, number] }; supportedGripArms?: { free: [number, number]; held: [number, number]; bend: number; releasing?: boolean; strength?: number }[]; pose?: ArenaPose; landingArms?: LandingArms; ankleReach?: LandingArms; anklePivotArms?: LandingArms; scoopAnkleMotion?: Motion; scoopAnkleReversed?: boolean; pairReach?: { arms: LandingArms; motion: Motion }; carrierReleasing?: boolean; carrierReleaseArcs?: { follow: [number, number]; rest: [number, number] }[]; rig?: { motion: Motion; hip: Point; feet: [Point, Point]; shoulders: Point[]; elbows: Point[]; hands: Point[] }; slamStart?: { motion: Motion; hip: Point; feet: [Point, Point]; shoulders: Point[]; elbows: Point[]; hands: Point[] }; carryStart?: { motion: Motion; hip: Point; feet: [Point, Point]; shoulders: Point[]; elbows: Point[]; hands: Point[] }; slideMotion?: Motion; slideFeet?: [Point, Point]; supermanPlant?: { motion: Motion; feet: [Point, Point] }; supermanMotion?: Motion; supermanFeet?: [Point, Point]; dropkickMotion?: Motion; dropkickFeet?: [Point, Point]; depthStride?: number; pairLegDepth?: number; pivotStep?: number; spinSnapshot?: ArenaSpinSnapshot; contactPoints?: { origin: Point; head: Point; headSides: [Point, Point]; back: Point; shoulders: Point[]; elbows: Point[]; hands: Point[]; waist: Point; waistSides: [Point, Point]; feet: Point[] }; skeleton?: { hips: Point[]; knees: Point[]; feet: Point[]; shorts: Point[][]; pelvis: Point[]; footAngles: number[] } };
-export type ArenaActor = { candidate: Candidate; index: number; x: number; y: number; depthY?: number; scale: number; facing: number; pose: ArenaPose; angle: number; yaw?: number; pivotTurn?: number; suspension?: number; slamProgress?: ArenaSlamProgress; slamEntry?: boolean; jumpTuck?: number; carryStretch?: number; carrySupport?: 'shoulder' | 'cradle'; carryEntry?: boolean; carryFlight?: number; overheadRaise?: number; pairCarry?: boolean; pairReach?: number; pairLoad?: number; pairLift?: number; pairBackload?: number; pairHeave?: number; carrierDrive?: number; scoopStroke?: number; frontKick?: number; slideProgress?: number; supermanRun?: boolean; supermanLoad?: number; supermanProgress?: number; punchTarget?: Point; punchStrength?: number; punchArm?: 0 | 1; dropkickProgress?: number; dropkickReaction?: boolean; footTargets?: [Point, Point]; feetStrength?: number; bulldogProgress?: number; bulldogHeadlock?: boolean; backBodyProgress?: number; backBodyRaise?: number; spinebusterProgress?: number; spineLoad?: number; spineLift?: number; spineDown?: number; spineCarry?: boolean; powerbombSplit?: boolean; powerbombVictim?: boolean; powerbombLoad?: number; powerbombLift?: number; powerbombDown?: number; eyesClosed?: boolean; slamImpact?: number; scoopSlamProgress?: number; scoopLoad?: number; scoopLift?: number; scoopTurn?: number; scoopDown?: number; scoopVictim?: boolean; scoopRecover?: number; ankleGripReversed?: boolean; ankleApproach?: number; ankleThrowProgress?: number; ankleSpinRaise?: number; ankleRimToss?: boolean; carrierRelease?: { hands: [Point, Point]; elbows: [Point, Point]; shoulders: [Point, Point]; progress: number; direction: number; sourceFacing?: number; followThrough?: Point; stance?: ArenaCarryStance; sourceAngle?: number; sourceLean?: number }; linkedArm?: 0 | 1; linkedHandTarget?: Point; linkedArmStrength?: number; clotheslineArm?: 0 | 1; clotheslineTarget?: Point; clotheslineStrength?: number; clotheslineInner?: boolean; spinSuspension?: ArenaSpinSuspension; captureRelease?: boolean; spinRelease?: { snapshot: ArenaSpinSnapshot; weight: number }; footTarget?: Point; footStrength?: number; kickLeg?: number; elbowTarget?: Point; elbowStrength?: number; alpha: number; velocityX: number; velocityY: number; gaitDistance: number; phase: number; power?: number; grappleEffort?: number; grappleLiftPreparation?: number; chargePreparation?: number; chargeStrength?: number; gripMode?: 'wrist' | 'waist' | 'ankle' | 'shoulder' | 'head' | 'cradle'; gripLocked?: boolean; gripStrength?: number; gripTarget?: Point; secondaryGripTarget?: Point; animation?: ArenaFighterAnimation; motionEpoch?: number | string; motionImmediate?: boolean };
+export type ArenaFighterAnimation = { overheadRelease?: boolean; overheadSlamBends?: number[]; overheadSlamFeet?: [Point, Point]; powerbombRearLeg?: PowerbombRearLeg; cradleForearm?: { shoulder?: Point; matrix: Matrix; hip: Point; lean: number; elbow: Point; hand: Point }; ankleMaterialFacing?: number; ankleRimAngles?: [number, number][]; clock: number | null; signature: string; epoch?: number | string; facing?: number; supportHip?: Point; motion: Motion | null; gait: number; distance: number; moving: boolean; airborne: boolean; feet: [FootMemory, FootMemory] | null; localFeet: [Point, Point] | null; grip?: Point; secondaryGrip?: Point; headGripArms?: { free: [number, number]; held: [number, number]; bend: number }[]; clotheslineAngles?: { free: [number, number]; strike: [number, number] }; supportedGripArms?: { free: [number, number]; held: [number, number]; bend: number; releasing?: boolean; strength?: number }[]; pose?: ArenaPose; landingArms?: LandingArms; ankleReach?: LandingArms; anklePivotArms?: LandingArms; scoopAnkleMotion?: Motion; scoopAnkleReversed?: boolean; pairReach?: { arms: LandingArms; motion: Motion }; carrierReleasing?: boolean; carrierReleaseArcs?: { follow: [number, number]; rest: [number, number] }[]; rig?: { motion: Motion; hip: Point; feet: [Point, Point]; shoulders: Point[]; elbows: Point[]; hands: Point[] }; slamStart?: { motion: Motion; hip: Point; feet: [Point, Point]; shoulders: Point[]; elbows: Point[]; hands: Point[] }; carryStart?: { motion: Motion; hip: Point; feet: [Point, Point]; shoulders: Point[]; elbows: Point[]; hands: Point[] }; slideMotion?: Motion; slideFeet?: [Point, Point]; supermanPlant?: { motion: Motion; feet: [Point, Point] }; supermanMotion?: Motion; supermanFeet?: [Point, Point]; dropkickMotion?: Motion; dropkickFeet?: [Point, Point]; depthStride?: number; pairLegDepth?: number; pivotStep?: number; spinSnapshot?: ArenaSpinSnapshot; contactPoints?: { origin: Point; head: Point; headSides: [Point, Point]; back: Point; shoulders: Point[]; elbows: Point[]; hands: Point[]; waist: Point; waistSides: [Point, Point]; feet: Point[] }; skeleton?: { hips: Point[]; knees: Point[]; feet: Point[]; shorts: Point[][]; pelvis: Point[]; footAngles: number[] } };
+export type ArenaActor = { candidate: Candidate; index: number; x: number; y: number; depthY?: number; scale: number; facing: number; pose: ArenaPose; angle: number; yaw?: number; pivotTurn?: number; suspension?: number; slamProgress?: ArenaSlamProgress; slamEntry?: boolean; overheadSlam?: boolean; jumpTuck?: number; carryStretch?: number; carrySupport?: 'shoulder' | 'cradle'; carryEntry?: boolean; carryFlight?: number; overheadRaise?: number; pairCarry?: boolean; pairReach?: number; pairLoad?: number; pairLift?: number; pairBackload?: number; pairHeave?: number; carrierDrive?: number; scoopStroke?: number; frontKick?: number; slideProgress?: number; supermanRun?: boolean; supermanLoad?: number; supermanProgress?: number; punchTarget?: Point; punchStrength?: number; punchArm?: 0 | 1; dropkickProgress?: number; dropkickReaction?: boolean; footTargets?: [Point, Point]; feetStrength?: number; bulldogProgress?: number; bulldogHeadlock?: boolean; backBodyProgress?: number; backBodyRaise?: number; spinebusterProgress?: number; spineLoad?: number; spineLift?: number; spineDown?: number; spineCarry?: boolean; powerbombSplit?: boolean; powerbombVictim?: boolean; powerbombLoad?: number; powerbombLift?: number; powerbombDown?: number; eyesClosed?: boolean; slamImpact?: number; scoopSlamProgress?: number; scoopLoad?: number; scoopLift?: number; scoopTurn?: number; scoopDown?: number; scoopVictim?: boolean; scoopRecover?: number; ankleGripReversed?: boolean; ankleApproach?: number; ankleThrowProgress?: number; ankleSpinRaise?: number; ankleRimToss?: boolean; carrierRelease?: { hands: [Point, Point]; elbows: [Point, Point]; shoulders: [Point, Point]; progress: number; direction: number; sourceFacing?: number; followThrough?: Point; stance?: ArenaCarryStance; sourceAngle?: number; sourceLean?: number }; linkedArm?: 0 | 1; linkedHandTarget?: Point; linkedArmStrength?: number; clotheslineArm?: 0 | 1; clotheslineTarget?: Point; clotheslineStrength?: number; clotheslineInner?: boolean; spinSuspension?: ArenaSpinSuspension; captureRelease?: boolean; spinRelease?: { snapshot: ArenaSpinSnapshot; weight: number }; footTarget?: Point; footStrength?: number; kickLeg?: number; elbowTarget?: Point; elbowStrength?: number; alpha: number; velocityX: number; velocityY: number; gaitDistance: number; phase: number; power?: number; grappleEffort?: number; grappleLiftPreparation?: number; chargePreparation?: number; chargeStrength?: number; gripMode?: 'wrist' | 'waist' | 'ankle' | 'shoulder' | 'head' | 'cradle'; gripLocked?: boolean; gripStrength?: number; gripTarget?: Point; secondaryGripTarget?: Point; animation?: ArenaFighterAnimation; motionEpoch?: number | string; motionImmediate?: boolean };
 
 /** Being lifted changes screen height, while occlusion follows the ground beneath each fighter. */
 export function arenaDrawOrder<T extends { y: number; index: number; depthY?: number; paintDepth?: number; paintLayer?: number }>(actors: readonly T[]): T[] {
@@ -440,6 +440,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     state.pairReach = { motion, arms: { at: clock - delta, root: { ...source.origin }, shoulders, elbows, hands, angles: hands.map((hand, arm) => [Math.atan2(elbows[arm].y - shoulders[arm].y, elbows[arm].x - shoulders[arm].x), Math.atan2(hand.y - elbows[arm].y, hand.x - elbows[arm].x)]) } };
   }
   if (!slam || reset) state.slamStart = undefined;
+  if (!slam || !actor.overheadSlam || reset) { state.overheadSlamBends = undefined; state.overheadSlamFeet = undefined; }
+  if (slam && actor.overheadSlam && !reset && state.rig && !state.overheadSlamFeet) state.overheadSlamFeet = structuredClone(state.rig.feet);
   if (slam && actor.slamEntry && !state.slamStart && !reset && state.rig) state.slamStart = structuredClone(state.rig);
   if (!carrying || reset) state.carryStart = undefined;
   if (carrying && actor.carryEntry && !state.carryStart && !reset && state.rig) state.carryStart = structuredClone(state.rig);
@@ -822,6 +824,17 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     Object.assign(target, { crouch: 4.4, lean: 8, hipX: -1.6, head: -3.5, backX: -16, backY: -17, frontX: 14, frontY: -23, contact: 0, shoulderLift: 0, clapTurn: 0, cheerTurn: 0, applause: 0 });
     (Object.keys(target) as (keyof Motion)[]).forEach(key => { target[key] = mix(source[key], target[key], load); });
   }
+  if (pose === 'overhead' && actor.gripMode === 'waist' && !reset && state.motion && (actor.overheadRaise ?? 1) < .25) {
+    // Begin the loaded overhead stance from the real receiving posture.
+    // Setting the whole pose at once moved the free elbow before the catch.
+    const follow = 1 - Math.exp(-delta / 70);
+    for (const key of Object.keys(target) as (keyof Motion)[]) if (key !== 'contact') target[key] = mix(state.motion[key], target[key], follow);
+  }
+  if (pose === 'overhead' && !reset && state.motion && (actor.gripMode === 'waist' || actor.gripMode === undefined) && !actor.carrierRelease && actor.ankleThrowProgress === undefined && target.contact < state.motion.contact) {
+    // The physical waist release is immediate; the turned chest and far
+    // shoulder open with the arm's inertia instead of resetting in one frame.
+    target.contact = mix(state.motion.contact, target.contact, 1 - Math.exp(-delta / 100));
+  }
   if (reset || slam || carrying || pairLift || state.scoopAnkleMotion || feetSpin || sliding || slideRise || superman || actor.supermanLoad !== undefined || dropkick || bulldog || actor.ankleThrowProgress !== undefined || pose === 'backbodydrop' || powerbomb || pose === 'spinebuster' || pose === 'scoopslam' || pose === 'scoop' || pose === 'trip' && actor.frontKick !== undefined || pose === 'overhead' && actor.overheadRaise !== undefined) state.motion = { ...target };
   else {
     (Object.keys(target) as (keyof Motion)[]).forEach(key => {
@@ -873,6 +886,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
       Object.assign(foot, pointMix(start, seated, powerLift));
     });
     if (state.slamStart) airFeet.forEach((foot, leg) => Object.assign(foot, pointMix(state.slamStart!.feet[leg], foot, slump)));
+    if (actor.overheadSlam && state.overheadSlamFeet) airFeet.forEach((foot, leg) => Object.assign(foot, pointMix(state.overheadSlamFeet![leg], foot, ease(tuck / .2))));
     const amount = reset || slam || carrying || feetSpin ? 1 : 1 - Math.exp(-delta / 60);
     feet = state.localFeet.map((foot, leg) => pointMix(foot, airFeet[leg], amount)) as [Point, Point];
     if (pose === 'sidekick') {
@@ -1107,7 +1121,9 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const overheadReach = pose === 'overhead' ? clamp(actor.overheadRaise ?? 1) * (1 - carrierSettle) : pose === 'scoop' ? ease((clamp(actor.scoopStroke ?? phase) - .18) / .54) : 0;
   const armRaise = jointOverhead ? 0 : overheadReach;
   const upperArm = mix(11, 14, armRaise), lowerArm = mix(10.5, 14, armRaise), armReach = pairLift && actor.gripMode === 'shoulder' ? upperArm + lowerArm - .02 : mix(21.3, 27.8, armRaise);
-  hands = hands.map((hand, arm) => reachable(shoulders[arm], hand, armReach, Math.abs(upperArm - lowerArm) + .02));
+  const protectedOpening = slam && actor.overheadSlam ? .35 : pose === 'overhead' && (actor.gripMode === 'waist' || actor.gripMode === undefined) && !actor.carrierRelease ? .45 : 0;
+  const minimumArmReach = protectedOpening ? Math.sqrt(upperArm ** 2 + lowerArm ** 2 - 2 * upperArm * lowerArm * Math.cos(protectedOpening)) : Math.abs(upperArm - lowerArm) + .02;
+  hands = hands.map((hand, arm) => reachable(shoulders[arm], hand, armReach, minimumArmReach));
   if (pose === 'clap' && motion.contact < .03 && target.frontX - target.backX < 5.01 && hands[1].x - hands[0].x < 5.4) {
     // Resolve palm contact at the chest; two hands stay distinct and share one height.
     const center = { x: (hands[0].x + hands[1].x) / 2, y: (hands[0].y + hands[1].y) / 2 };
@@ -1116,6 +1132,23 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   // Keep applause in front of the chest and raised victory arms outside the head.
   const elbows = hands.map((hand, arm) => {
     if (slam) {
+      if (actor.overheadSlam && !reset && state.contactPoints) {
+        // A waist lift keeps the same protective elbow as the loaded brace;
+        // switching its IK side at takeoff flipped it through the torso.
+        const world = (joint: Point) => {
+          const p = rotate(joint, lean), point = rotate({ x: (hip.x + p.x) * scale * facing, y: (hip.y + p.y) * scale }, actor.angle);
+          return { x: x + point.x, y: y - 2 * scale + point.y };
+        };
+        state.overheadSlamBends ??= [];
+        if (state.overheadSlamBends[arm] === undefined) {
+          const prior = state.contactPoints.elbows[arm];
+          state.overheadSlamBends[arm] = [1, -1].map(bend => ({ bend, joint: knee(shoulders[arm], hand, upperArm, lowerArm, bend) })).reduce((nearest, candidate) => {
+            const a = world(nearest.joint), b = world(candidate.joint);
+            return Math.hypot(b.x - prior.x, b.y - prior.y) < Math.hypot(a.x - prior.x, a.y - prior.y) ? candidate : nearest;
+          }).bend;
+        }
+        return knee(shoulders[arm], hand, upperArm, lowerArm, state.overheadSlamBends[arm]);
+      }
       // A body being dropped protects its chest with tucked elbows. Letting
       // either joint bend outside the shoulder made that arm hit the floor
       // first when the slam direction reversed, holding the back above it.
@@ -1769,6 +1802,34 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     const lowerAngle = turn(lower, { x: hands[arm].x - elbows[arm].x, y: hands[arm].y - elbows[arm].y });
     elbows[arm] = { x: shoulders[arm].x + Math.cos(upperAngle) * upperArm, y: shoulders[arm].y + Math.sin(upperAngle) * upperArm };
     hands[arm] = { x: elbows[arm].x + Math.cos(lowerAngle) * lowerArm, y: elbows[arm].y + Math.sin(lowerAngle) * lowerArm };
+  }
+  if (reset || (actor.gripStrength ?? 0) > .001 || actor.carrierRelease || pose !== 'overhead' && pose !== 'guard') state.overheadRelease = undefined;
+  if (pose === 'overhead' && actor.overheadRaise !== undefined && (actor.gripMode === 'waist' || actor.gripMode === undefined) && (actor.gripStrength ?? 0) <= .001 && !actor.carrierRelease) state.overheadRelease = true;
+  if (state.overheadRelease && !reset && state.contactPoints) {
+    // After releasing the overhead weight, bring each complete arm down
+    // from its painted direction. The free palm must not cross a shoulder
+    // and make its elbow choose the opposite bend in a single frame.
+    const previous = state.contactPoints, determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
+    const localAngle = (from: Point, to: Point) => {
+      const dx = to.x - from.x, dy = to.y - from.y;
+      const direction = rotate({ x: (matrix[3] * dx - matrix[2] * dy) / determinant, y: (-matrix[1] * dx + matrix[0] * dy) / determinant }, -lean);
+      return Math.atan2(direction.y, direction.x);
+    };
+    const signed = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle));
+    const bounded = (value: number, limit: number) => Math.max(-limit, Math.min(limit, value));
+    let settled = true;
+    for (let arm = 0; arm < 2; arm++) {
+      const shoulder = shoulders[arm], upper = localAngle(previous.shoulders[arm], previous.elbows[arm]), lower = localAngle(previous.elbows[arm], previous.hands[arm]);
+      const desiredUpper = Math.atan2(elbows[arm].y - shoulder.y, elbows[arm].x - shoulder.x), desiredLower = Math.atan2(hands[arm].y - elbows[arm].y, hands[arm].x - elbows[arm].x);
+      const limit = delta * .008, upperAngle = upper + bounded(signed(desiredUpper - upper), limit);
+      const bend = signed(lower - upper), desiredBend = signed(desiredLower - desiredUpper);
+      settled &&= Math.abs(signed(desiredUpper - upper)) < .02 && Math.abs(desiredBend - bend) < .02;
+      const elbowBend = bounded(bend + bounded(desiredBend - bend, limit), Math.PI - .45);
+      elbows[arm] = { x: shoulder.x + Math.cos(upperAngle) * upperArm, y: shoulder.y + Math.sin(upperAngle) * upperArm };
+      hands[arm] = { x: elbows[arm].x + Math.cos(upperAngle + elbowBend) * lowerArm, y: elbows[arm].y + Math.sin(upperAngle + elbowBend) * lowerArm };
+    }
+    // Carry the same arm return into the standing pose after impact.
+    if (pose === 'guard' && settled) state.overheadRelease = undefined;
   }
   // The near forearm wraps over the received body. Capture the final painted
   // geometry for that foreground pass without evaluating the rig a second time.

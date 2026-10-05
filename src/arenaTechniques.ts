@@ -1,5 +1,6 @@
 import type { ArenaPoint, ArenaRound, ArenaThrowFrame } from './arenaLogic';
 import { ARENA_DRAGGED_ANKLE_THROW_HEIGHT, ARENA_DRAGGED_ANKLE_THROW_TIMING } from './arenaWrestlingMoves';
+import { arenaOverheadSlamMotion } from './arenaOverheadSlam';
 
 export const arenaFinalTechniques = ['armspin', 'trip', 'suplex', 'sidekick', 'elbow'] as const;
 export type ArenaFinalTechnique = typeof arenaFinalTechniques[number];
@@ -134,26 +135,25 @@ export function arenaTechniqueTargets(round: ArenaRound, elapsed: number, center
     frame.grip = phase >= .30 && phase < .54 ? 'waist' : undefined;
     frame.stage = phase < .40 ? 'grip' : phase < .54 ? 'hook' : phase < .64 ? 'fall' : phase < .72 ? 'stunned' : frontKick < 1 ? 'kick' : 'roll';
   } else if (round.tactic === 'suplex') {
-    const lift = ease((phase - .34) / .30), drop = clamp((phase - .76) / .12);
-    const slam = drop ** 2, turn = ease((phase - .76) / .12);
+    const motion = arenaOverheadSlamMotion(phase, side), { lift, slam } = motion;
     const take = ease((phase - .30) / .04);
     frame.aggressor.x = center.x - side * mix(24, 22, take);
     frame.victim.x = frame.aggressor.x + side * (mix(mix(48, 43, take), 12, lift) + slam * 14);
-    frame.victim.y = center.y + slam * 3;
+    frame.victim.y = center.y + motion.victimOffsetY;
     // Bring the waist above the driver's head, read the raised hold, then
     // accelerate straight down into the shoulder landing without a back arch.
-    frame.lift = lift * 100 * (1 - slam);
-    frame.victimAngle = side * Math.PI * .53 * turn;
+    frame.lift = motion.height;
+    frame.victimAngle = motion.angle;
     // After this rotation the feet point to the other side of the body. The
     // driver approaches those feet and pulls outward instead of across the head.
     frame.exitDirection = -side as 1 | -1;
-    frame.aggressorPose = phase >= .34 && phase < .88 ? 'overhead' : undefined;
-    frame.aggressorOverheadRaise = lift * (1 - slam);
+    frame.aggressorPose = motion.overhead ? 'overhead' : undefined;
+    frame.aggressorOverheadRaise = motion.overheadRaise;
     frame.victimPose = phase >= .88 ? 'stunned' : phase >= .34 ? 'airborne' : undefined;
-    if (phase >= .34) frame.victimSlam = { tuck: lift, slump: ease((phase - .88) / .06) };
-    frame.victimSuspension = phase >= .34 && phase < .88 ? 1 - turn : 0;
-    frame.slamImpact = phase >= .88 && phase < .96 ? 1 - ease((phase - .88) / .08) : 0;
-    frame.grip = phase >= .30 && phase < .76 ? 'waist' : undefined;
+    frame.victimSlam = motion.victimSlam;
+    frame.victimSuspension = motion.suspension;
+    frame.slamImpact = motion.impact;
+    frame.grip = motion.gripping ? 'waist' : undefined;
     frame.stage = phase < .34 ? 'grip' : phase < .64 ? 'lift' : phase < .76 ? 'overhead' : phase < .94 ? 'slam' : elapsed < round.impact ? 'stunned' : 'drag';
   } else if (round.tactic === 'sidekick') {
     const window = arenaSidekickWindow(round), jump = clamp((elapsed - window.start) / window.duration);

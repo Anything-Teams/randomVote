@@ -7,6 +7,7 @@ async function source(path) {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
 const { ARENA_CHARGE_SPEED } = await source('src/arenaCharge.ts');
+const { arenaOverheadSlamMotion } = await source('src/arenaOverheadSlam.ts');
 const { arenaWrestlingMoveOutcome, arenaWrestlingMoveTargets, arenaWrestlingMoveIsCounter, arenaAnkleRimThrowTargets, ARENA_WRESTLING_MOVE_CHANCE, ARENA_WRESTLING_MOVE_TIMING, ARENA_SCOOP_SLAM_TIMING, ARENA_SCOOP_RECOVERY_TIMING, ARENA_SCOOP_FINISH_TIMING, ARENA_SPINEBUSTER_TIMING, ARENA_CLOTHESLINE_FINISH_TIMING, ARENA_DRAGGED_ANKLE_THROW_TIMING, ARENA_BACK_BODY_DROP_TIMING, ARENA_POWERBOMB_TIMING } = await source('src/arenaWrestlingMoves.ts');
 const { createArenaFighterAnimation, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const kinds = ['clothesline', 'dropkick', 'powerbomb', 'backbodydrop', 'spinebuster', 'scoopslam'];
@@ -381,7 +382,7 @@ test('the two-foot revolution preserves its captured pickup facing and cannot st
   }
 });
 
-test('a powerbomb folds the received waist, seats it overhead, slams the back and waits for a real ankle pickup', () => {
+test('an incoming waist catch uses the existing overhead slam and waits for a real ankle pickup', () => {
   for (const side of [-1, 1]) {
     const values = contacted('powerbomb', side), timing = ARENA_POWERBOMB_TIMING;
     const at = age => arenaWrestlingMoveTargets(values.actual, values.contactAt + age, center, values.initial, side);
@@ -390,12 +391,22 @@ test('a powerbomb folds the received waist, seats it overhead, slams the back an
     const raised = at(timing.load + timing.lift + timing.hold / 2);
     assert.equal(raised.stage, 'turn'); assert.equal(raised.powerbombLift, 1); assert.equal(raised.powerbombDown, 0);
     assert.equal(raised.victimEyesClosed, false, 'the incoming player stays conscious while being caught and lifted');
-    assert.ok(raised.victimHeight > 110); assert.equal(Math.abs(raised.victimAngle), 0); assert.equal(raised.powerbombVictim, true);
-    assert.ok(raised.powerbombSupport.y < raised.driver.y - 130, 'the seated waist is above the supporting shoulders');
+    assert.equal(raised.driverPose, 'overhead'); assert.equal(raised.overheadRaise, 1);
+    assert.equal(raised.victimPose, 'airborne'); assert.equal(raised.victimHeight, 100); assert.equal(Math.abs(raised.victimAngle), 0);
+    assert.equal(raised.powerbombVictim, undefined); assert.equal(raised.victimCarryStretch, undefined); assert.equal(raised.powerbombSupport, undefined, 'the old seated waist curve cannot override the reused overhead body');
+    for (const age of [timing.load, timing.load + timing.lift / 2, timing.load + timing.lift, timing.load + timing.lift + timing.hold, timing.load + timing.lift + timing.hold + timing.slam / 2]) {
+      const frame = at(age), motion = arenaOverheadSlamMotion(frame.driverPhase, frame.side);
+      assert.equal(frame.victimHeight, motion.height); assert.equal(frame.victimAngle, motion.angle);
+      assert.equal(frame.victimSuspension, motion.suspension); assert.deepEqual(frame.victimSlam, motion.victimSlam);
+      assert.equal(frame.overheadRaise, motion.overheadRaise); assert.equal(frame.driverPose, 'overhead');
+      assert.equal(frame.gripStrength, motion.gripping ? 1 : 0, 'the reused downward stroke releases the waist at its original phase');
+    }
     const floorAt = timing.load + timing.lift + timing.hold + timing.slam;
     assert.equal(at(floorAt - 1).victimEyesClosed, false, 'the eyes close on floor impact, not while accepting the rush');
     const floor = at(floorAt);
-    assert.equal(floor.victimPose, 'stunned'); assert.equal(floor.victimHeight, 0); assert.equal(floor.victimSlam.slump, 1); assert.equal(floor.victimEyesClosed, true);
+    assert.equal(floor.victimPose, 'stunned'); assert.equal(floor.victimHeight, 0); assert.equal(floor.victimSlam.slump, 0); assert.equal(floor.victimEyesClosed, true);
+    assert.equal(floor.slamImpact, 1, 'the shoulder first hits the sand before the tucked body relaxes');
+    assert.equal(at(floorAt + timing.recover).victimSlam.slump, 1, 'the existing floor relaxation completes before ankle pickup');
     assert.ok(Math.abs(floor.victimAngle) > 1.4); assert.equal(floor.canRelease, false);
     const pending = at(floorAt + timing.recover + timing.groggy + 2000);
     assert.equal(pending.ankleGripAt, null); assert.equal(pending.canRelease, false); assert.equal(pending.victimHeight, 0);
