@@ -127,7 +127,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
     let actualContactAt, anklesSeen = false, ankleFrames = 0, previousRig, previousDriverRig, previousSpinMatrix, previousSpinWeight, previousTurn, spinFrames = 0, fullTurnSeen = false, runSeen = false, floorSeen = false;
     const scoopStages = new Set();
     const clotheslineStages = new Set();
-    let sharedFallSeen = false, standingBeforeGrip = false, headsTouching = false, casterPassedVictim = false;
+    let sharedFallSeen = false, standingBeforeGrip = false, oppositeHeadDirectionMs = 0, casterPassedVictim = false;
     let counterGuardSeen = false, counterPrepareSeen = false;
     let overlapLiftTurnFrames = 0, overheadFrames = 0, scoopSupportFrames = 0, scoopFloatingMs = 0, scoopOverheadSeen = false, scoopImpactSeen = false, pivotFrames = 0, tangentFrames = 0;
     let spineOverlapFrames = 0, spinePause = 0, maxSpinePause = 0;
@@ -307,7 +307,10 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           const driverSkin = scene.ctx.records.get(driver.candidate.id).headSkin;
           const victimSkin = scene.ctx.records.get(victim.candidate.id).headSkin;
           assert.ok(driverSkin && victimSkin, 'both actual painted head rectangles are captured during the shared fall');
-          headsTouching ||= polygonGap(driverSkin, victimSkin) <= 3;
+          const driverHeadX = driverSkin.reduce((sum, point) => sum + point.x, 0) / driverSkin.length;
+          const victimHeadX = victimSkin.reduce((sum, point) => sum + point.x, 0) / victimSkin.length;
+          if (elapsed - window.contactAt >= 240 && driver.angle * victim.angle < -.5
+            && (driverHeadX - paintedDriver.waist.x) * (victimHeadX - paintedVictim.waist.x) < -100) oppositeHeadDirectionMs += frameDelta;
         }
         if (driver.pose === 'recover') {
           clotheslineStages.add('recover');
@@ -407,7 +410,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       assert.ok(scoopOverheadSeen && scoopImpactSeen, 'the real supported waist clears the caster crown and lands with a visible unconscious impact');
       assert.ok(scoopSupportFrames > 0, 'the actual highest lift exercises its planted heel support');
     }
-    if (kind === 'clothesline') assert.ok(casterPassedVictim && headsTouching && sharedFallSeen && standingBeforeGrip && ['fall', 'recover', 'ankle-approach', 'ankle-grip', 'spin', 'toss'].every(stage => clotheslineStages.has(stage)), 'the running caster passes the opponent before the close shared fall, rise, ankle pickup, full turn and throw');
+    if (kind === 'clothesline') assert.ok(casterPassedVictim && oppositeHeadDirectionMs >= 80 && sharedFallSeen && standingBeforeGrip && ['fall', 'recover', 'ankle-approach', 'ankle-grip', 'spin', 'toss'].every(stage => clotheslineStages.has(stage)), 'the flying caster passes the opponent and their painted bodies fall in opposite orientations before the rise, ankle pickup, full turn and throw');
   }
 });
 

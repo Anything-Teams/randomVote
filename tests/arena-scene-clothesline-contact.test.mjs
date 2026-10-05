@@ -43,6 +43,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
   });
   let ran = false, contactSeen = false, knockoutSeen = false, released = false, finished = false, stoppedAt;
   let contactRoot, leadingFallMs = 0, checkedEarlyMomentum = false;
+  let airborneApproachMs = 0, oppositeFallMs = 0;
   let ankleFrames = 0, spinFrames = 0, previousTurn;
   for (let elapsed = 0; elapsed <= 70000; elapsed += step) {
     render(ctx, props, elapsed, elapsed, sim, step, false);
@@ -53,6 +54,10 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
     const driver = capturedActors().get(round.aggressor), victim = capturedActors().get(round.victim);
     assert.ok(driver && victim);
     ran ||= driver.pose === 'run' && Math.hypot(driver.velocityX, driver.velocityY) > 80;
+    // The arm strike is a flying wrestling tackle, not a grounded runner
+    // falling only after contact. Measure the drawn elevation before the
+    // contact event; a pose name alone does not prove a visible jump.
+    if (window.contactAt == null && driver.depthY - driver.y >= 8 && driver.suspension > .5) airborneApproachMs += step;
     if (window.contactAt == null && ran && elapsed >= window.plannedContactAt && Math.hypot(frame.driverVelocity.x, frame.driverVelocity.y) < 1) {
       stoppedAt ??= elapsed;
       assert.ok(elapsed - stoppedAt < 400, `the runner cannot wait motionless in front of an unreachable stale neck (${elapsed}ms, seed 83)`);
@@ -63,10 +68,19 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       assert.ok(ran, 'the strike follows a visible actual run');
       const driverRig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
       const liveNeck = { x: victimRig.head.x, y: victimRig.head.y + victim.scale * 20 };
+      const trunkLength = distance(driverRig.head, driverRig.waist);
+      assert.ok(airborneApproachMs >= 80, 'the real approach shows at least 80ms of visible flight before the arm catches the neck');
+      assert.ok(driver.depthY - driver.y >= 8 && driver.suspension > .5, 'the neck hook happens while the actual driver is airborne');
+      assert.ok(Math.abs(driverRig.head.y - driverRig.waist.y) / trunkLength <= .7, 'the painted driver extends its trunk into a nearly horizontal flying strike at the neck hook');
       const insideForearm = { x: driverRig.elbows[1].x + (driverRig.hands[1].x - driverRig.elbows[1].x) * .25, y: driverRig.elbows[1].y + (driverRig.hands[1].y - driverRig.elbows[1].y) * .25 };
       const neckGap = segmentGap(liveNeck, driverRig.elbows[1], insideForearm);
       assert.ok(neckGap < 8, `the painted inside elbow reaches the victim's current neck (${neckGap.toFixed(2)}px at ${elapsed}ms)`);
       assert.ok(distance(liveNeck, driverRig.hands[1]) > 12, 'the fist extends beyond the neck instead of punching it');
+      assert.ok(driverRig.feet.every(foot => distance(liveNeck, foot) > 14), 'the elbow, rather than dropkick feet, causes the actual neck contact');
+      for (let arm = 0; arm < 2; arm++) {
+        assert.ok(Math.abs(distance(driverRig.shoulders[arm], driverRig.elbows[arm]) - 11 * driver.scale) < .001, 'the flying strike keeps each painted upper arm attached at its ordinary length');
+        assert.ok(Math.abs(distance(driverRig.elbows[arm], driverRig.hands[arm]) - 10.5 * driver.scale) < .001, 'the flying strike keeps each painted forearm at its ordinary length');
+      }
     }
     if (window.contactAt != null && elapsed < frame.floorAt) {
       const age = elapsed - window.contactAt, driverRig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
@@ -74,6 +88,8 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       // the caster's trunk passes the opponent instead of settling behind it.
       // Check the live roots and painted hips, not only a planned end point.
       if (frame.side * (driver.x - victim.x) > 12 && frame.side * (driverRig.waist.x - victimRig.waist.x) > 12) leadingFallMs += step;
+      const driverHeadward = driverRig.head.x - driverRig.waist.x, victimHeadward = victimRig.head.x - victimRig.waist.x;
+      if (age >= 240 && driver.angle * victim.angle < -.5 && driverHeadward * victimHeadward < -100) oppositeFallMs += step;
       if (!checkedEarlyMomentum && age >= 96 && age <= 150) {
         assert.ok(contactRoot, 'the real neck contact anchors the pass-through measurement');
         const advance = frame.side * (driver.x - contactRoot.x);
@@ -114,6 +130,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
     if (Object.keys(capturedRanks()).length === order.length) { finished = true; break; }
   }
   assert.ok(checkedEarlyMomentum && leadingFallMs >= 80, 'the actual caster keeps running momentum and visibly carries its trunk past the opponent before both hit the floor');
+  assert.ok(oppositeFallMs >= 80, 'after the flying arm collision the painted bodies fall in opposite head-to-foot directions for a visible interval');
   assert.ok(contactSeen && knockoutSeen && released && finished, 'the same running strike must proceed through knockout, actual two-toe support, one full revolution, release and all drawn ranks');
   assert.deepEqual(capturedRanks(), { '1': 5, '2': 4, '3': 3, '4': 2, '5': 1 });
 });

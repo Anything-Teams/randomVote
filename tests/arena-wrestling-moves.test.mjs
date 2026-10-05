@@ -38,10 +38,13 @@ test('each new wrestling move uses an independent four percent cosmetic roll', (
   for (const invalid of [-1, 1000, .5, NaN]) assert.throws(() => arenaWrestlingMoveOutcome(invalid), RangeError);
 });
 
-test('clothesline needs a real accelerating runway while hip counters wait for the incoming opponent', () => {
+test('a clothesline runs into its flying arm strike while hip counters wait for the incoming opponent', () => {
   for (const side of [-1, 1]) {
-    const clothesline = launched('clothesline', side), early = arenaWrestlingMoveTargets(clothesline.actual, clothesline.actual.launchAt + 250, center, clothesline.initial, side);
+    const clothesline = launched('clothesline', side), early = arenaWrestlingMoveTargets(clothesline.actual, clothesline.actual.start + 250, center, clothesline.initial, side);
     assert.equal(early.canContact, false); assert.equal(early.driverPose, 'run'); assert.ok(distance(early.driver, clothesline.initial.driver) > 25);
+    const flying = arenaWrestlingMoveTargets(clothesline.actual, clothesline.actual.launchAt + 250, center, clothesline.initial, side);
+    assert.ok(flying.driverHeight > 20 && flying.driverSuspension === 1 && Math.abs(flying.driverAngle) > 1, 'the accelerating stride launches a visibly horizontal flying body before contact');
+    assert.equal(flying.footTargets, undefined); assert.equal(flying.feetStrength, 0, 'the flying clothesline strikes with its arm rather than converting into a two-foot kick');
     const close = arenaWrestlingMoveTargets(window('clothesline'), 1000, center, { driver: { x: 500, y: 416 }, victim: { x: 500 + side * 90, y: 416 } }, side);
     assert.equal(close.canPerform, false, 'a short reach cannot become an instant running clothesline');
     for (const kind of ['powerbomb', 'spinebuster', 'backbodydrop', 'scoopslam']) {
@@ -203,7 +206,7 @@ test('the solo clothesline meets the real neck with its inner elbow while the fi
     for (let elapsed = values.actual.launchAt; elapsed < values.opening.requiredEndAt; elapsed += 16) {
       const frame = arenaWrestlingMoveTargets(values.actual, elapsed, center, values.initial, side);
       if (!frame.canContact || frame.clotheslineStrength <= .75) continue;
-      const actor = fighter(index, { ...frame.driver, facing: frame.driverFacing, pose: frame.driverPose, phase: frame.driverPhase, clotheslineArm: 1, clotheslineTarget: frame.clotheslineTarget, clotheslineStrength: frame.clotheslineStrength, clotheslineInner: frame.clotheslineInner });
+      const actor = fighter(index, { ...frame.driver, y: frame.driver.y - frame.driverHeight, angle: frame.driverAngle, facing: frame.driverFacing, pose: frame.driverPose, phase: frame.driverPhase, suspension: frame.driverSuspension, dropkickProgress: frame.dropkickProgress, clotheslineArm: 1, clotheslineTarget: frame.clotheslineTarget, clotheslineStrength: frame.clotheslineStrength, clotheslineInner: frame.clotheslineInner });
       const contact = sampleArenaFighterContacts(actor, elapsed);
       const inner = { x: contact.elbows[1].x + (contact.hands[1].x - contact.elbows[1].x) * .25, y: contact.elbows[1].y + (contact.hands[1].y - contact.elbows[1].y) * .25 };
       if (segmentGap(neck, contact.elbows[1], inner) < 8 && distance(neck, contact.hands[1]) > 12) {
@@ -398,16 +401,16 @@ test('all five floor finishes reserve the loser until an actual two-ankle hold c
   }
 });
 
-test('a clothesline falls together, rises before the ankle hold and finishes with a planted complete revolution', () => {
+test('a flying clothesline falls in opposite orientations, rises before the ankle hold and finishes with a planted complete revolution', () => {
   for (const side of [-1, 1]) {
     const values = contacted('clothesline', side), fallAt = values.contactAt + 300;
     const falling = arenaWrestlingMoveTargets(values.actual, fallAt, center, values.initial, side);
     assert.equal(falling.stage, 'fall');
-    assert.ok(side * falling.driverAngle > 1 && side * falling.victimAngle > 1, 'the collision brings both bodies down');
+    assert.ok(-side * falling.driverAngle > 1 && side * falling.victimAngle > 1, 'the airborne driver passes the victim and the collision brings their bodies down in opposite orientations');
     assert.ok(falling.driverSlam.slump > .8 && falling.victimSlam.slump > .8);
     const floor = arenaWrestlingMoveTargets(values.actual, falling.floorAt, center, values.initial, side);
     assert.equal(floor.victimEyesClosed, true); assert.equal(floor.slamImpact, 1);
-    assert.ok(Math.abs(distance(floor.driver, floor.victim) - 32) < .001, 'the matching fallen trunks put their visible heads next to one another');
+    assert.ok(Math.abs(distance(floor.driver, floor.victim) - 32) < .001, 'the collision leaves the fallen driver visibly ahead of the opponent');
     const standing = arenaWrestlingMoveTargets(values.actual, falling.pickupReadyAt, center, values.initial, side);
     assert.equal(standing.driverAngle, 0); assert.equal(standing.driverSlam, undefined);
     assert.equal(standing.victimPose, 'stunned'); assert.equal(standing.victimHeight, 0);

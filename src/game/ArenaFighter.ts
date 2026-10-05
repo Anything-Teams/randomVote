@@ -985,6 +985,9 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   }
   const footPoint = (leg: number, point: Point) => { const p = rotate(point, footAngles[leg]); return { x: feet[leg].x + p.x, y: feet[leg].y + p.y }; };
   const bodyWidth = 18 + index % 3, shoulderWidth = bodyWidth * .43;
+  // A loaded shrug joins the raised shoulder bases through the trapezius and
+  // neck. Keep the trunk's original length rather than lifting detached arm
+  // roots or stretching the whole torso into the head.
   // A grip turns the chest toward the opponent, bringing the far shoulder forward.
   // The receiving shoulder opens beneath the back before both arms press
   // overhead. Holding the far shoulder forward through this whole lift
@@ -992,6 +995,11 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const cradleShoulder = pose === 'scoopslam' && actor.gripMode === 'cradle' ? 1 - clamp(actor.scoopLoad ?? 0) * (1 - clamp(actor.scoopLift ?? 0)) : 1;
   const shoulderContact = spin || released && releaseWeight > 0 ? 0 : jointOverhead ? motion.contact * (1 - clamp(actor.overheadRaise ?? 1)) : anklePivot ? motion.contact * (1 - clamp(actor.ankleThrowProgress!)) : motion.contact * cradleShoulder;
   const shoulders = [mix(-shoulderWidth, 3.5, shoulderContact), shoulderWidth].map(offset => ({ x: offset * (casterPlane ? across.x : turnWidth), y: -20 - motion.shoulderLift + (casterPlane ? offset * across.y : 0) }));
+  const chestBridge = scoopStance && motion.shoulderLift > 3 ? [
+    { x: -bodyWidth / 2, y: -22 }, { x: shoulders[0].x / turnWidth, y: shoulders[0].y },
+    { x: -2.7, y: -28 }, { x: 2.7, y: -28 },
+    { x: shoulders[1].x / turnWidth, y: shoulders[1].y }, { x: bodyWidth / 2, y: -22 },
+  ] : undefined;
   if (released?.snapshot.shoulders && releaseWeight > 0) shoulders.forEach((shoulder, arm) => Object.assign(shoulder, pointMix(shoulder, released.snapshot.shoulders![arm], releaseWeight)));
   if (actor.carrierRelease && (!actor.carrierRelease.stance || actor.carrierRelease.followThrough || actor.pivotTurn !== undefined && actor.gripMode === 'ankle')) {
     const source = actor.carrierRelease, weight = 1 - ease(clamp(source.progress));
@@ -1255,7 +1263,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const yoke = [...fabricEdge(fabric).slice(0, -1), ...fabricEdge([...fabric].reverse()).slice(0, -1)];
   const headWidth = [14, 15, 14, 16][personality], headY = -33 - index % 2 + overheadReach * (jointOverhead ? 7 : 5);
   let rootX = x, rootY = y - 2 * scale, pivotY = 0;
-  if (air && pose !== 'sidekick' && pose !== 'held' && !superman && !dropkick) {
+  if (air && pose !== 'sidekick' && pose !== 'held' && !superman && (!dropkick || actor.clotheslineInner && slam)) {
     pivotY = -24;
     const bounds: Point[] = [];
     const boundRect = (origin: Point, width: number, height: number, transform = (point: Point) => point) => {
@@ -1282,6 +1290,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
       boundRect({ x: hand.x - 2.5, y: hand.y - 1.7 }, 5, 4, bodyPoint);
     });
     boundRect({ x: -bodyWidth / 2 - 1, y: -23 }, bodyWidth + 2, 28, torsoPoint);
+    if (chestBridge) bounds.push(...chestBridge.map(torsoPoint));
     const lowest = Math.max(...bounds.map(point => Math.sin(actor.angle) * point.x * facing + Math.cos(actor.angle) * (point.y - pivotY)));
     rootY = y - lowest * scale;
     // A released wrist starts in the same transform as the held body, then eases
@@ -1296,8 +1305,11 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     // Rotate the airborne torso about its pelvis. The soles extend forward
     // while the head stays behind them; a ground-marker rotation would move
     // the hip out of reach and make both feet miss their captured chest.
-    matrix[4] = x + hip.x * scale * facing - matrix[0] * hip.x - matrix[2] * hip.y;
-    matrix[5] = y - 2 * scale + hip.y * scale - matrix[1] * hip.x - matrix[3] * hip.y;
+    // A flying neck hook keeps this same pelvis pivot through contact, then
+    // settles its complete horizontal silhouette onto the sand as it falls.
+    const landing = actor.clotheslineInner && slam ? slump : 0;
+    matrix[4] = mix(x + hip.x * scale * facing - matrix[0] * hip.x - matrix[2] * hip.y, matrix[4], landing);
+    matrix[5] = mix(y - 2 * scale + hip.y * scale - matrix[1] * hip.x - matrix[3] * hip.y, matrix[5], landing);
   }
   if (spin && feetSpin) {
     const center = pointMix(spin.grips[0], spin.grips[1], .5), flat = clamp(spin.flatness);
@@ -1554,7 +1566,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     const turn = (from: Point, to: Point) => {
       const start = Math.atan2(from.y, from.x), target = Math.atan2(to.y, to.x);
       const gap = Math.atan2(Math.sin(target - start), Math.cos(target - start));
-      return start + Math.max(-delta * .008, Math.min(delta * .008, gap));
+      const limit = delta * (dropkick ? .010 : .008);
+      return start + Math.max(-limit, Math.min(limit, gap));
     };
     const upperAngle = turn(upper, { x: elbows[arm].x - shoulders[arm].x, y: elbows[arm].y - shoulders[arm].y });
     const lowerAngle = turn(lower, { x: hands[arm].x - elbows[arm].x, y: hands[arm].y - elbows[arm].y });
@@ -1606,6 +1619,10 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   if (ankleGripTurn) arm(!farArm);
   ctx.save(); ctx.scale(turnWidth, 1);
   rect(-bodyWidth / 2, -23, bodyWidth, 23, palette.base);
+  if (chestBridge) {
+    ctx.fillStyle = palette.base; ctx.beginPath(); ctx.moveTo(chestBridge[0].x, chestBridge[0].y);
+    chestBridge.slice(1).forEach(point => ctx.lineTo(point.x, point.y)); ctx.closePath(); ctx.fill();
+  }
   rect(-bodyWidth / 2 + 2, -21, 5, 2, palette.light); rect(-bodyWidth / 2 + 3, -15, 3, 2, palette.light);
   rect(bodyWidth / 2 - 3, -20, 3, 5, palette.shade); rect(bodyWidth / 2 - 4, -10, 4, 4, palette.shade);
   if (frontAlpha > 0) { ctx.save(); ctx.globalAlpha *= frontAlpha; rect(-3, -14, 6, 1, palette.shade); ctx.restore(); }
