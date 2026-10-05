@@ -1,4 +1,5 @@
 import type { ArenaPoint, ArenaRound } from './arenaLogic';
+import { ARENA_CHARGE_SPEED, arenaChargeDuration, arenaChargeTravel } from './arenaCharge';
 
 export const ARENA_RIM_CHARGE_DURATION = 2600;
 export type ArenaRimChargeOutcome = 'dodge' | 'resist';
@@ -29,11 +30,16 @@ export function arenaRimChargeTargets(round: ArenaRound, elapsed: number, center
   const initialDefender = origins?.defender ?? inside({ x: center.x + side * 23 * pace, y: center.y });
   const contact = { x: initialDefender.x - side * 35, y: initialDefender.y };
   const rimX = 500 + side * (303 * Math.sqrt(Math.max(0, 1 - ((contact.y - 416) / 112) ** 2)) - 2);
-  const canRun = Math.hypot(contact.x - initialCharger.x, contact.y - initialCharger.y) / (duration / 1000 * .56 * .91) <= 165;
-  const canReachRim = Math.abs(rimX - contact.x) / (duration / 1000 * .32) <= 165;
-  const run = clamp((phase - .12) / .56), drive = (run < .18 ? run * run / .36 : run - .09) / .91;
+  const runDistance = Math.hypot(contact.x - initialCharger.x, contact.y - initialCharger.y);
+  const runDuration = arenaChargeDuration(runDistance) * 1000;
+  const canRun = runDuration <= duration * .56;
+  const canReachRim = Math.abs(rimX - contact.x) / (duration / 1000 * .32) <= ARENA_CHARGE_SPEED;
   const contactAt = window.start + duration * .68;
-  const charge = clamp(drive), dodge = outcome === 'dodge' ? ease((phase - .48) / .20) : 0;
+  // Keep the actual dodge/defense clock while giving the incoming run the
+  // shoulder charge's physical speed rather than stretching every stride.
+  const chargeStartsAt = Math.max(window.start + duration * .12, contactAt - runDuration);
+  const charge = elapsed >= contactAt ? 1 : clamp(arenaChargeTravel((elapsed - chargeStartsAt) / 1000).distance / Math.max(.001, runDistance));
+  const dodge = outcome === 'dodge' ? ease((phase - .48) / .20) : 0;
   const resistance = outcome === 'resist' ? ease((phase - .64) / .13) : 0;
   const release = ease((phase - .83) / .17);
   let charger = pointMix(initialCharger, contact, charge);
@@ -48,7 +54,7 @@ export function arenaRimChargeTargets(round: ArenaRound, elapsed: number, center
     charger = inside({ x: contact.x + side * press, y: contact.y + release * 6 * pace });
     defender = inside({ x: initialDefender.x + side * press * .40, y: initialDefender.y + release * 6 * pace });
   }
-  const stage = elapsed >= window.end ? 'done' : phase < .12 ? 'approach' : phase < .48 ? 'charge' : outcome === 'dodge' ? phase < .68 ? 'dodge' : 'out' : phase < .68 ? 'charge' : phase < .83 ? 'brace' : 'duel';
+  const stage = elapsed >= window.end ? 'done' : elapsed < chargeStartsAt ? 'approach' : phase < .48 ? 'charge' : outcome === 'dodge' ? phase < .68 ? 'dodge' : 'out' : phase < .68 ? 'charge' : phase < .83 ? 'brace' : 'duel';
   return { active: elapsed >= window.start && elapsed < window.end, stage, phase, side: side as 1 | -1, outcome,
     chargerId: round.victim, defenderId: round.aggressor, charger, defender, contactAt, canRun, canReachRim,
     chargerFacing: side as 1 | -1, defenderFacing: -side as 1 | -1,

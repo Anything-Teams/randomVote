@@ -1,4 +1,5 @@
 import type { ArenaPoint } from './arenaLogic';
+import { ARENA_CHARGE_RAMP_SECONDS, arenaChargePath } from './arenaCharge';
 
 export type ArenaSupermanPunchWindow = {
   start: number; end: number;
@@ -29,7 +30,7 @@ export type ArenaSupermanPunchFrame = {
 
 export const ARENA_SUPERMAN_PUNCH_CHANCE = .001;
 export const ARENA_SUPERMAN_PUNCH_TIMING = {
-  runRamp: 180, load: 180, air: 500, extendStart: 120, extendEnd: 240,
+  runRamp: ARENA_CHARGE_RAMP_SECONDS * 1000, load: 180, air: 500, extendStart: 120, extendEnd: 240,
   holdEnd: 340, contactStart: 180, contactEnd: 360, land: 180, recover: 180,
 } as const;
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
@@ -42,28 +43,6 @@ const inside = (point: ArenaPoint, rx = 293, ry = 102) => Math.hypot((point.x - 
 export function arenaSupermanPunchOutcome(roll: number): boolean {
   if (!Number.isInteger(roll) || roll < 0 || roll > 999) throw new RangeError('Superman punch roll must be 0–999');
   return roll === 0;
-}
-
-/** A real run accelerates and brakes without inventing a backwards runway. */
-function runTravel(origin: ArenaPoint, goal: ArenaPoint, age: number) {
-  const length = distance(origin, goal), cap = 190;
-  const ramp = Math.min(ARENA_SUPERMAN_PUNCH_TIMING.runRamp / 1000, Math.sqrt(length / cap));
-  const speed = Math.min(cap, length / Math.max(.001, ramp));
-  const cruise = Math.max(0, length / Math.max(1, speed) - ramp);
-  const duration = (2 * ramp + cruise) * 1000, seconds = Math.max(0, age / 1000);
-  let moved: number, velocity: number;
-  if (seconds < ramp) {
-    moved = speed * seconds * seconds / (2 * Math.max(.001, ramp)); velocity = speed * seconds / Math.max(.001, ramp);
-  } else if (seconds < ramp + cruise) {
-    moved = speed * ramp / 2 + speed * (seconds - ramp); velocity = speed;
-  } else {
-    const braking = Math.min(ramp, seconds - ramp - cruise);
-    moved = speed * (ramp / 2 + cruise + braking - braking * braking / (2 * Math.max(.001, ramp)));
-    velocity = speed * (1 - braking / Math.max(.001, ramp));
-  }
-  const direction = length > .001 ? { x: (goal.x - origin.x) / length, y: (goal.y - origin.y) / length } : { x: 0, y: 0 };
-  return { point: mix(origin, goal, clamp(moved / Math.max(.001, length))), duration,
-    velocity: { x: direction.x * velocity, y: direction.y * velocity } };
 }
 
 /**
@@ -84,7 +63,7 @@ export function arenaSupermanPunchTargets(window: ArenaSupermanPunchWindow, elap
   const canPerform = ahead && distance(initial.driver, approachGoal) >= 24 && side * (landing.x - jumpOrigin.x) > 16
     && jumpLength <= 80 && inside(initial.driver, 303, 112) && inside(initial.victim)
     && inside(approachGoal) && inside(jumpOrigin) && inside(landing);
-  const run = runTravel(initial.driver, canPerform ? approachGoal : initial.driver, elapsed - window.start);
+  const run = arenaChargePath(initial.driver, canPerform ? approachGoal : initial.driver, elapsed - window.start, true);
   const plannedLaunchAt = window.plannedLaunchAt ?? window.start + run.duration + ARENA_SUPERMAN_PUNCH_TIMING.load;
   const loadAt = plannedLaunchAt - ARENA_SUPERMAN_PUNCH_TIMING.load;
   // A recorded takeoff already passed the Scene's real-origin plant gate.

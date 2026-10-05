@@ -673,7 +673,10 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     const reach = clamp(actor.clotheslineStrength ?? 0);
     target.frontX = mix(-18, target.frontX, reach); target.frontY = mix(-24, target.frontY, reach);
   }
-  if (actor.linkedArm !== undefined || actor.clotheslineArm !== undefined) { target.lean = 0; target.hipX = 0; target.contact = 0; target.shoulderLift = 0; }
+  if (actor.linkedArm !== undefined || actor.clotheslineArm !== undefined) {
+    if (!(pose === 'run' && charge > 0 || dropkick && actor.clotheslineInner)) { target.lean = 0; target.hipX = 0; }
+    target.contact = 0; target.shoulderLift = 0;
+  }
   if (actor.gripMode === 'head') { target.contact = 0; target.shoulderLift = 0; }
   if (actor.gripMode === 'wrist' && pose !== 'overhead') target.shoulderLift = 0;
   if (spin && !feetSpin) {
@@ -835,7 +838,10 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     });
   }
   const motion = { ...state.motion! };
-  if (actor.linkedArm !== undefined || actor.clotheslineArm !== undefined) { motion.lean = 0; motion.hipX = 0; motion.contact = 0; motion.shoulderLift = 0; }
+  if (actor.linkedArm !== undefined || actor.clotheslineArm !== undefined) {
+    if (!(pose === 'run' && charge > 0 || dropkick && actor.clotheslineInner)) { motion.lean = 0; motion.hipX = 0; }
+    motion.contact = 0; motion.shoulderLift = 0;
+  }
   const articulatedRelease = !!actor.dropkickReaction;
   // Use the freely reacting hand pose before the trunk inherits its impact
   // snapshot. Applying that snapshot to hand coordinates and to both bones
@@ -1502,7 +1508,10 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     hands = hands.map((hand, arm) => {
       const point = targets[arm], dx = point.x - matrix[4], dy = point.y - matrix[5];
       const local = rotate({ x: (matrix[3] * dx - matrix[2] * dy) / determinant - hip.x, y: (-matrix[1] * dx + matrix[0] * dy) / determinant - hip.y }, -lean);
-      const shoulder = shoulders[arm], supported = reachable(shoulder, local, upperArm + lowerArm - .02, Math.abs(upperArm - lowerArm) + .02), memory = state.supportedGripArms![arm];
+      // A cradled back passes close to the far shoulder during pickup. Keep
+      // room for an open supporting elbow instead of folding the palm into it.
+      const minimumReach = cradleGrip ? Math.sqrt(upperArm ** 2 + lowerArm ** 2 - 2 * upperArm * lowerArm * Math.cos(Math.PI / 4 + .02)) : Math.abs(upperArm - lowerArm) + .02;
+      const shoulder = shoulders[arm], supported = reachable(shoulder, local, upperArm + lowerArm - .02, minimumReach), memory = state.supportedGripArms![arm];
       const unwrap = (from: number, to: number) => from + Math.atan2(Math.sin(to - from), Math.cos(to - from));
       // Once the supported waist leaves the palms, return below the chest.
       // The lifting pose's old hand coordinates passed through the moving
@@ -1535,8 +1544,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
       });
       const first = solutions[0], second = solutions[1] ?? first, previous = !reset ? state.contactPoints?.elbows[arm] : undefined;
       const chosen = previous && Math.hypot(second.world.x - previous.x, second.world.y - previous.y) < Math.hypot(first.world.x - previous.x, first.world.y - previous.y) ? second : first;
-      if (powerGrip && powerDown > 0 && strength < .995 && !reset && state.contactPoints) {
-        // After the waist is released, open the real shoulder and elbow
+      if (slamRelease && strength < .995 && !reset && state.contactPoints) {
+        // After the supported body is released, open the shoulder and elbow
         // continuously. The rotating target may pass close to a shoulder;
         // it must not whip an unweighted forearm around that IK pole.
         const prior = state.contactPoints;

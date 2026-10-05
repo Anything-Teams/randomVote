@@ -1,4 +1,5 @@
 import type { ArenaPoint } from './arenaLogic';
+import { ARENA_CHARGE_SPEED, ARENA_CHARGE_RAMP_SECONDS, arenaChargeDuration, arenaChargeTravel } from './arenaCharge';
 
 export type ArenaPairDodgeWindow = {
   start: number; end: number; outcome: 'escape' | 'out';
@@ -16,7 +17,7 @@ export type ArenaPairDodgeFrame = {
   rearExit: boolean; exitRim?: ArenaPoint; exitProgress: number;
 };
 
-export const ARENA_PAIR_DODGE_SPEED = 162;
+export const ARENA_PAIR_DODGE_SPEED = ARENA_CHARGE_SPEED;
 export const ARENA_PAIR_DODGE_JUMP_DURATION = 550;
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const ease = (value: number) => { const p = clamp(value); return p * p * (3 - 2 * p); };
@@ -62,21 +63,21 @@ export function arenaPairDodgeTargets(window: ArenaPairDodgeWindow, elapsed: num
   const direction = heading(initial.charger, anchor), distance = Math.hypot(anchor.x - initial.charger.x, anchor.y - initial.charger.y);
   const launchAt = window.launchAt === null ? null : Math.max(window.start, window.launchAt ?? window.start + 180 * timeUnit);
   const assumedLaunch = launchAt ?? window.start + 180 * timeUnit;
-  const ramp = 180 * timeUnit;
-  const fastest = distance <= speed * ramp / 2 ? Math.sqrt(2 * distance * ramp / speed) : distance / speed + ramp / 2;
+  const ramp = ARENA_CHARGE_RAMP_SECONDS * 1000;
+  const fastest = arenaChargeDuration(distance) * 1000;
   const runDuration = Math.max(160 * timeUnit, fastest);
   const earliestContact = assumedLaunch + Math.max(300 * timeUnit, runDuration);
   const contactAt = window.contactAt !== undefined && window.contactAt >= assumedLaunch ? window.contactAt : earliestContact;
   const available = Math.max(0, contactAt - assumedLaunch);
   const actualRun = Math.min(runDuration, available), runAt = contactAt - actualRun;
-  const runRamp = Math.min(ramp, actualRun * .5);
-  const runSpeed = Math.min(speed, distance / Math.max(.001, actualRun - runRamp / 2));
+  const runRamp = ramp;
+  const runSpeed = speed * Math.min(1, distance / Math.max(.001, arenaChargeTravel(actualRun / 1000).distance));
   const runTravel = (age: number) => {
     const t = Math.max(0, Math.min(actualRun, age));
-    return Math.min(distance, runSpeed * (t < runRamp ? t * t / Math.max(.001, 2 * runRamp) : t - runRamp / 2));
+    return Math.min(distance, arenaChargeTravel(t / 1000).distance * runSpeed / speed);
   };
   // A recorded live contact remains the common clock even for narration consumers.
-  // With real origins its speed equals the recorded plan and never exceeds 162px/s.
+  // With real origins its speed equals the recorded plan and never exceeds the shoulder-charge pace.
   const contactPoint = advance(initial.charger, direction, runTravel(actualRun));
   const forwardToRim = rimDistance(contactPoint, direction);
   const postRamp = 180 * timeUnit;

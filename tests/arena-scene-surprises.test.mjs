@@ -14,7 +14,7 @@ assert.ok(source.includes(rankRead));
 source = source.replaceAll('drawArenaScenery(ctx, clock,', 'surpriseTestScenery(ctx, clock,')
   .replace(rankRead, `${rankRead} surpriseTestRanks = ranks;`)
   .replace(draw, 'surpriseTestActors = actors; arenaDrawOrder([...actors.values()]).forEach(actor => { ctx.surpriseStart(actor); drawArenaFighter(ctx, actor, reduced ? 0 : clock); ctx.surpriseEnd(); });');
-source += '\nlet surpriseTestActors, surpriseTestRanks; const surpriseTestScenery = () => {}; export const capturedActors = () => surpriseTestActors; export const capturedRanks = () => surpriseTestRanks; export { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets };';
+source += '\nlet surpriseTestActors, surpriseTestRanks; const surpriseTestScenery = () => {}; export const capturedActors = () => surpriseTestActors; export const capturedRanks = () => surpriseTestRanks; export { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets }; export { ARENA_CHARGE_SPEED } from "./arenaCharge";';
 const initAnchor = 'const ambient = won ? [] : active.filter';
 assert.ok(source.includes(initAnchor));
 source = source.replace(initAnchor, 'surpriseTestInitialize(sim, props, elapsed, reset); ' + initAnchor);
@@ -22,7 +22,7 @@ source += '\nlet surpriseTestInitialize = () => {}; export const setInitialize =
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, capturedActors, capturedRanks, setInitialize } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaEliminatedIds, arenaTechniqueTargets, arenaPairDodgeTargets, arenaPassingTripTargets, ARENA_CHARGE_SPEED, capturedActors, capturedRanks, setInitialize } = module.exports;
 const noop = () => {};
 const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
@@ -134,7 +134,7 @@ for (const seed of [0, 3]) for (const reversed of [false, true]) test(`the live 
     }
     if (elapsed < actual.pairDodge.end && elapsed < (frame.outAt ?? Infinity)) {
       const last = previous.get(actual.victim);
-      if (last) assert.ok(distance(chargerBody, last) <= 162 * .016 + .001, `the actual runner keeps its bounded natural speed: ${detail}`);
+      if (last) assert.ok(distance(chargerBody, last) <= ARENA_CHARGE_SPEED * .016 + .001, `the actual runner keeps its bounded natural speed: ${detail}`);
       previous.set(actual.victim, { x: chargerBody.x, y: chargerBody.y });
     }
     if (actual.pairDodge.outcome === 'out' && elapsed >= frame.outAt) {

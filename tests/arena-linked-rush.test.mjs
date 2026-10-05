@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
+const chargeBundle = await build({ entryPoints: ['src/arenaCharge.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { ARENA_CHARGE_SPEED, arenaChargeTravel } = await import(`data:text/javascript;base64,${Buffer.from(chargeBundle.outputFiles[0].text).toString('base64')}`);
 const bundled = await build({ entryPoints: ['src/arenaLinkedRush.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const {
   arenaLinkedRushTargets, arenaLinkedRushOutcome, ARENA_LINKED_RUSH_CHANCE,
@@ -21,7 +23,7 @@ const rendered = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle
 const { sampleArenaFighterContacts, drawArenaFighter, createArenaFighterAnimation } = await import(`data:text/javascript;base64,${Buffer.from(rendered.outputFiles[0].text).toString('base64')}`);
 const context = new Proxy({}, { get: () => () => {}, set: () => true });
 const actor = (index, overrides = {}) => ({ candidate: { id: String(index), name: '선수', color: '#ffad72' }, index,
-  x: 500, y: 416, scale: 2.04, facing: 1, pose: 'run', angle: 0, alpha: 1, velocityX: 0, velocityY: 162,
+  x: 500, y: 416, scale: 2.04, facing: 1, pose: 'run', angle: 0, alpha: 1, velocityX: 0, velocityY: ARENA_CHARGE_SPEED,
   gaitDistance: 0, phase: 0, power: .55, motionImmediate: true, animation: createArenaFighterAnimation(), ...overrides });
 
 test('one independent cosmetic roll in a thousand enables the double clothesline', () => {
@@ -103,7 +105,7 @@ test('the actual clothesline renderer strikes both captured targets without join
       y: (victim.shoulders[0].y + victim.shoulders[1].y) / 2 - 2.2 * 2.04 };
     const plan = arenaLinkedRushTargets(window, window.start, center, origins);
     const hit = arenaLinkedRushTargets(window, plan.contactAt, center, origins);
-    const atHit = runners.map((runner, index) => ({ ...runner, ...hit.pair[index], velocityY: hit.direction.y * 162 }));
+    const atHit = runners.map((runner, index) => ({ ...runner, ...hit.pair[index], velocityY: hit.direction.y * ARENA_CHARGE_SPEED }));
     const saved = atHit.map(runner => structuredClone(runner.animation));
     atHit.forEach((runner, index) => {
       runner.clotheslineTarget = hit.strikeHands[index]; runner.clotheslineStrength = 1;
@@ -132,7 +134,7 @@ test('an unconfirmed extended-arm formation waits on the ground and confirming i
   assert.deepEqual(at.linkPoint, waiting.linkPoint);
   assert.equal(at.chargeStrength, 0);
   const step = arenaLinkedRushTargets(confirmed, confirmedAt + 16, center, origins);
-  assert.ok(distance(at.pair[0], step.pair[0]) < .12, 'a real first step accelerates from the verified stance');
+  assert.ok(Math.abs(distance(at.pair[0], step.pair[0]) - arenaChargeTravel(.016).distance) < 1e-9, 'the first step accelerates at exactly the shoulder charge pace from the verified stance');
 });
 
 test('stage boundaries preserve roots, separate striking hands, and preparation instead of resetting poses', () => {

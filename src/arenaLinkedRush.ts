@@ -1,4 +1,5 @@
 import type { ArenaPoint } from './arenaLogic';
+import { ARENA_CHARGE_SPEED, ARENA_CHARGE_RAMP_SECONDS, arenaChargeDuration, arenaChargeTravel } from './arenaCharge';
 import { ARENA_PAIR_COUNTER_TIMING } from './arenaPairRush';
 
 export type ArenaLinkedRushWindow = {
@@ -30,7 +31,7 @@ export type ArenaLinkedRushFrame = {
 };
 
 export const ARENA_LINKED_RUSH_CHANCE = .001;
-export const ARENA_LINKED_RUSH_SPEED = 162;
+export const ARENA_LINKED_RUSH_SPEED = ARENA_CHARGE_SPEED;
 export const ARENA_LINKED_RUSH_MAX_PRELUDE = 7000;
 const ARM_HALF_SPAN = 41;
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
@@ -59,7 +60,7 @@ export function arenaLinkedRushTargets(window: ArenaLinkedRushWindow, elapsed: n
     pair: [{ x: center.x - 80, y: center.y + 66 }, { x: center.x + 80, y: center.y + 66 }] as [ArenaPoint, ArenaPoint],
     victim: { ...center },
   };
-  const timeUnit = Math.max(.001, unit), speed = ARENA_LINKED_RUSH_SPEED / 1000;
+  const timeUnit = Math.max(.001, unit);
   const left = initial.pair[0].x <= initial.pair[1].x ? 0 : 1;
   const targetNeck = { ...(initial.neck ?? { x: initial.victim.x, y: initial.victim.y - 84 }) };
   const strikeTargets = initial.strikeTargets?.map(point => ({ ...point })) ?? initial.pair.map((_, index) => ({ x: targetNeck.x + (index === left ? -8 : 8), y: targetNeck.y + (index === left ? 0 : 6) }));
@@ -103,13 +104,13 @@ export function arenaLinkedRushTargets(window: ArenaLinkedRushWindow, elapsed: n
   const readyAt = window.start + approachDuration;
   const launchAt = window.launchAt === null ? null : Math.max(readyAt, window.launchAt ?? readyAt + 180 * timeUnit);
   const assumedLaunch = launchAt ?? readyAt + 180 * timeUnit;
-  const runRamp = 180 * timeUnit;
-  const runDuration = Math.max(300 * timeUnit, plan.runway / speed + runRamp / 2);
+  const runRamp = ARENA_CHARGE_RAMP_SECONDS * 1000;
+  const runDuration = arenaChargeDuration(plan.runway) * 1000;
   const physicalContactAt = assumedLaunch + runDuration;
   const contactAt = window.contactAt !== undefined && window.contactAt >= assumedLaunch ? window.contactAt : physicalContactAt;
   const runTravel = (age: number) => {
     const t = Math.max(0, Math.min(runDuration, age));
-    return Math.min(plan.runway, speed * (t < runRamp ? t * t / (2 * runRamp) : t - runRamp / 2));
+    return age >= runDuration ? plan.runway : Math.min(plan.runway, arenaChargeTravel(t / 1000).distance);
   };
   const contactTravel = runTravel(contactAt - assumedLaunch);
   const contactPair = plan.formation.map(point => advance(point, plan.direction, contactTravel)) as [ArenaPoint, ArenaPoint];

@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { build } from 'esbuild';
 
+const chargeBundle = await build({ entryPoints: ['src/arenaCharge.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+const { ARENA_CHARGE_SPEED } = await import(`data:text/javascript;base64,${Buffer.from(chargeBundle.outputFiles[0].text).toString('base64')}`);
 const bundle = await build({ entryPoints: ['src/arenaSlideTrip.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { arenaSlideTripOutcome, arenaSlideTripEvadeOutcome, arenaSlideTripTargets, ARENA_SLIDE_TRIP_CHANCE, ARENA_SLIDE_TRIP_EVADE_CHANCE, ARENA_SLIDE_TRIP_MIN_GAP, ARENA_SLIDE_TRIP_TIMING, ARENA_SLIDE_TRIP_JUMP_DURATION } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 const center = { x: 500, y: 416 }, distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -65,7 +67,7 @@ test('a real runway accelerates into a brief feet-first slide with bounded speed
     let previous = opening;
     for (let at = 1016; at <= until; at += 16) {
       const frame = arenaSlideTripTargets(window, at, center, origins);
-      const cap = frame.stage === 'approach' && previous.stage === 'approach' ? 190 : 240;
+      const cap = frame.stage === 'approach' && previous.stage === 'approach' ? ARENA_CHARGE_SPEED : 240;
       assert.ok(distance(frame.driver, previous.driver) / .016 <= cap + 1e-6);
       assert.ok(side * (frame.driver.x - origins.driver.x) >= -1e-8, 'a close runner cannot back up to invent a runway');
       if (frame.stage === 'slide') assert.ok(side * (frame.driver.x - origins.victim.x) < 0, 'the leading foot hits from outside the victim instead of passing through the body');
@@ -105,7 +107,8 @@ test('the low slide begins with room left and carries running momentum through a
     assert.ok(distance(before.driver, entered.driver) < .001, 'changing pose cannot move the root');
     assert.equal(lowered.slideProgress, 1);
     assert.ok(distance(lowered.driver, origins.standingAnkle) > 85, 'the body is already low while substantial travel remains');
-    assert.ok(distance(lowered.driver, entered.driver) > 30, 'lowering happens during real forward ground travel');
+    assert.ok(Math.abs(distance(entered.driverVelocity, { x: 0, y: 0 }) - ARENA_CHARGE_SPEED) < 1e-7, 'the slide starts with the same shoulder charge speed');
+    assert.ok(distance(lowered.driver, entered.driver) > ARENA_CHARGE_SPEED * .15, 'lowering preserves substantial forward travel at the shared charge pace despite friction');
     assert.ok(distance(stopped.driver, entered.driver) > 80, 'the foot reaches the rival after a visible slide, not an immediate hook');
     assert.ok(distance(lowered.driverVelocity, { x: 0, y: 0 }) < distance(entered.driverVelocity, { x: 0, y: 0 }), 'ground friction reduces momentum after entry');
     assert.deepEqual(stopped.victim, origins.victim); assert.equal(Math.abs(stopped.victimAngle), 0); assert.equal(stopped.victimPose, 'brace', 'the travel alone cannot script the fall');

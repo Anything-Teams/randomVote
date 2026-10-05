@@ -1,4 +1,5 @@
 import type { ArenaPoint } from './arenaLogic';
+import { ARENA_CHARGE_SPEED, arenaChargeDuration, arenaChargePath } from './arenaCharge';
 import { arenaAnkleSwingProjection, arenaAnkleSwingCasterProjection } from './arenaAnkleSwing';
 export { arenaAnkleSwingProjection } from './arenaAnkleSwing';
 
@@ -141,16 +142,6 @@ function travel(origin: ArenaPoint, goal: ArenaPoint, age: number, cap = 190) {
   return { point: blend(origin, goal, moved / Math.max(.001, length)), velocity: { x: direction.x * velocity, y: direction.y * velocity }, duration };
 }
 
-/** A committed rush keeps its incoming speed until the catcher takes the actual grip. */
-function rush(origin: ArenaPoint, goal: ArenaPoint, age: number) {
-  const length = distance(origin, goal), ramp = Math.min(.18, Math.sqrt(2 * length / 190));
-  const duration = (length / 190 + ramp / 2) * 1000, t = Math.max(0, age / 1000);
-  const moved = Math.min(length, t < ramp ? 190 * t * t / Math.max(.001, 2 * ramp) : 190 * (t - ramp / 2));
-  const velocity = t * 1000 >= duration ? 0 : 190 * Math.min(1, t / Math.max(.001, ramp));
-  const direction = length > .001 ? { x: (goal.x - origin.x) / length, y: (goal.y - origin.y) / length } : zero();
-  return { point: blend(origin, goal, moved / Math.max(.001, length)), velocity: { x: direction.x * velocity, y: direction.y * velocity }, duration };
-}
-
 /** Contact-gated moves use real roots; an aerial miss always returns to the sand. */
 export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elapsed: number, center: ArenaPoint, origins?: ArenaWrestlingMoveOrigins, layoutSide = 1): ArenaWrestlingMoveFrame {
   const kind = window.kind, timing = ARENA_WRESTLING_MOVE_TIMING;
@@ -167,7 +158,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     : catching ? { x: initial.driver.x + side * 42, y: initial.driver.y }
     : { x: initial.victim.x - side * 36, y: initial.victim.y };
   const movingOrigin = catching ? initial.victim : initial.driver;
-  const run = rush(movingOrigin, goal, elapsed - window.start);
+  const run = arenaChargePath(movingOrigin, goal, elapsed - window.start);
   const plannedLaunchAt = window.plannedLaunchAt ?? (catching ? window.start + timing.load : window.start + run.duration);
   const landingGoal = kind === 'dropkick' ? { x: initial.victim.x - side * 12, y: initial.victim.y } : goal;
   const behind = { x: initial.driver.x - side * 70, y: initial.driver.y };
@@ -183,9 +174,8 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     : window.plannedContactAt + launch - plannedLaunchAt;
   const contactAt = !canPerform || launchAt === null || window.contactAt === null ? null : Math.max(launchAt, window.contactAt ?? plannedContactAt);
   const contact = contactAt ?? plannedContactAt;
-  const runway = distance(initial.launchVictim ?? initial.victim, goal), rushRamp = Math.min(.18, Math.sqrt(2 * runway / 190));
-  const halfDistance = runway / 2, rampDistance = 190 * rushRamp / 2;
-  const halfRunAt = (halfDistance < rampDistance ? Math.sqrt(2 * halfDistance * rushRamp / 190) : halfDistance / 190 + rushRamp / 2) * 1000;
+  const runway = distance(initial.launchVictim ?? initial.victim, goal);
+  const halfRunAt = arenaChargeDuration(runway / 2) * 1000;
   const counterReadyAt = window.counterReadyAt === undefined ? launch + halfRunAt : window.counterReadyAt + launch - plannedLaunchAt;
   const scoopTiming = ARENA_SCOOP_SLAM_TIMING, scoopDuration = scoopTiming.load + scoopTiming.lift + scoopTiming.turn + scoopTiming.slam;
   const floorAt = contact + (kind === 'clothesline' ? timing.clotheslineFall : kind === 'powerbomb' ? ARENA_POWERBOMB_TIMING.load + ARENA_POWERBOMB_TIMING.lift + ARENA_POWERBOMB_TIMING.hold + ARENA_POWERBOMB_TIMING.slam : kind === 'backbodydrop' ? timing.backFlip : kind === 'scoopslam' ? scoopDuration : ARENA_SPINEBUSTER_TIMING.load + ARENA_SPINEBUSTER_TIMING.lift + ARENA_SPINEBUSTER_TIMING.slam);
@@ -295,8 +285,8 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const runway = distance(initial.driver, goal), runDirection = runway > .001 ? { x: (goal.x - initial.driver.x) / runway, y: (goal.y - initial.driver.y) / runway } : { x: side, y: 0 };
     const airborne = (p: number) => {
       const tangent = p * (1 - p) ** 2, tangentVelocity = (1 - p) * (1 - 3 * p), duration = jump.flight / 1000;
-      return { point: { x: mix(origin.x, landing.x, ease(p)) + runDirection.x * 190 * duration * tangent, y: mix(origin.y, landing.y, ease(p)) + runDirection.y * 190 * duration * tangent },
-        velocity: { x: (landing.x - origin.x) * 6 * p * (1 - p) / duration + runDirection.x * 190 * tangentVelocity, y: (landing.y - origin.y) * 6 * p * (1 - p) / duration + runDirection.y * 190 * tangentVelocity },
+      return { point: { x: mix(origin.x, landing.x, ease(p)) + runDirection.x * ARENA_CHARGE_SPEED * duration * tangent, y: mix(origin.y, landing.y, ease(p)) + runDirection.y * ARENA_CHARGE_SPEED * duration * tangent },
+        velocity: { x: (landing.x - origin.x) * 6 * p * (1 - p) / duration + runDirection.x * ARENA_CHARGE_SPEED * tangentVelocity, y: (landing.y - origin.y) * 6 * p * (1 - p) / duration + runDirection.y * ARENA_CHARGE_SPEED * tangentVelocity },
         height: jump.height * 4 * p * (1 - p), angle: -side * Math.PI * .47 * ease(p / .32) };
     };
     const entry = launched ? airborne(flight) : { point: run.point, velocity: run.velocity, height: 0, angle: 0 };
@@ -348,7 +338,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   if (kind === 'dropkick') {
     const p = launched ? clamp((elapsed - launch) / timing.jump) : 0;
     const origin = initial.launchDriver ?? goal;
-    const runway = distance(initial.driver, goal), incoming = runway > .001 ? { x: (goal.x - initial.driver.x) / runway * 190, y: (goal.y - initial.driver.y) / runway * 190 } : zero();
+    const runway = distance(initial.driver, goal), incoming = runway > .001 ? { x: (goal.x - initial.driver.x) / runway * ARENA_CHARGE_SPEED, y: (goal.y - initial.driver.y) / runway * ARENA_CHARGE_SPEED } : zero();
     const duration = timing.jump / 1000, tangent = p * (1 - p) ** 2, tangentVelocity = (1 - p) * (1 - 3 * p);
     frame.driver = launched ? { x: mix(origin.x, landingGoal.x, ease(p)) + incoming.x * duration * tangent, y: mix(origin.y, landingGoal.y, ease(p)) + incoming.y * duration * tangent } : run.point;
     frame.driverVelocity = launched ? { x: (landingGoal.x - origin.x) * 6 * p * (1 - p) / duration + incoming.x * tangentVelocity, y: (landingGoal.y - origin.y) * 6 * p * (1 - p) / duration + incoming.y * tangentVelocity } : run.velocity;
@@ -370,7 +360,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const down = contacted ? ease((age - power.load - power.lift - power.hold) / power.slam) : 0;
     const rise = contacted ? ease((elapsed - floorAt) / power.recover) : 0;
     const driverOrigin = initial.contactDriver ?? initial.driver, victimOrigin = initial.contactVictim ?? goal;
-    const runner = rush(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0);
+    const runner = arenaChargePath(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0);
     const preparationAge = contacted ? Math.min(elapsed, contactAt!) : elapsed;
     const preparation = launched ? ease((preparationAge - counterReadyAt) / Math.max(1, plannedContactAt - counterReadyAt)) : 0;
     frame.counterPreparation = preparation;
@@ -424,7 +414,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const impactAge = elapsed - floorAt;
     const recoil = contacted ? ease(impactAge / 50) * (1 - ease((impactAge - 50) / 170)) : 0;
     const victimOrigin = initial.contactVictim ?? goal, driverOrigin = initial.contactDriver ?? initial.driver;
-    const runner = rush(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0);
+    const runner = arenaChargePath(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0);
     const preparationAge = contacted ? Math.min(elapsed, contactAt!) : elapsed;
     const preparation = launched ? ease((preparationAge - counterReadyAt) / Math.max(1, plannedContactAt - counterReadyAt)) : 0;
     frame.counterPreparation = preparation;
@@ -476,7 +466,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     return finishAnkles();
   }
   if (kind === 'spinebuster') {
-    const runner = catching ? rush(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0) : run;
+    const runner = catching ? arenaChargePath(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0) : run;
     const age = contacted ? Math.max(0, elapsed - contactAt!) : 0;
     const spineTiming = ARENA_SPINEBUSTER_TIMING;
     const preparationAge = contacted ? Math.min(elapsed, contactAt!) : elapsed;
@@ -486,7 +476,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const slamStart = spineTiming.load + spineTiming.lift * .85;
     const slamDuration = spineTiming.load + spineTiming.lift + spineTiming.slam - slamStart;
     const lift = contacted ? ease((age - liftStart) / (liftEnd - liftStart)) : 0;
-    const slamClock = contacted ? clamp((age - slamStart) / slamDuration) : 0;
+    const slamClock = contacted ? elapsed >= floorAt ? 1 : clamp((age - slamStart) / slamDuration) : 0;
     const slam = slamClock * slamClock * (2 - slamClock);
     const rise = contacted ? ease((elapsed - floorAt) / spineTiming.recover) : 0;
     const victimOrigin = initial.contactVictim ?? (catching ? goal : initial.victim);
@@ -530,7 +520,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     frame.stage = !launched ? frame.stage : !contacted ? 'attack' : age < liftStart ? 'contact' : slamClock === 0 ? 'lift' : slam < 1 ? 'fall' : rise < 1 ? 'recover' : 'groggy';
     return finishAnkles();
   }
-  const runner = rush(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0);
+  const runner = arenaChargePath(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0);
   const flip = contacted ? clamp((elapsed - contactAt!) / timing.backFlip) : 0;
   const raise = ease(flip / .42), over = ease((flip - .34) / .66), descend = ease((flip - .50) / .50);
   const preparationAge = contacted ? Math.min(elapsed, contactAt!) : elapsed;

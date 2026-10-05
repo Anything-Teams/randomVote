@@ -1,4 +1,5 @@
 import type { ArenaPoint } from './arenaLogic';
+import { ARENA_CHARGE_RAMP_SECONDS, arenaChargePath } from './arenaCharge';
 
 export type ArenaKickCatchWindow = {
   start: number; end: number;
@@ -33,37 +34,18 @@ export type ArenaKickCatchFrame = {
 export const ARENA_KICK_CATCH_CHANCE = .01;
 /** Physical milliseconds, independent of the scheduled game duration. */
 export const ARENA_KICK_CATCH_TIMING = {
-  runRamp: 180, plant: 180, air: 650, catchStart: 180, catchEnd: 410,
+  runRamp: ARENA_CHARGE_RAMP_SECONDS * 1000, plant: 180, air: 650, catchStart: 180, catchEnd: 410,
   load: 220, spin: 1200, spinRamp: .18, land: 180, recover: 180,
 } as const;
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const ease = (value: number) => { const p = clamp(value); return p * p * (3 - 2 * p); };
 const blend = (a: ArenaPoint, b: ArenaPoint, p: number): ArenaPoint => ({ x: a.x + (b.x - a.x) * p, y: a.y + (b.y - a.y) * p });
-const distance = (a: ArenaPoint, b: ArenaPoint) => Math.hypot(a.x - b.x, a.y - b.y);
 const inside = (point: ArenaPoint, rx = 293, ry = 102) => Math.hypot((point.x - 500) / rx, (point.y - 416) / ry) <= 1;
 
 /** An independent cosmetic choice; the original aggressor and loser never exchange ranks. */
 export function arenaKickCatchOutcome(roll: number): boolean {
   if (!Number.isInteger(roll) || roll < 0 || roll > 999) throw new RangeError('Kick catch roll must be 0–999');
   return roll < 10;
-}
-
-function approach(origin: ArenaPoint, goal: ArenaPoint, age: number) {
-  const length = distance(origin, goal), cap = 160;
-  const ramp = Math.min(ARENA_KICK_CATCH_TIMING.runRamp / 1000, Math.sqrt(length / cap));
-  const speed = Math.min(cap, length / Math.max(.001, ramp)), cruise = Math.max(0, length / Math.max(1, speed) - ramp);
-  const seconds = Math.max(0, age / 1000), duration = (ramp * 2 + cruise) * 1000;
-  let moved: number, velocity: number;
-  if (seconds < ramp) { moved = speed * seconds ** 2 / (2 * Math.max(.001, ramp)); velocity = speed * seconds / Math.max(.001, ramp); }
-  else if (seconds < ramp + cruise) { moved = speed * ramp / 2 + speed * (seconds - ramp); velocity = speed; }
-  else {
-    const braking = Math.min(ramp, seconds - ramp - cruise);
-    moved = speed * (ramp / 2 + cruise + braking - braking ** 2 / (2 * Math.max(.001, ramp)));
-    velocity = speed * (1 - braking / Math.max(.001, ramp));
-  }
-  const direction = length > .001 ? { x: (goal.x - origin.x) / length, y: (goal.y - origin.y) / length } : { x: 0, y: 0 };
-  return { point: blend(origin, goal, clamp(moved / Math.max(.001, length))), duration,
-    velocity: { x: direction.x * velocity, y: direction.y * velocity } };
 }
 
 /**
@@ -83,7 +65,7 @@ export function arenaKickCatchTargets(window: ArenaKickCatchWindow, elapsed: num
   const canPerform = gap >= 68 && gap <= 330 && Math.abs(initial.kicker.y - initial.catcher.y) <= 48
     && inside(initial.catcher) && inside(initial.kicker, 303, 112) && inside(staging) && inside(jumpOrigin) && inside(landing)
     && side * (jumpOrigin.x - landing.x) >= 16;
-  const run = approach(initial.kicker, canPerform ? staging : initial.kicker, elapsed - window.start);
+  const run = arenaChargePath(initial.kicker, canPerform ? staging : initial.kicker, elapsed - window.start, true);
   const plannedLaunchAt = window.plannedLaunchAt ?? window.start + run.duration + ARENA_KICK_CATCH_TIMING.plant;
   const launchAt = !canPerform || window.launchAt === null ? null : window.launchAt === undefined ? plannedLaunchAt : Math.max(window.start, window.launchAt);
   const expectedLaunch = launchAt ?? plannedLaunchAt, airAge = launchAt === null ? -1 : elapsed - launchAt;

@@ -6,6 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
+const { ARENA_CHARGE_SPEED } = await source('src/arenaCharge.ts');
 const { arenaWrestlingMoveOutcome, arenaWrestlingMoveTargets, arenaWrestlingMoveIsCounter, arenaAnkleRimThrowTargets, ARENA_WRESTLING_MOVE_CHANCE, ARENA_WRESTLING_MOVE_TIMING, ARENA_SCOOP_SLAM_TIMING, ARENA_SCOOP_RECOVERY_TIMING, ARENA_SCOOP_FINISH_TIMING, ARENA_SPINEBUSTER_TIMING, ARENA_CLOTHESLINE_FINISH_TIMING, ARENA_DRAGGED_ANKLE_THROW_TIMING, ARENA_BACK_BODY_DROP_TIMING, ARENA_POWERBOMB_TIMING } = await source('src/arenaWrestlingMoves.ts');
 const { createArenaFighterAnimation, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const kinds = ['clothesline', 'dropkick', 'powerbomb', 'backbodydrop', 'spinebuster', 'scoopslam'];
@@ -131,7 +132,7 @@ test('a powerbomb receives a bounded incoming rush without moving its waiting ho
     for (let elapsed = actual.launchAt + 16; elapsed <= opening.plannedContactAt; elapsed += 16) {
       const frame = arenaWrestlingMoveTargets(actual, elapsed, center, initial, side);
       assert.deepEqual(frame.driver, initial.driver); assert.deepEqual(frame.driverVelocity, { x: 0, y: 0 });
-      assert.ok(distance(frame.victim, previous.victim) / .016 <= 190 + 1e-6);
+      assert.ok(distance(frame.victim, previous.victim) / .016 <= ARENA_CHARGE_SPEED + 1e-6);
       assert.equal(frame.victimPose, 'run'); assert.equal(frame.victimHeight, 0); assert.equal(frame.victimEyesClosed, false);
       if (elapsed <= opening.counterReadyAt) {
         assert.equal(frame.driverPose, 'guard'); assert.equal(frame.gripStrength, 0); assert.equal(frame.canContact, false);
@@ -166,11 +167,11 @@ test('a dropkick carries its running speed through takeoff without a planted pre
     const after = arenaWrestlingMoveTargets(values.actual, at + delta, center, values.initial, side);
     assert.equal(before.driverPose, 'run'); assert.equal(takeoff.driverPose, 'dropkick');
     assert.ok(distance(before.driver, takeoff.driver) < .002);
-    assert.ok(Math.hypot(before.driverVelocity.x, before.driverVelocity.y) > 189.9);
+    assert.ok(Math.hypot(before.driverVelocity.x, before.driverVelocity.y) > ARENA_CHARGE_SPEED - .1);
     assert.ok(distance(before.driverVelocity, after.driverVelocity) < .01, 'the first airborne frame retains the real incoming horizontal tangent');
     for (const age of [-100, -50, -16, 0, 16, 50, 100]) {
       const frame = arenaWrestlingMoveTargets(values.actual, at + age, center, values.initial, side);
-      assert.ok(Math.hypot(frame.driverVelocity.x, frame.driverVelocity.y) > 170, 'the last running strides and initial jump cannot stop near the opponent');
+      assert.ok(Math.hypot(frame.driverVelocity.x, frame.driverVelocity.y) > ARENA_CHARGE_SPEED * (170 / 190), 'the last running strides and initial jump cannot stop near the opponent');
     }
   }
 });
@@ -186,7 +187,7 @@ test('a quantized dropkick carries the remainder of its running stride into the 
     const recorded = { ...pending, launchAt: actualTakeoff, plannedLaunchAt: opening.plannedLaunchAt, plannedContactAt: opening.plannedContactAt };
     const after = arenaWrestlingMoveTargets(recorded, actualTakeoff, center, initial, side);
     const rootSpeed = distance(before.driver, after.driver) * 1000 / delta;
-    assert.ok(rootSpeed > 180 && rootSpeed < 215, 'late event sampling advances the first airborne root instead of discarding the end of a running stride');
+    assert.ok(rootSpeed > ARENA_CHARGE_SPEED * (180 / 190) && rootSpeed < ARENA_CHARGE_SPEED * (215 / 190), 'late event sampling advances the first airborne root instead of discarding the end of a running stride');
     assert.ok(after.dropkickProgress > 0 && after.driverHeight > 0, 'the first visible jump contains the fractional airborne time');
     assert.equal(after.landingAt, opening.plannedLaunchAt + ARENA_WRESTLING_MOVE_TIMING.jump, 'landing follows the continuous flight clock');
   }

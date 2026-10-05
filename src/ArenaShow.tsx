@@ -235,6 +235,13 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   const elbowKnockouts = new Set<string>();
   let collisionShake = 0;
   const seconds = props.paused || reduced ? 0 : delta / 1000;
+  const applyChargeRun = (actor: ArenaActor) => {
+    actor.chargeStrength = actor.pose === 'run' ? 1 : 0;
+    if (actor.pose !== 'run') return;
+    // Every attacking ground run uses the shoulder-charge posture and gait.
+    // The technique's jump, tackle, grip and impact retain their own poses.
+    actor.chargePreparation = 0;
+  };
   const prepareContactActor = (actor: ArenaActor) => {
     const body = sim.bodies.get(actor.candidate.id);
     if (!body) return;
@@ -560,6 +567,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               body.motorX = velocity.x; body.motorY = velocity.y;
               actor.x = body.x; actor.y = body.y - height; actor.depthY = body.y; actor.facing = body.facing;
               actor.pose = pose; actor.phase = phase; actor.angle = angle; actor.suspension = suspension; actor.slamProgress = slam; actor.jumpTuck = tuck;
+              applyChargeRun(actor);
               actor.slamImpact = frame.slamImpact;
               if (actor === victim) {
                 actor.eyesClosed = frame.victimEyesClosed;
@@ -727,8 +735,14 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               const dx = to.x - from.x, dy = to.y - from.y, along = clamp(((point.x - from.x) * dx + (point.y - from.y) * dy) / Math.max(.001, dx * dx + dy * dy));
               return Math.hypot(point.x - from.x - dx * along, point.y - from.y - dy * along);
             };
-            const innerArm = { x: attacking.elbows[1].x + (attacking.hands[1].x - attacking.elbows[1].x) * .25, y: attacking.elbows[1].y + (attacking.hands[1].y - attacking.elbows[1].y) * .25 };
-            let touched = window.kind === 'clothesline' ? frame.clotheslineStrength > .75 && segmentGap(contact.wrestlingMoveOrigins.target!, attacking.elbows[1], innerArm) < 8 && pointGap(contact.wrestlingMoveOrigins.target!, attacking.hands[1]) > 12
+            const neckHookTouches = (rig: typeof attacking) => {
+              const shoulder = rig.shoulders[1], elbow = rig.elbows[1], hand = rig.hands[1];
+              const upper = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y }, lower = { x: hand.x - elbow.x, y: hand.y - elbow.y };
+              const bend = Math.abs(Math.atan2(upper.x * lower.y - upper.y * lower.x, upper.x * lower.x + upper.y * lower.y));
+              const inside = { x: elbow.x + (hand.x - elbow.x) * .25, y: elbow.y + (hand.y - elbow.y) * .25 };
+              return bend >= .4 && segmentGap(contact.wrestlingMoveOrigins!.target!, elbow, inside) < 8 && pointGap(contact.wrestlingMoveOrigins!.target!, hand) > 12;
+            };
+            let touched = window.kind === 'clothesline' ? frame.clotheslineStrength > .75 && neckHookTouches(attacking)
               : window.kind === 'dropkick' ? frame.feetStrength > .9 && attacking.feet.every((foot, leg) => pointGap(foot, frame.footTargets![leg]) < 7)
                 : window.kind === 'powerbomb' ? attacking.hands.every((hand, arm) => pointGap(hand, defending.waistSides[arm]) < 7)
                   : window.kind === 'scoopslam' ? attacking.hands.every((hand, arm) => pointGap(hand, arm === 0 ? defending.back : { x: defending.waist.x + ((defending.feet[0].x + defending.feet[1].x) / 2 - defending.waist.x) * .28, y: defending.waist.y + ((defending.feet[0].y + defending.feet[1].y) / 2 - defending.waist.y) * .28 }) < 6)
@@ -744,8 +758,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
                 if (!candidate.canContact || candidate.clotheslineStrength <= .75) continue;
                 const predicted = { ...driver, ...candidate.driver, y: candidate.driver.y - candidate.driverHeight, depthY: candidate.driver.y, pose: candidate.driverPose, phase: candidate.driverPhase, angle: candidate.driverAngle, suspension: candidate.driverSuspension, dropkickProgress: candidate.dropkickProgress, clotheslineStrength: candidate.clotheslineStrength };
                 const rig = sampleArenaFighterContacts(predicted, clock);
-                const inner = { x: rig.elbows[1].x + (rig.hands[1].x - rig.elbows[1].x) * .25, y: rig.elbows[1].y + (rig.hands[1].y - rig.elbows[1].y) * .25 };
-                if (segmentGap(contact.wrestlingMoveOrigins.target!, rig.elbows[1], inner) < 8 && pointGap(contact.wrestlingMoveOrigins.target!, rig.hands[1]) > 12) {
+                if (neckHookTouches(rig)) {
                   strikeFrame = candidate; touched = true; break;
                 }
               }
@@ -880,6 +893,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           kicker.pose = frame.kickerPose; kicker.phase = frame.kickerPhase; kicker.angle = frame.kickerAngle; kicker.suspension = frame.kickerSuspension;
           kicker.footTarget = frame.footTarget; kicker.footStrength = frame.footStrength; kicker.kickLeg = frame.kickLeg;
           kicker.gripTarget = undefined; kicker.secondaryGripTarget = undefined; kicker.gripStrength = 0;
+          applyChargeRun(kicker);
           prepareContactActor(catcher); prepareContactActor(kicker);
           if (frame.canCatch) {
             const foot = sampleArenaFighterContacts(kicker, reduced ? 0 : clock).feet[frame.kickLeg];
@@ -959,6 +973,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         driver.supermanRun = frame.stage === 'approach'; driver.supermanLoad = frame.stage === 'load' ? frame.loadProgress : undefined;
         driver.supermanProgress = frame.driverPhase; driver.punchTarget = frame.punchTarget; driver.punchStrength = frame.punchStrength;
         driver.suspension = frame.suspension; driver.chargePreparation = frame.loadProgress * .4;
+        applyChargeRun(driver);
         driver.gripTarget = undefined; driver.secondaryGripTarget = undefined; driver.gripStrength = 0;
         prepareContactActor(driver);
         driver.velocityX = frame.driverVelocity.x; driver.velocityY = frame.driverVelocity.y;
@@ -1033,6 +1048,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         driver.slideProgress = frame.slideProgress; driver.phase = frame.driverPhase; driver.frontKick = frame.frontKick;
         driver.gripTarget = undefined; driver.secondaryGripTarget = undefined; driver.gripStrength = 0;
         driver.footTarget = frame.driverFootTarget; driver.footStrength = frame.footStrength; driver.kickLeg = 1;
+        applyChargeRun(driver);
         v.x = frame.victim.x; v.y = frame.victim.y;
         victim.x = v.x; victim.y = v.y - frame.victimHeight; victim.depthY = v.y; victim.facing = -frame.side; victim.pose = frame.victimPose;
         victim.angle = frame.victimAngle; victim.suspension = frame.victimSuspension; victim.slamProgress = frame.victimSlam;
@@ -1119,7 +1135,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             actor.clotheslineArm = frame.clotheslineArms[index]; actor.clotheslineStrength = frame.strikeStrength; actor.clotheslineTarget = frame.strikeHands[index];
             // Each runner extends a separate arm across the target's upper body.
             // Depthward gait keeps its actual shoulder and forearm at that height.
-            actor.chargePreparation = 0; actor.chargeStrength = 0;
+            actor.chargePreparation = frame.chargePreparation; actor.chargeStrength = frame.chargeStrength;
+            applyChargeRun(actor);
             prepareContactActor(actor);
           }
           const first = actors.get(pairIds[0])!, second = actors.get(pairIds[1])!;
@@ -1314,6 +1331,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             charger.facing = dodge.chargerFacing; charger.angle = dodge.chargerAngle;
             charger.pose = elapsed < dodge.runAt || Math.hypot(dodge.charger.x - (contact.pairDodgeOrigins?.charger.x ?? dodge.charger.x), dodge.charger.y - (contact.pairDodgeOrigins?.charger.y ?? dodge.charger.y)) < 1 ? 'brace' : dodge.stage === 'recover' || dodge.stage === 'release' ? 'guard' : 'run';
             charger.chargePreparation = dodge.chargePreparation; charger.chargeStrength = dodge.chargeStrength;
+            applyChargeRun(charger);
             charger.gripTarget = undefined; charger.secondaryGripTarget = undefined; charger.gripStrength = 0;
             if (charger.pose === 'run') words.set(exchange.victim, '돌진!');
             if (exchange.pairDodge!.outcome === 'out' && dodge.outAt !== undefined && elapsed >= dodge.outAt) {
@@ -1352,6 +1370,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             actor.x = point.x; actor.y = point.y; actor.facing = facing; actor.angle = 0; actor.yaw = 0;
             actor.pose = actor === driver ? charge.stage === 'approach' ? 'brace' : charge.stage === 'brace' || charge.stage === 'duel' ? 'grapple' : 'run' : charge.dodge > 0 ? 'dodge' : charge.grip ? 'brace' : 'guard';
             actor.phase = charge.resistance; actor.chargePreparation = actor === driver && charge.stage === 'approach' ? charge.phase / .12 : 0; actor.chargeStrength = actor === driver && charge.stage !== 'approach' && !charge.grip ? 1 : 0;
+            if (actor === driver) applyChargeRun(actor);
             actor.gripTarget = undefined; actor.secondaryGripTarget = undefined; actor.gripStrength = 0; actor.gripLocked = false;
           }
           if (charge.grip) {
@@ -1583,7 +1602,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       }
       if (exchange.tactic === 'catch' && exchange.chargeSetup?.contactAt === undefined && exchange.chargeSetup) {
         const span = Math.max(1, exchange.impact - exchange.start);
-        const contactAt = reset && elapsed >= exchange.start + span * .55 ? exchange.start + span * .55 : null;
+        const plannedContactAt = arenaCatchTargets(exchange, exchange.start, contact.center).plannedContactAt;
+        const contactAt = reset && elapsed >= plannedContactAt ? plannedContactAt : null;
         contact.round = { ...exchange, chargeSetup: { ...exchange.chargeSetup, contactAt, loadDuration: Math.max(180, span * .12), turnDuration: Math.max(300, span * .28) } };
         exchange = contact.round;
       }
@@ -1673,7 +1693,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             target = arenaInsidePoint(arenaCarryHolderPoint(holder, feet, reduced ? 0 : clock, arenaInsidePoint(elbowPickup.holder, 8)), 8);
           }
         }
-        if (action.stage === 'approach' && !rush && !ram) target = arenaGuardTarget(target, actor.index, elapsed);
+        if (action.stage === 'approach' && !rush && !ram && !caught && !charge) target = arenaGuardTarget(target, actor.index, elapsed);
         if (action.stage === 'release') {
           const origin = contact.releases!.get(part.id) ?? body;
           target = arenaReleaseTarget(origin, center, part.role, (elapsed - exchange.impact) / Math.max(1, exchange.end - exchange.impact));
@@ -1682,6 +1702,13 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         // the same bounded acceleration and speed as everyone elsewhere.
         if (technique && exchange.tactic === 'elbow' && part.id === exchange.victim && contact.elbowFall) {
           body.x = contact.elbowFall.x; body.y = contact.elbowFall.y; body.motorX = 0; body.motorY = 0;
+        }
+        else if ((caught && caught.gripStrength === 0) || (charge && part.id === exchange.victim)) {
+          const distance = Math.hypot(target.x - body.x, target.y - body.y);
+          const step = reset ? 1 : Math.min(1, 165 * seconds / Math.max(.001, distance));
+          const next = { x: body.x + (target.x - body.x) * step, y: body.y + (target.y - body.y) * step };
+          body.motorX = seconds ? (next.x - body.x) / seconds : 0; body.motorY = seconds ? (next.y - body.y) / seconds : 0;
+          body.x = next.x; body.y = next.y;
         }
         else if (ram && ram.stage !== 'release') {
           body.motorX = seconds ? (target.x - body.x) / seconds : 0; body.motorY = seconds ? (target.y - body.y) / seconds : 0;
@@ -1823,6 +1850,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             actor.gripTarget = undefined; actor.secondaryGripTarget = undefined; actor.gripStrength = 0; actor.gripLocked = false;
           }
         }
+        applyChargeRun(actor);
       });
       if (exchange.linkedRush && contact.linkedRelease && elapsed - contact.linkedRelease.at < 180) {
         const release = contact.linkedRelease, age = elapsed - release.at;
@@ -1833,7 +1861,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           actor.clotheslineArm = release.arms[index]; actor.clotheslineStrength = 1 - ease((age - 45) / 135);
           actor.clotheslineTarget = { x: release.hands[index].x + actor.x - release.roots[index].x, y: release.hands[index].y + actor.y - release.roots[index].y };
           actor.facing = release.facings[index]; body.facing = release.facings[index];
-          if (age < 45) actor.pose = 'run';
+          if (age < 45) { actor.pose = 'run'; applyChargeRun(actor); }
         }
       }
       const lifted = action.liftedId ? actors.get(action.liftedId) : undefined;
@@ -1859,6 +1887,11 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         if (rush?.outcome === 'counter-throw') lifted.pose = rush.victimPose ?? 'stunned';
         else if (technique?.victimPose) lifted.pose = technique.victimPose;
         else if (heldLift > 5) lifted.pose = spin && action.liftedId === exchange.victim || technique && exchange.tactic === 'armspin' ? 'held' : 'airborne';
+      }
+      if (exchange.linkedRush?.contactAt === elapsed) {
+        // Paint the exact neck/chest posture struck by both forearms before
+        // the following frame starts the shared knockout reaction.
+        actors.get(exchange.victim)!.pose = 'guard';
       }
       action.actors.forEach(part => {
         const actor = actors.get(part.id), other = part.gripId ? actors.get(part.gripId) : undefined;
@@ -1897,12 +1930,14 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       if (caught && a && v && (waitingForCatch || elapsed < exchange.impact)) {
         const receiver = actors.get(exchange.aggressor)!, charger = actors.get(exchange.victim)!;
         const gap = Math.hypot(a.x - v.x, a.y - v.y), depth = Math.abs(a.y - v.y);
-        if (gap < 60 && depth < 18) {
+        if (gap < 90 && depth < 18) {
           prepareContactActor(charger); prepareContactActor(receiver);
           const waist = sampleArenaFighterContacts(charger, reduced ? 0 : clock).waist;
           receiver.gripTarget = waist; receiver.secondaryGripTarget = { x: waist.x - receiver.facing * 6, y: waist.y + 3 };
-          receiver.gripStrength = caught.gripStrength || ease((60 - gap) / 18); receiver.gripLocked = true; receiver.gripMode = 'waist';
-          if (exchange.chargeSetup?.contactAt === null) {
+          // Prepare the receiving arms while the runner closes the last
+          // stride; the real two-palm contact still owns the catch below.
+          receiver.gripStrength = caught.gripStrength || ease((90 - gap) / 30); receiver.gripLocked = true; receiver.gripMode = 'waist';
+          if (gap < 60 && exchange.chargeSetup?.contactAt === null) {
             const hands = sampleArenaFighterContacts(receiver, reduced ? 0 : clock).hands;
             if (hands.every((hand, arm) => Math.hypot(hand.x - (arm ? waist.x : receiver.secondaryGripTarget!.x), hand.y - (arm ? waist.y : receiver.secondaryGripTarget!.y)) < 7)) {
               const span = Math.max(1, exchange.impact - exchange.start), loadDuration = Math.max(180, span * .12), turnDuration = Math.max(300, span * .28);

@@ -8,6 +8,8 @@ async function source(path) {
 }
 const { arenaAction, arenaActionWords, arenaMiniExchanges, arenaNarration, arenaPodium, arenaRounds } = await source('src/arenaLogic.ts');
 const { arenaStoryState } = await source('src/arenaStoryLogic.ts');
+const { arenaRimChargeTargets } = await source('src/arenaRimCharge.ts');
+const { arenaChargeDuration } = await source('src/arenaCharge.ts');
 const { arenaFloorExitTiming } = await source('src/arenaTechniques.ts');
 const candidates = [{ id: 'a', name: '받는 선수', color: '#f00' }, { id: 'v', name: '돌진 선수', color: '#0ff' }];
 const order = candidates.map(candidate => candidate.id);
@@ -17,13 +19,17 @@ test('outer charge announcements follow preparation, actual sprint, dodge or pla
   for (const outcome of ['dodge', 'resist']) {
     const round = { ...base, tactic: outcome === 'dodge' ? 'bait' : 'brace', rimCharge: { start: 1000, end: 3600, outcome }, impact: outcome === 'dodge' ? 3600 : 7500, resolve: outcome === 'dodge' ? 4700 : 8600 };
     const at = phase => round.rimCharge.start + 2600 * phase;
-    const preparing = arenaStoryState(round, 999), sprint = arenaAction(round, at(.3));
+    const initial = arenaRimChargeTargets(round, round.rimCharge.start, { x: 500, y: 416 });
+    const runway = Math.hypot(initial.defender.x - initial.side * 35 - initial.charger.x, initial.defender.y - initial.charger.y);
+    const runStartsAt = initial.contactAt - arenaChargeDuration(runway) * 1000;
+    const sprintAt = (runStartsAt + at(.48)) / 2;
+    const preparing = arenaStoryState(round, 999), sprint = arenaAction(round, sprintAt);
     assert.match(preparing.steps[preparing.step], /지금 자리.*준비/);
     assert.match(arenaNarration(round, candidates, order, 999).title, /돌진 준비/);
     assert.equal(sprint.lift, 0); assert.equal(sprint.liftedId, undefined);
     assert.equal(sprint.actors.find(actor => actor.id === 'v').pose, 'run');
     assert.ok(sprint.actors.every(actor => !actor.gripId), 'the runner does not take a grip before reaching the defender');
-    assert.deepEqual(arenaActionWords(round, at(.3)), [{ id: 'v', word: '돌진!' }]);
+    assert.deepEqual(arenaActionWords(round, sprintAt), [{ id: 'v', word: '돌진!' }]);
     const reaction = arenaStoryState(round, at(outcome === 'dodge' ? .58 : .75));
     assert.match(reaction.steps[reaction.step], outcome === 'dodge' ? /옆으로 회피/ : /두 발로 버티기/);
     assert.match(arenaNarration(round, candidates, order, at(outcome === 'dodge' ? .58 : .75)).detail, outcome === 'dodge' ? /옆으로 빠집/ : /두 사람 모두.*남았/);

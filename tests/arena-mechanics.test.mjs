@@ -62,7 +62,8 @@ test('a charge is caught at body contact before the receiver pivots, lifts and t
       }
       previous = current;
     }
-    const caught = arenaAction(round, round.start + span * .65), lifted = arenaAction(round, round.start + span * .98);
+    const receive = arenaCatchTargets(round, round.start, center);
+    const caught = arenaAction(round, receive.plannedContactAt + span * .06), lifted = arenaAction(round, round.start + span * .98);
     assert.equal(caught.lift, 0);
     assert.ok(lifted.lift > 40);
     assert.equal(lifted.liftedId, round.victim);
@@ -72,7 +73,8 @@ test('a charge is caught at body contact before the receiver pivots, lifts and t
     assert.equal(flight.groundX, end.charger.x);
     assert.equal(flight.height, lifted.lift, 'release inherits the existing held height instead of jumping into flight');
   }
-  assert.match(arenaStoryState(round, round.start + span * .65).action, /몸통.*팔.*잡/);
+  const receive = arenaCatchTargets(round, round.start, { x: 500, y: 416 });
+  assert.match(arenaStoryState(round, receive.plannedContactAt + span * .06).action, /몸통.*팔.*잡/);
 });
 
 test('an outside shove reaches a fighting pair, frees one fighter and pushes only the drawn loser out', () => {

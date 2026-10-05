@@ -6,6 +6,7 @@ async function source(entry) {
   const result = await build({ entryPoints: [entry], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
+const { ARENA_CHARGE_SPEED } = await source('src/arenaCharge.ts');
 const { arenaKickCatchTargets: targets, arenaKickCatchOutcome, ARENA_KICK_CATCH_TIMING: timing } = await source('src/arenaKickCatch.ts');
 const { arenaRounds, arenaRanks, arenaEliminatedIds, arenaMiniExchanges, arenaContactRound, arenaRimPushOutcome, ARENA_RIM_PUSH_DISTANCE } = await source('src/arenaLogic.ts');
 const { arenaEscapeRoll } = await source('src/arenaEscape.ts');
@@ -30,7 +31,7 @@ test('the losing kicker approaches from the actual root, accelerates and plants 
     for (let elapsed = start + 16; elapsed <= first.plannedLaunchAt + 1000; elapsed += 16) {
       const frame = targets(window, elapsed, center, initial);
       assert.ok(side * (frame.kicker.x - previous.kicker.x) <= 1e-8, 'the kicker never steps back to manufacture a jump');
-      assert.ok(distance(frame.kicker, previous.kicker) / .016 <= 160 + 1e-7);
+      assert.ok(distance(frame.kicker, previous.kicker) / .016 <= ARENA_CHARGE_SPEED + 1e-7);
       assert.equal(frame.kickerHeight, 0); assert.equal(frame.grip, false); assert.equal(frame.spin, undefined);
       assert.deepEqual(frame.catcher, initial.catcher);
       previous = frame;

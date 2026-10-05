@@ -25,7 +25,7 @@ test('a charge uses its existing run-up and cannot send a close or misaligned pa
     const actual = arenaContactRound(round, center, item);
     assert.equal(actual.tactic, round.tactic);
     assert.ok(actual.chargeSetup);
-    const start = item.targets(actual, round.start, center), preparing = item.targets(actual, round.start + (item.tactic === 'ram' ? 150 : 300), center);
+    const start = item.targets(actual, round.start, center), preparing = item.targets(actual, round.start + 150, center);
     const from = item.chargerId === 'a' ? item.aggressor : item.victim, receiver = item.chargerId === 'a' ? item.victim : item.aggressor;
     assert.deepEqual(start[item.driver], from);
     assert.deepEqual(start[item.receiver], receiver);
@@ -76,7 +76,8 @@ test('backward preparation and approach keep looking at the opponent, including 
 test('brief blocking, counter and release words belong to the actual visible maneuver', () => {
   const round = { id: 'block', index: 0, tactic: 'catch', aggressor: 'a', victim: 'v', start: 1000, impact: 6000, resolve: 7100, end: 7500, final: false };
   const at = p => round.start + (round.impact - round.start) * p;
-  assert.deepEqual(arenaActionWords(round, at(.63)), [{ id: 'a', word: '막기!' }]);
+  const receive = arenaCatchTargets(round, round.start, { x: 500, y: 416 });
+  assert.deepEqual(arenaActionWords(round, receive.plannedContactAt + (round.impact - round.start) * .06), [{ id: 'a', word: '막기!' }]);
   assert.deepEqual(arenaActionWords(round, at(.85)), [{ id: 'a', word: '되치기!' }]);
   assert.deepEqual(arenaActionWords(round, round.impact + 100), [{ id: 'a', word: '던지기!' }]);
   assert.deepEqual(arenaActionWords({ ...round, tactic: 'brace' }, at(.40)), [{ id: 'a', word: '막기!' }]);

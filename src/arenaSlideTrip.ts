@@ -1,4 +1,5 @@
 import type { ArenaPoint } from './arenaLogic';
+import { ARENA_CHARGE_SPEED, ARENA_CHARGE_RAMP_SECONDS, arenaChargePath } from './arenaCharge';
 
 export type ArenaSlideTripWindow = {
   start: number; end: number;
@@ -34,7 +35,7 @@ export const ARENA_SLIDE_TRIP_MIN_GAP = 130;
 export const ARENA_SLIDE_TRIP_MIN_RUN = 320;
 export const ARENA_SLIDE_TRIP_ENTRY_GAP = 124;
 export const ARENA_SLIDE_TRIP_JUMP_DURATION = 520;
-export const ARENA_SLIDE_TRIP_TIMING = { runRamp: 180, slideRamp: 100, hook: 24, fall: 320, rise: 400, kickWindup: 240, kickRetract: 170 } as const;
+export const ARENA_SLIDE_TRIP_TIMING = { runRamp: ARENA_CHARGE_RAMP_SECONDS * 1000, slideRamp: 100, hook: 24, fall: 320, rise: 400, kickWindup: 240, kickRetract: 170 } as const;
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const ease = (value: number) => { const p = clamp(value); return p * p * (3 - 2 * p); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
@@ -52,19 +53,9 @@ export function arenaSlideTripEvadeOutcome(roll: number): boolean {
   return roll < 20;
 }
 
-/** A committed runner carries the same speed into the seated slide. */
-function runningEntry(origin: ArenaPoint, goal: ArenaPoint, age: number) {
-  const length = distance(origin, goal), speed = 190, ramp = ARENA_SLIDE_TRIP_TIMING.runRamp / 1000;
-  const duration = (length / speed + ramp / 2) * 1000, t = Math.max(0, age / 1000);
-  const moved = Math.min(length, t < ramp ? speed * t * t / (2 * ramp) : speed * (t - ramp / 2));
-  const direction = length > .001 ? { x: (goal.x - origin.x) / length, y: (goal.y - origin.y) / length } : { x: 0, y: 0 };
-  const velocity = t * 1000 > duration ? 0 : speed * Math.min(1, t / ramp);
-  return { point: blend(origin, goal, moved / Math.max(.001, length)), velocity: { x: direction.x * velocity, y: direction.y * velocity }, duration };
-}
-
 /** Ground friction reduces the carried running speed over a visible slide. */
 function slidingTravel(origin: ArenaPoint, goal: ArenaPoint, age: number) {
-  const length = distance(origin, goal), speed = 190, duration = 2 * length / speed * 1000;
+  const length = distance(origin, goal), speed = ARENA_CHARGE_SPEED, duration = 2 * length / speed * 1000;
   const p = clamp(age / Math.max(1, duration)), moved = length * (2 * p - p * p);
   const direction = length > .001 ? { x: (goal.x - origin.x) / length, y: (goal.y - origin.y) / length } : { x: 0, y: 0 };
   return { point: blend(origin, goal, moved / Math.max(.001, length)), velocity: { x: direction.x * speed * (1 - p), y: direction.y * speed * (1 - p) }, duration };
@@ -83,7 +74,7 @@ export function arenaSlideTripTargets(window: ArenaSlideTripWindow, elapsed: num
   // backwards to make room for a cosmetic runway.
   const ahead = side * (staging.x - initial.driver.x) > 0;
   const approachGoal = ahead ? staging : { ...initial.driver };
-  const run = runningEntry(initial.driver, approachGoal, elapsed - window.start);
+  const run = arenaChargePath(initial.driver, approachGoal, elapsed - window.start);
   const plannedLaunchAt = window.plannedLaunchAt ?? window.start + run.duration;
   const startingGap = distance(initial.driver, initial.victim);
   const victimInside = Math.hypot((initial.victim.x - 500) / 290, (initial.victim.y - 416) / 98) <= 1;

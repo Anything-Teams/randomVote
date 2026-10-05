@@ -30,7 +30,7 @@ const segmentGap = (point, from, to) => {
 const noop = () => {};
 const ctx = new Proxy({ globalAlpha: 1, measureText: value => ({ width: value.length * 8 }), createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }) }, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 const order = ['5', '4', '3', '2', '1'];
-const props = { candidates: ['1', '2', '3', '4', '5'].map(id => ({ id, name: id, color: '#ffad72' })), order, duration: 44000, arenaRushRoll: 7, arenaEscapeSeed: 83, paused: false, preview: false };
+const props = { candidates: ['1', '2', '3', '4', '5'].map(id => ({ id, name: id, color: '#ffad72' })), order, duration: 44000, arenaRushRoll: 7, arenaEscapeSeed: 31, paused: false, preview: false };
 const planned = arenaRounds(order, props.duration, props.arenaRushRoll, props.arenaEscapeSeed).find(round => round.wrestlingMove?.kind === 'clothesline');
 assert.ok(planned);
 
@@ -60,7 +60,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
     if (window.contactAt == null && driver.depthY - driver.y >= 8 && driver.suspension > .5) airborneApproachMs += step;
     if (window.contactAt == null && ran && elapsed >= window.plannedContactAt && Math.hypot(frame.driverVelocity.x, frame.driverVelocity.y) < 1) {
       stoppedAt ??= elapsed;
-      assert.ok(elapsed - stoppedAt < 400, `the runner cannot wait motionless in front of an unreachable stale neck (${elapsed}ms, seed 83)`);
+      assert.ok(elapsed - stoppedAt < 400, `the runner cannot wait motionless in front of an unreachable stale neck (${elapsed}ms, seed 31)`);
     }
     if (window.contactAt === elapsed) {
       contactSeen = true;

@@ -1,4 +1,5 @@
 import type { ArenaPoint, ArenaRound } from './arenaLogic';
+import { arenaChargeDuration, arenaChargeTravel } from './arenaCharge';
 
 export type ArenaPairRushOutcome = 'double-out' | 'counter-throw';
 /** The shared heave rises clearly above the two supports before gravity takes over. */
@@ -161,7 +162,7 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   // until both wrestlers have established the actual two-way grip.
   const launchAt = round.rushLaunchAt === null ? null : Math.max(round.start, round.rushLaunchAt ?? round.start + preparation * span);
   const waitingForGrip = launchAt === null || elapsed < launchAt;
-  const runDuration = outcome === 'counter-throw' && distance < 1 ? 0 : Math.max(160 * unit, distance * 1000 / (162 * .9));
+  const runDuration = outcome === 'counter-throw' && distance < 1 ? 0 : arenaChargeDuration(distance) * 1000;
   const earliestContact = (launchAt ?? round.start + preparation * span) + runDuration;
   // The Scene records the real contact from its actual runway. Consumers
   // without that origin must use the recorded instant, not a default runway.
@@ -173,7 +174,7 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
   const requiredImpactAt = outcome === 'counter-throw' ? pickupAt === null ? Math.max(contactAt + postContactDuration, elapsed + afterPickup) : pickupAt + afterPickup : contactAt + postContactDuration;
   const released = launchAt !== null && (outcome !== 'counter-throw' || pickupAt !== null) && elapsed >= (outcome === 'counter-throw' ? requiredImpactAt : round.impact);
   const runProgress = launchAt === null ? 0 : clamp((elapsed - launchAt) / Math.max(1, contactAt - launchAt));
-  const approach = drive(runProgress);
+  const approach = distance > .001 && launchAt !== null ? clamp(arenaChargeTravel((elapsed - launchAt) / 1000).distance / distance) : 0;
   const impactAge = launchAt === null ? -1 : elapsed - contactAt;
   const impactStrength = impactAge >= 0 ? 1 - ease(impactAge / (240 * unit)) : 0;
   const impactDeflect = impactAge >= 0 ? ease(impactAge / (45 * unit)) * impactStrength : 0;
@@ -230,10 +231,13 @@ export function arenaPairRushTargets(round: RushRound, elapsed: number, center: 
     return frame;
   }
   const timing = ARENA_PAIR_COUNTER_TIMING;
-  const age = impactAge;
+  // Contact times now follow a physical runway and may contain fractions.
+  // The recorded absolute pickup boundary owns the transition even when
+  // subtracting that contact clock rounds a few ulps below the grip age.
+  const age = launchAt !== null && elapsed >= plannedPickupAt ? Math.max(timing.grip, impactAge) : impactAge;
   const reboundProgress = clamp(age / timing.rebound), rebound = ease(reboundProgress);
   const fallen = ease((age - timing.fallStart) / (timing.rebound - timing.fallStart));
-  const pickupAge = pickupAt === null ? -1 : elapsed - pickupAt;
+  const pickupAge = pickupAt === null ? -1 : elapsed >= requiredImpactAt ? afterPickup : elapsed - pickupAt;
   const loadDuration = timing.load - timing.grip, riseDuration = timing.lift - timing.load;
   const backDuration = timing.toss - timing.lift, heaveDuration = timing.release - timing.toss;
   const load = ease(pickupAge / loadDuration), lifted = ease((pickupAge - loadDuration) / riseDuration);

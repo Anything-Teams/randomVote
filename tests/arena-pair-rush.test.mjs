@@ -6,6 +6,7 @@ async function source(path) {
   const result = await build({ entryPoints: [path], bundle: true, format: 'esm', platform: 'node', write: false });
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString('base64')}`);
 }
+const { ARENA_CHARGE_SPEED, ARENA_CHARGE_RAMP_SECONDS, arenaChargeDuration, arenaChargeTravel } = await source('src/arenaCharge.ts');
 const { ARENA_PAIR_COUNTER_TIMING, ARENA_PAIR_CONTACT_RADIUS, ARENA_PAIR_THROW_UPWARD, arenaPairRushContact, arenaPairRushOutcome, arenaPairRushCast, arenaPairRushTargets, arenaPairRushFlight, arenaPairPushFlight } = await source('src/arenaPairRush.ts');
 const { createArenaFighterAnimation, sampleArenaFighterContacts, arenaCarryHolderPoint } = await source('src/game/ArenaFighter.ts');
 const { arenaAction, arenaActionWords, arenaNarration } = await source('src/arenaLogic.ts');
@@ -125,7 +126,7 @@ test('both rush outcomes keep bounded continuous movement without returning to a
     let previous = arenaPairRushTargets(actual, 0, center);
     for (let elapsed = 16; elapsed <= span; elapsed += 16) {
       const current = arenaPairRushTargets(actual, elapsed, center);
-      for (const actor of ['aggressor', 'victim', 'helper']) assert.ok(distance(current[actor], previous[actor]) / .016 < 165, `${roll}/${side}/${actor} cannot teleport or exceed the movement cap`);
+      for (const actor of ['aggressor', 'victim', 'helper']) assert.ok(distance(current[actor], previous[actor]) / .016 <= ARENA_CHARGE_SPEED + 1e-7, `${roll}/${side}/${actor} cannot teleport or exceed the movement cap`);
       previous = current;
     }
     for (const phase of [.15, .38, .44, .49, .52, .56, .60, .62, .66, .74, .84, .90, 1]) {
@@ -178,7 +179,7 @@ test('the third fighter runs from farther behind and the collision pulse follows
     let previous = arenaPairRushTargets(actual, 0, center, origin)[charger];
     for (let elapsed = 16; elapsed < opening.contactAt; elapsed += 16) {
       const frame = arenaPairRushTargets(actual, elapsed, center, origin);
-      assert.ok(distance(frame[charger], previous) / .016 < 165);
+      assert.ok(distance(frame[charger], previous) / .016 <= ARENA_CHARGE_SPEED + 1e-7);
       previous = frame[charger];
     }
   }
@@ -201,7 +202,7 @@ test('a runner faces its real approach from either side, diagonally or verticall
         const frame = arenaPairRushTargets(actual, elapsed, center, origin), current = frame[charger];
         const forward = (current.x - previous.x) * opening.chargeDirection.x + (current.y - previous.y) * opening.chargeDirection.y;
         assert.ok(forward >= -1e-9, 'every approach step advances toward the pair');
-        assert.ok(distance(current, previous) / .016 < 165, 'an arbitrary origin keeps the same bounded running speed');
+        assert.ok(distance(current, previous) / .016 <= ARENA_CHARGE_SPEED + 1e-7, 'an arbitrary origin keeps the same bounded running speed');
         if (frame.stage === 'charge' && roll === 7) assert.equal(frame.victimPose, undefined, 'a running charger cannot be frozen by a brace pose');
         previous = current;
       }
@@ -236,8 +237,11 @@ test('a charge keeps its running speed into the hit and never reverses a nearby 
       const origin = { x: contact.x + offset.x, y: contact.y + offset.y }, opening = arenaPairRushTargets(actual, 0, center, origin);
       const before = arenaPairRushTargets(actual, opening.contactAt - 50, center, origin), next = arenaPairRushTargets(actual, opening.contactAt - 25, center, origin), hit = arenaPairRushTargets(actual, opening.contactAt, center, origin);
       const earlierSpeed = distance(before[charger], next[charger]) / .025, arrivingSpeed = distance(next[charger], hit[charger]) / .025;
-      assert.ok(Math.abs(arrivingSpeed - earlierSpeed) < .01, 'the final steps do not ease down to a stop before collision');
-      assert.ok(arrivingSpeed < 165);
+      const incomingTime = (opening.contactAt - opening.launchAt) / 1000;
+      const expectedArrivalSpeed = (arenaChargeTravel(incomingTime).distance - arenaChargeTravel(incomingTime - .025).distance) / .025;
+      assert.ok(Math.abs(arrivingSpeed - expectedArrivalSpeed) < 1e-7, 'the final step retains the shared acceleration and cannot brake before collision');
+      if (incomingTime >= ARENA_CHARGE_RAMP_SECONDS + .05) assert.ok(Math.abs(arrivingSpeed - earlierSpeed) < .01, 'a completed acceleration keeps constant speed into contact');
+      assert.ok(arrivingSpeed <= ARENA_CHARGE_SPEED + 1e-7);
       if (distance(origin, opening.contactPoint) > 60) assert.ok(arrivingSpeed > 150, 'a clear runway produces a committed fast charge');
       assert.deepEqual(opening[charger], origin, 'a short runway never sends the runner back to invent more distance');
       assert.ok(opening.contactAt < actual.impact * .40, 'the charge reaches contact without the old fixed forty-two percent delay');
@@ -340,7 +344,7 @@ test('an explicit grip gate reserves the actual charger until both wrestlers are
     let previous = starts;
     for (let elapsed = 2316; elapsed <= launch.impact; elapsed += 16) {
       const frame = arenaPairRushTargets(launch, elapsed, center, origin);
-      for (const actor of ['aggressor', 'victim', 'helper']) assert.ok(distance(frame[actor], previous[actor]) / .016 < 165, `${roll}/${side}/${actor}: a delayed physical grip cannot accelerate the full encounter past its movement limit`);
+      for (const actor of ['aggressor', 'victim', 'helper']) assert.ok(distance(frame[actor], previous[actor]) / .016 <= ARENA_CHARGE_SPEED + 1e-7, `${roll}/${side}/${actor}: a delayed physical grip cannot accelerate the full encounter past its movement limit`);
       previous = frame;
     }
   }
@@ -351,7 +355,7 @@ test('the grip gate reports the real runway and minimum remaining story time for
     const center = { x: 500, y: 416 }, actual = { ...round(roll, side, 10900), rushLaunchAt: 3000, timeScale: 1 };
     const contact = { x: center.x - side * (roll < 3 ? 36 : 53), y: center.y + 5 }, origin = { x: contact.x - side * 285, y: contact.y + 60 };
     const frame = arenaPairRushTargets(actual, 3000, center, origin);
-    assert.ok(frame.contactAt > 4900 && frame.contactAt < 5100, 'a long runway receives actual running time after the real grip');
+    assert.ok(Math.abs(frame.contactAt - actual.rushLaunchAt - arenaChargeDuration(distance(origin, frame.contactPoint)) * 1000) < 1e-7, 'a long runway receives the shoulder charge running time after the real grip');
     assert.ok(Math.abs(frame.requiredImpactAt - frame.contactAt - frame.postContactDuration) < 1e-8);
     if (roll < 3) assert.ok(frame.postContactDuration >= 700, 'the planted push follows its actual distance at bounded speed');
     else assert.equal(frame.postContactDuration, ARENA_PAIR_COUNTER_TIMING.release);
@@ -502,7 +506,7 @@ test('the faster counter keeps normal ground steps below the movement cap while 
     let previous = arenaPairRushTargets(actual, 0, center, origin);
     for (let elapsed = 16; elapsed <= actual.impact; elapsed += 16) {
       const frame = arenaPairRushTargets(actual, elapsed, center, origin);
-      for (const actor of ['aggressor', 'victim', 'helper']) assert.ok(distance(frame[actor], previous[actor]) / .016 <= 165, `${side}/${direction}/${actor}: a faster counter keeps bounded ground motion`);
+      for (const actor of ['aggressor', 'victim', 'helper']) assert.ok(distance(frame[actor], previous[actor]) / .016 <= ARENA_CHARGE_SPEED + 1e-7, `${side}/${direction}/${actor}: a faster counter keeps bounded ground motion`);
       previous = frame;
     }
   }

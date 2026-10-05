@@ -1,4 +1,5 @@
 import type { Candidate } from './election';
+import { ARENA_CHARGE_SPEED, arenaChargeDuration, arenaChargeTravel } from './arenaCharge';
 import { arenaFinalTechniques, arenaFloorExitTiming, arenaTechniqueExit, arenaTechniqueTargets, isArenaFinalTechnique, isArenaFloorDrag } from './arenaTechniques';
 import { arenaPairRushCast, type ArenaPairRushOutcome } from './arenaPairRush';
 import { arenaPairRushTargets } from './arenaPairRush';
@@ -28,7 +29,7 @@ export type ArenaActionStage = 'approach' | 'link' | 'joint-attack' | 'resist' |
 export type ArenaActionPose = 'pairlift' | 'guard' | 'grapple' | 'brace' | 'push' | 'lift' | 'overhead' | 'dodge' | 'run' | 'throw' | 'trip' | 'suplex' | 'drag' | 'sidekick' | 'stunned' | 'elbow';
 export type ArenaActionActor = { id: string; role: 'aggressor' | 'victim' | 'helper'; offset: ArenaPoint; pose: ArenaActionPose; phase: number; gripId?: string; badge: string; turn?: number };
 export type ArenaAction = { stage: ArenaActionStage; actors: ArenaActionActor[]; attackers: string[]; targetId: string; allies: string[]; liftedId?: string; lift: number; outcome: 'pending' | 'success' | 'resisted' | 'betrayed'; betrayed: boolean };
-export const ARENA_MAX_GROUND_SPEED = 165;
+export const ARENA_MAX_GROUND_SPEED = ARENA_CHARGE_SPEED;
 export const ARENA_LIFT_HEIGHT = 42;
 export const ARENA_RIM_PUSH_CHANCE = .70;
 export const ARENA_RIM_PUSH_DISTANCE = 80;
@@ -84,28 +85,37 @@ export function arenaBeat(round: ArenaRound, elapsed: number): ArenaBeat {
 }
 
 /** A forward lean precedes acceleration; the sidestep happens as the charge arrives. */
-export function arenaChargeState(round: ArenaRound, elapsed: number): ArenaChargeState {
-  const duration = Math.min(1600, Math.max(1, round.impact - round.start) * .64);
+export function arenaChargeState(round: ArenaRound, elapsed: number, runway?: number): ArenaChargeState {
+  const nominalDuration = Math.min(1600, Math.max(1, round.impact - round.start) * .64);
+  if (runway === undefined && round.chargeSetup) {
+    const { charger, receiver, side } = round.chargeSetup;
+    const rim = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((charger.y - 416) / 112) ** 2));
+    runway = Math.abs((round.exchange ? receiver.x + side * 43 : rim - side * 13) - charger.x);
+  }
+  const length = runway ?? arenaChargeTravel(nominalDuration / 1000).distance;
+  const duration = Math.max(1, arenaChargeDuration(length) * 1000);
   const chargeStartsAt = round.impact - duration, dodgeStartsAt = chargeStartsAt + duration * .40;
-  const t = clamp((elapsed - chargeStartsAt) / duration), ramp = .22;
-  const charge = (t < ramp ? t * t / (2 * ramp) : t - ramp / 2) / (1 - ramp / 2);
-  return { stage: elapsed < chargeStartsAt ? 'prepare' : t < .40 ? 'charge' : t < .96 ? 'dodge' : 'miss', charge, dodge: ease((t - .40) / .56), preparation: ease((elapsed - chargeStartsAt + 450) / 450), chargeStartsAt, dodgeStartsAt };
+  const t = clamp((elapsed - chargeStartsAt) / duration);
+  const charge = elapsed >= round.impact ? 1 : clamp(arenaChargeTravel((elapsed - chargeStartsAt) / 1000).distance / Math.max(.001, length));
+  return { stage: elapsed < chargeStartsAt ? 'prepare' : t < .40 ? 'charge' : t < .96 ? 'dodge' : 'miss', charge, dodge: ease((elapsed - dodgeStartsAt) / Math.max(650, duration * .56)), preparation: ease((elapsed - chargeStartsAt + 240) / 240), chargeStartsAt, dodgeStartsAt };
 }
 
 /** The charging loser runs toward the nearest edge while the opponent moves across its path. */
 export function arenaChargeTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
   if (round.chargeSetup) {
-    const state = arenaChargeState(round, elapsed), { charger, receiver, side } = round.chargeSetup;
+    const { charger, receiver, side } = round.chargeSetup;
     const across = receiver.y >= 416 ? -1 : 1;
     const evade = arenaInsidePoint({ x: receiver.x, y: receiver.y + across * 61 }, 12);
     const rim = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((charger.y - 416) / 112) ** 2));
     const endX = round.exchange ? receiver.x + side * 43 : rim - side * 13;
+    const state = arenaChargeState(round, elapsed, Math.abs(endX - charger.x));
     return { ...state, side, target: { x: mix(receiver.x, evade.x, state.dodge), y: mix(receiver.y, evade.y, state.dodge) }, charger: { x: mix(charger.x, endX, state.charge), y: charger.y } };
   }
-  const state = arenaChargeState(round, elapsed), side = center.x >= 500 ? 1 : -1;
+  const side = center.x >= 500 ? 1 : -1;
   const across = center.y >= 430 ? -1 : 1;
   const edgeX = 500 + side * 303 * Math.sqrt(Math.max(0, 1 - ((center.y - 416) / 112) ** 2));
   const endX = round.exchange ? center.x + side * 86 : edgeX - side * 13;
+  const state = arenaChargeState(round, elapsed, Math.abs(endX - (center.x - side * 102)));
   return { ...state, side, target: { x: center.x + side * (30 + state.dodge * 34), y: center.y + across * state.dodge * 61 }, charger: { x: mix(center.x - side * 102, endX, state.charge), y: center.y } };
 }
 
@@ -122,18 +132,23 @@ export function arenaEdgeTargets(round: ArenaRound, elapsed: number, center: Are
 
 /** The receiver absorbs a charge, steps across it, then lifts from an established grip. */
 export function arenaCatchTargets(round: ArenaRound, elapsed: number, center: ArenaPoint) {
-  const span = Math.max(1, round.impact - round.start), p = clamp((elapsed - round.start) / span);
+  const span = Math.max(1, round.impact - round.start), prepare = Math.min(240, span * .15);
   const side = round.chargeSetup?.side ?? (center.x >= 500 ? 1 : -1);
   const receiverOrigin = round.chargeSetup?.receiver ?? { x: center.x + side * 26, y: center.y };
   const chargerOrigin = round.chargeSetup?.charger ?? { x: center.x - side * 92, y: center.y };
-  const charge = ease((p - .18) / .37);
-  const contactAt = round.chargeSetup?.contactAt === null ? Infinity : round.chargeSetup?.contactAt ?? round.start + span * .55;
+  const destination = { x: receiverOrigin.x - side * 50, y: receiverOrigin.y };
+  const distance = Math.hypot(destination.x - chargerOrigin.x, destination.y - chargerOrigin.y);
+  const chargeStartsAt = round.start + prepare;
+  const plannedContactAt = chargeStartsAt + arenaChargeDuration(distance) * 1000;
+  const traveled = arenaChargeTravel((elapsed - chargeStartsAt) / 1000).distance;
+  const charge = elapsed >= plannedContactAt ? 1 : clamp(traveled / Math.max(.001, distance));
+  const contactAt = round.chargeSetup?.contactAt === null ? Infinity : round.chargeSetup?.contactAt ?? plannedContactAt;
   const connected = elapsed >= contactAt;
   const loadDuration = round.chargeSetup?.loadDuration ?? Math.max(180, span * .12);
   const load = ease((elapsed - contactAt) / loadDuration);
   const turn = ease((elapsed - contactAt - loadDuration) / (round.chargeSetup?.turnDuration ?? Math.max(300, span * .28)));
-  const receiveStep = ease((charge - .65) / .35) * 8;
-  const caughtReceiver = round.chargeSetup?.contactReceiver ?? { x: receiverOrigin.x - side * 8, y: receiverOrigin.y };
+  const receiveStep = ease((charge - .65) / .35) * 10;
+  const caughtReceiver = round.chargeSetup?.contactReceiver ?? { x: receiverOrigin.x - side * 10, y: receiverOrigin.y };
   const caughtCharger = round.chargeSetup?.contactCharger ?? { x: receiverOrigin.x - side * 50, y: receiverOrigin.y };
   // The incoming roots are captured at real contact. First accept their weight,
   // then step across and rotate the supported torso before letting go.
@@ -141,8 +156,8 @@ export function arenaCatchTargets(round: ArenaRound, elapsed: number, center: Ar
   const charger = connected ? { x: caughtCharger.x + side * turn * 11, y: caughtCharger.y } : { x: mix(chargerOrigin.x, receiverOrigin.x - side * 50, charge), y: mix(chargerOrigin.y, receiverOrigin.y, charge) };
   return { side, charge, turn, load, gripStrength: connected ? 1 : 0, height: ARENA_LIFT_HEIGHT * turn,
     receiverAngle: -side * turn * .20, chargerAngle: side * turn * .55,
-    stage: p < .18 ? 'prepare' as const : !connected ? charge < 1 ? 'charge' as const : 'catch' as const : load < 1 ? 'load' as const : 'turn' as const,
-    preparation: ease(p / .18), receiver, charger };
+    stage: elapsed < chargeStartsAt ? 'prepare' as const : !connected ? charge < 1 ? 'charge' as const : 'catch' as const : load < 1 ? 'load' as const : 'turn' as const,
+    preparation: ease((elapsed - round.start) / prepare), chargeStartsAt, plannedContactAt, receiver, charger };
 }
 
 /** A successful shoulder charge transfers its momentum at contact; neither fighter takes a grip. */
@@ -154,8 +169,7 @@ export function arenaRamTargets(round: ArenaRound, elapsed: number, center: Aren
   const receiver = round.chargeSetup?.receiver ?? { x: center.x + side * 24, y: center.y };
   const destination = { x: receiver.x - side * 28, y: receiver.y };
   const distance = Math.hypot(destination.x - charger.x, destination.y - charger.y);
-  const age = Math.max(0, elapsed - round.start - prepare) / 1000, ramp = .16;
-  const traveled = ARENA_MAX_GROUND_SPEED * (age < ramp ? age * age / (2 * ramp) : age - ramp / 2);
+  const traveled = arenaChargeTravel((elapsed - round.start - prepare) / 1000).distance;
   // The run has its own physical pace. The scheduled bout length cannot turn
   // a committed shoulder charge into several seconds of slow walking.
   const charge = clamp(traveled / Math.max(.001, distance));
