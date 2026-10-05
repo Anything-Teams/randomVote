@@ -598,15 +598,6 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             driver.clotheslineArm = window.kind === 'clothesline' && frame.clotheslineStrength > .001 ? 1 : undefined;
             driver.clotheslineTarget = frame.clotheslineTarget; driver.clotheslineStrength = frame.clotheslineStrength;
             driver.clotheslineInner = frame.clotheslineInner;
-            if (window.kind === 'clothesline' && window.contactAt != null && frame.clotheslineStrength > 0 && victim) {
-              const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock);
-              const liveNeck = clotheslineNeck(rig);
-              // The flying inside elbow bears down on the neckline. A small
-              // upward arc of the victim's turning head must not pull the
-              // striking arm back up through the neck after contact.
-              const caughtNeck = contact.wrestlingMoveOrigins?.target;
-              driver.clotheslineTarget = { x: liveNeck.x, y: caughtNeck ? Math.max(liveNeck.y, caughtNeck.y) : liveNeck.y };
-            }
             driver.dropkickProgress = frame.dropkickProgress; driver.footTargets = frame.footTargets; driver.feetStrength = frame.feetStrength;
             driver.bulldogProgress = frame.bulldogProgress; driver.backBodyProgress = frame.backBodyProgress;
             driver.backBodyRaise = frame.backBodyRaise;
@@ -746,30 +737,31 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               const dx = to.x - from.x, dy = to.y - from.y, along = clamp(((point.x - from.x) * dx + (point.y - from.y) * dy) / Math.max(.001, dx * dx + dy * dy));
               return Math.hypot(point.x - from.x - dx * along, point.y - from.y - dy * along);
             };
-            const neckHookTouches = (rig: typeof attacking) => {
+            const extendedArmTouches = (rig: typeof attacking) => {
               const shoulder = rig.shoulders[1], elbow = rig.elbows[1], hand = rig.hands[1];
               const upper = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y }, lower = { x: hand.x - elbow.x, y: hand.y - elbow.y };
               const bend = Math.abs(Math.atan2(upper.x * lower.y - upper.y * lower.x, upper.x * lower.x + upper.y * lower.y));
-              const inside = { x: elbow.x + (hand.x - elbow.x) * .25, y: elbow.y + (hand.y - elbow.y) * .25 };
-              return bend >= .4 && segmentGap(contact.wrestlingMoveOrigins!.target!, elbow, inside) < 8 && pointGap(contact.wrestlingMoveOrigins!.target!, hand) > 12;
+              const upperInside = { x: shoulder.x + upper.x * .5, y: shoulder.y + upper.y * .5 };
+              const lowerInside = { x: elbow.x + lower.x * .45, y: elbow.y + lower.y * .45 };
+              return bend <= .3 && Math.min(segmentGap(contact.wrestlingMoveOrigins!.target!, upperInside, elbow), segmentGap(contact.wrestlingMoveOrigins!.target!, elbow, lowerInside)) < 8 && pointGap(contact.wrestlingMoveOrigins!.target!, hand) > 12;
             };
-            let touched = window.kind === 'clothesline' ? frame.clotheslineStrength > .75 && neckHookTouches(attacking)
+            let touched = window.kind === 'clothesline' ? frame.clotheslineStrength > .75 && extendedArmTouches(attacking)
               : window.kind === 'dropkick' ? frame.feetStrength > .9 && attacking.feet.every((foot, leg) => pointGap(foot, frame.footTargets![leg]) < 7)
                 : window.kind === 'powerbomb' ? attacking.hands.every((hand, arm) => pointGap(hand, defending.waistSides[arm]) < 7)
                   : window.kind === 'scoopslam' ? attacking.hands.every((hand, arm) => pointGap(hand, arm === 0 ? defending.back : { x: defending.waist.x + ((defending.feet[0].x + defending.feet[1].x) / 2 - defending.waist.x) * .28, y: defending.waist.y + ((defending.feet[0].y + defending.feet[1].y) / 2 - defending.waist.y) * .28 }) < 6)
                     : attacking.hands.some(hand => pointGap(hand, defending.waist) < 6);
             let strikeFrame = frame;
-            if (!touched && window.kind === 'clothesline' && !reset && !reduced && delta > 0) {
-              // A fast flying elbow can cross the neck between render frames.
-              // Keep the same real arm contact radius and choose the latest
-              // touching pose on this frame's traveled path, never a wider hit.
+            if (window.kind === 'clothesline' && !reset && !reduced && delta > 0) {
+              // Catch the first extended-arm collision on the traveled path.
+              // Choosing a later touch lets the body pass the neck before the
+              // impact is seen and makes the arm appear to strike from behind.
               const start = Math.max(elapsed - Math.min(50, delta), window.launchAt ?? elapsed);
-              for (let at = elapsed - 2; at >= start; at -= 2) {
+              for (let at = start; at < elapsed; at += 2) {
                 const candidate = arenaWrestlingMoveTargets(window, at, contact.center, contact.wrestlingMoveOrigins, exchange.contactSide);
                 if (!candidate.canContact || candidate.clotheslineStrength <= .75) continue;
                 const predicted = { ...driver, ...candidate.driver, y: candidate.driver.y - candidate.driverHeight, depthY: candidate.driver.y, pose: candidate.driverPose, phase: candidate.driverPhase, angle: candidate.driverAngle, suspension: candidate.driverSuspension, dropkickProgress: candidate.dropkickProgress, clotheslineStrength: candidate.clotheslineStrength };
                 const rig = sampleArenaFighterContacts(predicted, clock);
-                if (neckHookTouches(rig)) {
+                if (extendedArmTouches(rig)) {
                   strikeFrame = candidate; touched = true; break;
                 }
               }

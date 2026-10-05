@@ -298,14 +298,14 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const age = contacted ? Math.max(0, elapsed - contactAt!) : 0;
     const fall = ease(age / timing.clotheslineFall), rise = ease((age - timing.clotheslineFall) / ARENA_CLOTHESLINE_FINISH_TIMING.rise);
     // Jump from the running stride, then carry that same airborne body and
-    // velocity past the neck hook. The attacker keeps its feet forward as
-    // it lands; the opponent's upper body tips in the opposite direction.
+    // velocity through the extended-arm strike. The attacker keeps its feet
+    // forward as it lands; the opponent tips in the opposite direction.
     const incoming = initial.contactDriverVelocity ?? atContact.velocity;
     const caughtHeight = initial.contactDriverHeight ?? atContact.height, caughtAngle = initial.contactDriverAngle ?? atContact.angle;
     const caughtFlight = initial.contactFlightProgress ?? clamp((contact - launch) / jump.flight);
     const through = { x: victimOrigin.x + side * 92, y: victimOrigin.y };
     const p = clamp(age / timing.clotheslineFall), tangent = p * (1 - p) ** 2, tangentVelocity = (1 - p) * (1 - 3 * p);
-    // The hooked arm is still on the descending jump. Keep that vertical
+    // The arm collision is still on the descending jump. Keep that vertical
     // tangent as well as the forward speed instead of suspending the torso
     // at contact and starting a separate descent from rest.
     const incomingHeightVelocity = 4 * jump.height * (1 - 2 * caughtFlight) / (jump.flight / 1000);

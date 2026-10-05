@@ -667,12 +667,6 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     target.frontX = mix(target.frontX, 14 + pump, ready); target.frontY = mix(target.frontY, -17 - drive * 2, ready);
     target.clapTurn = 0;
   }
-  if (pose === 'run' && actor.clotheslineInner) {
-    // Open the striking arm behind the running shoulder before sweeping its
-    // inner elbow across the neck. The forearm then hooks through contact.
-    const reach = clamp(actor.clotheslineStrength ?? 0);
-    target.frontX = mix(-18, target.frontX, reach); target.frontY = mix(-24, target.frontY, reach);
-  }
   if (actor.linkedArm !== undefined || actor.clotheslineArm !== undefined) {
     if (!(pose === 'run' && charge > 0 || dropkick && actor.clotheslineInner)) { target.lean = 0; target.hipX = 0; }
     target.contact = 0; target.shoulderLift = 0;
@@ -1726,8 +1720,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     });
   } else state.headGripArms = undefined;
   if (actor.clotheslineInner && actor.clotheslineTarget && (actor.clotheslineStrength ?? 0) > 0) {
-    // The neck meets the inside elbow and the beginning of the forearm.
-    // The fist continues past it; a palm target alone reads as a punch.
+    // Extend a connected arm before the collision. The inside of the elbow
+    // strikes the neck while the hand continues beyond it and the body passes.
     const arm = actor.clotheslineArm ?? 1, strength = clamp(actor.clotheslineStrength ?? 0);
     const determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
     const dx = actor.clotheslineTarget.x - matrix[4], dy = actor.clotheslineTarget.y - matrix[5];
@@ -1738,30 +1732,26 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     const unwrap = (from: number, to: number) => from + Math.atan2(Math.sin(to - from), Math.cos(to - from));
     const rawFree = [Math.atan2(elbows[arm].y - shoulder.y, elbows[arm].x - shoulder.x), Math.atan2(hands[arm].y - elbows[arm].y, hands[arm].x - elbows[arm].x)];
     const free = rawFree.map((angle, bone) => memory ? unwrap(memory.free[bone], angle) : angle) as [number, number];
-    // Aim the inside of the elbow and the first quarter of the forearm at
-    // the neck. A straight radial arm only grazed it on the way past and
-    // read as a fist strike; this connected bend hooks the neckline while
-    // the ordinary forearm and palm continue beyond the opponent.
-    const wrap = ease((actor.slamProgress?.slump ?? 0) / .08);
-    const insideLength = lowerArm * mix(.25, .8, wrap);
-    const inside = reachable(shoulder, local, upperArm + insideLength - .02, Math.abs(upperArm - insideLength) + .02);
-    const choices = [1, -1].map(bend => {
-      const hooked = knee(shoulder, inside, upperArm, insideLength, bend);
-      return [Math.atan2(hooked.y - shoulder.y, hooked.x - shoulder.x), Math.atan2(inside.y - hooked.y, inside.x - hooked.x)]
-        .map((angle, bone) => unwrap(memory?.strike[bone] ?? free[bone], angle)) as [number, number];
-    });
-    const reference = memory?.strike ?? free;
-    const distance = (angles: [number, number]) => angles.reduce((sum, angle, bone) => sum + Math.abs(angle - reference[bone]), 0);
-    const strike = distance(choices[0]) <= distance(choices[1]) ? choices[0] : choices[1];
+    const worldShoulder = worldPoint(bodyPoint(shoulder));
+    const targetAhead = facing * (actor.clotheslineTarget.x - worldShoulder.x) > 0;
+    let aim = Math.atan2(local.y - shoulder.y, local.x - shoulder.x);
+    if (!targetAhead && !reset && state.contactPoints) {
+      // Once the neck passes behind the shoulder, keep the extended arm's
+      // actual forward direction. Chasing it backward turns the strike into
+      // a neck hook and folds the wrist back toward the opponent.
+      const previous = state.contactPoints, dx = previous.elbows[arm].x - previous.shoulders[arm].x, dy = previous.elbows[arm].y - previous.shoulders[arm].y;
+      const direction = rotate({ x: (matrix[3] * dx - matrix[2] * dy) / determinant, y: (-matrix[1] * dx + matrix[0] * dy) / determinant }, -lean);
+      aim = Math.atan2(direction.y, direction.x);
+    }
+    const strike = [aim, aim + .14].map((angle, bone) => unwrap(memory?.strike[bone] ?? free[bone], angle)) as [number, number];
     const upperAngle = mix(free[0], strike[0], strength), lowerAngle = mix(free[1], strike[1], strength);
     elbows[arm] = { x: shoulder.x + Math.cos(upperAngle) * upperArm, y: shoulder.y + Math.sin(upperAngle) * upperArm };
     hands[arm] = { x: elbows[arm].x + Math.cos(lowerAngle) * lowerArm, y: elbows[arm].y + Math.sin(lowerAngle) * lowerArm };
     state.clotheslineAngles = { free, strike };
   } else state.clotheslineAngles = undefined;
-  if (actor.clotheslineInner && actor.gripMode !== 'ankle' && !reset && state.contactPoints) {
-    // Opening behind the shoulder passes close to the arm's inner radius.
-    // Rotate both complete bones from the painted arm instead of allowing
-    // the free-hand IK to switch its elbow across the torso in one frame.
+  if (actor.clotheslineInner && pose !== 'run' && actor.gripMode !== 'ankle' && !reset && state.contactPoints) {
+    // Extend and recover both complete bones from the painted arm without
+    // switching an elbow's bend in one frame. The ground run stays ordinary.
     const arm = actor.clotheslineArm ?? 1, previous = state.contactPoints;
     const determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
     const localDirection = (from: Point, to: Point) => {

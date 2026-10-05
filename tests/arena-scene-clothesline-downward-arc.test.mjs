@@ -32,7 +32,7 @@ const props = { candidates: ['1', '2'].map(id => ({ id, name: id, color: '#ffad7
 const planned = arenaRounds(props.order, props.duration, props.arenaRushRoll, props.arenaEscapeSeed)[0];
 assert.equal(planned.wrestlingMove?.kind, 'clothesline');
 
-for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the flying neck hook carries forward and down without restarting its fall (${mirrored ? 'mirrored' : 'ordinary'}, ${delta}ms)`, () => {
+for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the extended flying neck strike carries forward and down without restarting its fall (${mirrored ? 'mirrored' : 'ordinary'}, ${delta}ms)`, () => {
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() };
   setInitialize((current, reset) => {
     if (current !== sim || !reset) return;
@@ -44,12 +44,12 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the fl
     }
   });
   let contactRoot, contactWaist, caughtHeight, caughtFlight, caughtNeck, contactAt, previousRig;
-  let continuedDescent = false, fartherPass = false, impact = false;
+  let continuedDescent = false, fartherPass = false, impact = false, fixedTargetDuringFall = false;
   for (let elapsed = 0; elapsed <= 9000; elapsed += delta) {
     render(ctx, props, elapsed, elapsed, sim, delta, false);
     const contact = sim.contacts.get(planned.id), round = contact?.round, window = round?.wrestlingMove;
     if (!contact?.started) continue;
-    assert.equal(window?.kind, 'clothesline', 'the actual flying hook cannot quietly fall back to an ordinary throw');
+    assert.equal(window?.kind, 'clothesline', 'the actual flying arm strike cannot quietly fall back to an ordinary throw');
     const frame = arenaWrestlingMoveTargets(window, elapsed, contact.center, contact.wrestlingMoveOrigins, round.contactSide);
     const driver = capturedActors().get(round.aggressor), victim = capturedActors().get(round.victim);
     const rig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
@@ -57,10 +57,16 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the fl
       contactAt = elapsed; contactRoot = { x: driver.x, y: driver.depthY }; contactWaist = { ...rig.waist };
       caughtHeight = frame.driverHeight; caughtFlight = frame.dropkickProgress;
       caughtNeck = { ...contact.wrestlingMoveOrigins.target };
-      const inside = { x: rig.elbows[1].x + (rig.hands[1].x - rig.elbows[1].x) * .25, y: rig.elbows[1].y + (rig.hands[1].y - rig.elbows[1].y) * .25 };
-      assert.ok(segmentGap(contact.wrestlingMoveOrigins.target, rig.elbows[1], inside) < 8, 'the actual inside elbow catches the live neck');
+      const shoulder = rig.shoulders[1], elbow = rig.elbows[1], hand = rig.hands[1];
+      const upperInside = { x: shoulder.x + (elbow.x - shoulder.x) * .5, y: shoulder.y + (elbow.y - shoulder.y) * .5 };
+      const lowerInside = { x: elbow.x + (hand.x - elbow.x) * .45, y: elbow.y + (hand.y - elbow.y) * .45 };
+      const upperAngle = Math.atan2(elbow.y - shoulder.y, elbow.x - shoulder.x), forearmAngle = Math.atan2(hand.y - elbow.y, hand.x - elbow.x);
+      const bend = Math.abs(Math.atan2(Math.sin(forearmAngle - upperAngle), Math.cos(forearmAngle - upperAngle)));
+      assert.ok(bend <= .3, 'the real contact is an extended arm instead of a folded neck hook');
+      assert.ok(Math.min(segmentGap(caughtNeck, upperInside, elbow), segmentGap(caughtNeck, elbow, lowerInside)) < 8, 'the actual middle upper arm, elbow or beginning of the forearm meets the live neck');
       assert.ok(distance(contact.wrestlingMoveOrigins.target, rig.hands[1]) > 12, 'the hand continues beyond the neck instead of making a fist strike');
-      assert.ok(distance(contactRoot, contact.wrestlingMoveOrigins.launchDriver) > 100, 'the airborne wrestler crosses a visible runway before the neck hook');
+      assert.ok(frame.side * (rig.waist.x - caughtNeck.x) <= 1, 'the neck collision precedes the attacking trunk passing its contact point');
+      assert.ok(distance(contactRoot, contact.wrestlingMoveOrigins.launchDriver) > 100, 'the airborne wrestler crosses a visible runway before the neck strike');
     }
     if (contactAt != null && elapsed <= frame.floorAt) {
       if (previousRig) for (const [index, point] of painted(rig).entries()) assert.ok(distance(point, painted(previousRig)[index]) < 8 + delta * .9, 'the painted collision cannot teleport an arm, trunk or foot');
@@ -72,12 +78,15 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the fl
         const temples = { x: (victimRig.headSides[0].x + victimRig.headSides[1].x) / 2, y: (victimRig.headSides[0].y + victimRig.headSides[1].y) / 2 };
         const shoulders = { x: (victimRig.shoulders[0].x + victimRig.shoulders[1].x) / 2, y: (victimRig.shoulders[0].y + victimRig.shoulders[1].y) / 2 };
         const neck = { x: temples.x + (shoulders.x - temples.x) * .65, y: temples.y + (shoulders.y - temples.y) * .65 };
-        assert.ok(driver.clotheslineTarget.y >= caughtNeck.y - .01, 'the hooked arm never reverses upward across its actual collision neckline');
-        assert.ok(distance(driver.clotheslineTarget, neck) < 6, 'the descending hook still follows the actual turning neck rather than an unrelated stale point');
+        assert.ok(distance(driver.clotheslineTarget, caughtNeck) < 1e-9, 'the striking arm retains its original collision point instead of following the neck from behind');
+        if (elapsed - contactAt >= 96) {
+          assert.ok(distance(neck, caughtNeck) > 6, 'the opponent actually falls away from the fixed collision point');
+          fixedTargetDuringFall = true;
+        }
       }
       if (elapsed === contactAt + delta) {
         const incomingDescent = Math.max(0, -4 * 40 * (1 - 2 * caughtFlight) / .64);
-        assert.ok(incomingDescent > 20, 'the real hooked contact occurs on the descending jump');
+        assert.ok(incomingDescent > 20, 'the real arm contact occurs on the descending jump');
         assert.ok(caughtHeight - frame.driverHeight >= incomingDescent * delta / 1000 * .75, 'the first fall frame retains the incoming downward speed instead of hanging at the neck');
         continuedDescent = true;
       }
@@ -87,10 +96,10 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the fl
       assert.ok(frame.side * (driver.x - victim.x) >= 65, 'the actual attacker lands farther through the opponent rather than stopping at the neck');
       assert.equal(victim.pose, 'stunned'); assert.equal(victim.eyesClosed, true);
       assert.ok(driver.angle * victim.angle < -1, 'the two painted bodies land in opposite orientations');
-      assert.ok(victimRig.head.y > rig.elbows[1].y - 30, 'the caught upper body reaches the sand under the striking arm');
+      assert.ok(victimRig.head.y > rig.elbows[1].y - 30, 'the struck upper body reaches the sand under the striking arm');
       impact = true; break;
     }
     previousRig = structuredClone(rig);
   }
-  assert.ok(continuedDescent && fartherPass && impact, 'the same live neck hook continues its incoming forward/downward flight through the complete floor impact');
+  assert.ok(continuedDescent && fartherPass && fixedTargetDuringFall && impact, 'the same extended neck strike carries its incoming momentum past the fixed collision point through the complete floor impact');
 });

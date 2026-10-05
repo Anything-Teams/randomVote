@@ -71,13 +71,19 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       const shoulders = { x: (victimRig.shoulders[0].x + victimRig.shoulders[1].x) / 2, y: (victimRig.shoulders[0].y + victimRig.shoulders[1].y) / 2 };
       const liveNeck = { x: temples.x + (shoulders.x - temples.x) * .65, y: temples.y + (shoulders.y - temples.y) * .65 };
       const trunkLength = distance(driverRig.head, driverRig.waist);
-      assert.ok(airborneApproachMs >= 80, 'the real approach shows at least 80ms of visible flight before the arm catches the neck');
-      assert.ok(driver.depthY - driver.y >= 8 && driver.suspension > .5, 'the neck hook happens while the actual driver is airborne');
-      assert.ok(Math.abs(driverRig.head.y - driverRig.waist.y) / trunkLength <= .7, 'the painted driver extends its trunk into a nearly horizontal flying strike at the neck hook');
-      const insideForearm = { x: driverRig.elbows[1].x + (driverRig.hands[1].x - driverRig.elbows[1].x) * .25, y: driverRig.elbows[1].y + (driverRig.hands[1].y - driverRig.elbows[1].y) * .25 };
-      const neckGap = segmentGap(liveNeck, driverRig.elbows[1], insideForearm);
-      assert.ok(neckGap < 8, `the painted inside elbow reaches the victim's current neck (${neckGap.toFixed(2)}px at ${elapsed}ms)`);
+      assert.ok(airborneApproachMs >= 80, 'the real approach shows at least 80ms of visible flight before the extended arm meets the neck');
+      assert.ok(driver.depthY - driver.y >= 8 && driver.suspension > .5, 'the arm collision happens while the actual driver is airborne');
+      assert.ok(Math.abs(driverRig.head.y - driverRig.waist.y) / trunkLength <= .7, 'the painted driver extends its trunk into a nearly horizontal flying strike');
+      const shoulder = driverRig.shoulders[1], elbow = driverRig.elbows[1], hand = driverRig.hands[1];
+      const upper = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y }, lower = { x: hand.x - elbow.x, y: hand.y - elbow.y };
+      const bend = Math.abs(Math.atan2(upper.x * lower.y - upper.y * lower.x, upper.x * lower.x + upper.y * lower.y));
+      const upperInside = { x: shoulder.x + upper.x * .5, y: shoulder.y + upper.y * .5 };
+      const lowerInside = { x: elbow.x + lower.x * .45, y: elbow.y + lower.y * .45 };
+      const neckGap = Math.min(segmentGap(liveNeck, upperInside, elbow), segmentGap(liveNeck, elbow, lowerInside));
+      assert.ok(bend <= .3, 'the arm is extended before the collision, without hooking backward around the neck');
+      assert.ok(neckGap < 8, `the painted middle arm reaches the victim's current neck (${neckGap.toFixed(2)}px at ${elapsed}ms)`);
       assert.ok(distance(liveNeck, driverRig.hands[1]) > 12, 'the fist extends beyond the neck instead of punching it');
+      assert.ok(frame.side * (driverRig.waist.x - liveNeck.x) <= 3, 'the arm meets the neck before the trunk has passed it');
       assert.ok(driverRig.feet.every(foot => distance(liveNeck, foot) > 14), 'the elbow, rather than dropkick feet, causes the actual neck contact');
       for (let arm = 0; arm < 2; arm++) {
         assert.ok(Math.abs(distance(driverRig.shoulders[arm], driverRig.elbows[arm]) - 11 * driver.scale) < .001, 'the flying strike keeps each painted upper arm attached at its ordinary length');
@@ -86,7 +92,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
     }
     if (window.contactAt != null && elapsed < frame.floorAt) {
       const age = elapsed - window.contactAt, driverRig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
-      // A neck hook is a running collision: after the inside elbow catches,
+      // The extended-arm strike is a running collision: after the arm meets,
       // the caster's trunk passes the opponent instead of settling behind it.
       // Check the live roots and painted hips, not only a planned end point.
       if (frame.side * (driver.x - victim.x) > 12 && frame.side * (driverRig.waist.x - victimRig.waist.x) > 12) leadingFallMs += step;

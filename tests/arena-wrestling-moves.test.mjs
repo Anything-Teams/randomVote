@@ -210,25 +210,38 @@ test('both painted dropkick soles can reach the actual chest during the bounded 
   }
 });
 
-test('the solo clothesline meets the real neck with its inner elbow while the fist continues past it', () => {
+test('the solo clothesline strikes the real neck with its extended middle arm before the body passes', () => {
   const segmentGap = (point, from, to) => { const dx = to.x - from.x, dy = to.y - from.y, p = Math.max(0, Math.min(1, ((point.x - from.x) * dx + (point.y - from.y) * dy) / Math.max(.001, dx * dx + dy * dy))); return distance(point, { x: from.x + dx * p, y: from.y + dy * p }); };
   for (const side of [-1, 1]) for (let index = 0; index < 10; index++) {
     const values = launched('clothesline', side), victim = fighter((index + 3) % 10, { ...values.initial.victim, facing: -side });
-    const rig = sampleArenaFighterContacts(victim, 1000), neck = { x: rig.head.x, y: rig.head.y + victim.scale * 20 };
+    const rig = sampleArenaFighterContacts(victim, 1000);
+    const head = { x: (rig.headSides[0].x + rig.headSides[1].x) / 2, y: (rig.headSides[0].y + rig.headSides[1].y) / 2 };
+    const shoulders = { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 };
+    const neck = { x: head.x + (shoulders.x - head.x) * .65, y: head.y + (shoulders.y - head.y) * .65 };
     values.initial.target = neck; let touched = false;
-    for (let elapsed = values.actual.launchAt; elapsed < values.opening.requiredEndAt; elapsed += 16) {
+    // Search in time order so a later backward neck hook cannot substitute
+    // for the first collision of the flying, already extended arm.
+    for (let elapsed = values.actual.launchAt; elapsed < values.opening.requiredEndAt; elapsed += 2) {
       const frame = arenaWrestlingMoveTargets(values.actual, elapsed, center, values.initial, side);
       if (!frame.canContact || frame.clotheslineStrength <= .75) continue;
       const actor = fighter(index, { ...frame.driver, y: frame.driver.y - frame.driverHeight, angle: frame.driverAngle, facing: frame.driverFacing, pose: frame.driverPose, phase: frame.driverPhase, suspension: frame.driverSuspension, dropkickProgress: frame.dropkickProgress, clotheslineArm: 1, clotheslineTarget: frame.clotheslineTarget, clotheslineStrength: frame.clotheslineStrength, clotheslineInner: frame.clotheslineInner });
       const contact = sampleArenaFighterContacts(actor, elapsed);
-      const inner = { x: contact.elbows[1].x + (contact.hands[1].x - contact.elbows[1].x) * .25, y: contact.elbows[1].y + (contact.hands[1].y - contact.elbows[1].y) * .25 };
-      if (segmentGap(neck, contact.elbows[1], inner) < 8 && distance(neck, contact.hands[1]) > 12) {
+      const shoulder = contact.shoulders[1], elbow = contact.elbows[1], hand = contact.hands[1];
+      const upper = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y }, lower = { x: hand.x - elbow.x, y: hand.y - elbow.y };
+      const bend = Math.abs(Math.atan2(upper.x * lower.y - upper.y * lower.x, upper.x * lower.x + upper.y * lower.y));
+      const upperInside = { x: shoulder.x + upper.x * .5, y: shoulder.y + upper.y * .5 };
+      const lowerInside = { x: elbow.x + lower.x * .45, y: elbow.y + lower.y * .45 };
+      if (Math.min(segmentGap(neck, upperInside, elbow), segmentGap(neck, elbow, lowerInside)) < 8 && distance(neck, hand) > 12) {
+        assert.ok(bend <= .3, `${side}/${index}: the arm is extended rather than hooked around the neck`);
+        assert.ok(side * (hand.x - neck.x) > 10, `${side}/${index}: the fist continues beyond the middle-arm collision`);
+        assert.ok(side * (contact.waist.x - neck.x) < 1, `${side}/${index}: the middle arm strikes before the torso passes the neck`);
+        assert.ok(frame.driverHeight > 20 && frame.driverSuspension === 1, 'the neck collision happens during the same flying attack');
         assert.ok(Math.abs(distance(contact.shoulders[1], contact.elbows[1]) - 11 * actor.scale) < .001);
         assert.ok(Math.abs(distance(contact.elbows[1], contact.hands[1]) - 10.5 * actor.scale) < .001);
         touched = true; break;
       }
     }
-    assert.ok(touched, `${side}/${index}: the inside elbow crosses the painted neck while the fist stays beyond it`);
+    assert.ok(touched, `${side}/${index}: the extended middle arm crosses the painted neck while the fist stays beyond it`);
   }
 });
 
