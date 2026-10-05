@@ -79,10 +79,14 @@ for (const kind of ['spinebuster', 'backbodydrop']) for (const mirrored of [fals
       assert.ok(actual.wrestlingMove.ankleGripAt != null, 'the real four-contact gate schedules the pickup');
       rig.hands.forEach((palm, arm) => {
         assert.ok(distance(palm, victim.animation.contactPoints.feet[arm]) < 5, 'both actual palms reach the actual ankle endpoints before rotation begins');
-        // At this low pickup the palms are below the loaded shoulders. The
-        // elbows open in front of the chest instead of reaching backwards
-        // and returning their forearms to the shoulder from behind.
-        assert.ok(actor.facing * (rig.elbows[arm].x - rig.shoulders[arm].x) > -.5 * actor.scale, `the low ankle hold keeps the elbow on the front of the chest: arm ${arm}, ${kind}/${mirrored}/${delta}ms/${elapsed}`);
+        // Measure in front of the actual inclined chest, rather than a
+        // vertical line through its forward shoulder. A lowered elbow can
+        // sit slightly behind that shoulder while still bracing in front.
+        const chest = { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 };
+        const up = { x: chest.x - rig.waist.x, y: chest.y - rig.waist.y }, length = Math.hypot(up.x, up.y);
+        const front = { x: -up.y / length * actor.facing, y: up.x / length * actor.facing };
+        const elbow = rig.elbows[arm];
+        assert.ok((elbow.x - chest.x) * front.x + (elbow.y - chest.y) * front.y > -.5 * actor.scale, `the low ankle hold keeps the elbow on the front of the inclined chest: arm ${arm}, ${kind}/${mirrored}/${delta}ms/${elapsed}`);
       });
     }
     previous = { supported: reaching || loading || pickupAt === elapsed, rig: structuredClone(rig) };

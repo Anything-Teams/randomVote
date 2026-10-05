@@ -124,7 +124,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
   for (const frameDelta of [16, 50]) {
     const scene = game(kind, { mirrored, frameDelta });
     let contactSeen = false, releaseSeen = false, finalSeen = false, fallbackSeen = false, attackerJumped = false, attackerLanded = false;
-    let actualContactAt, anklesSeen = false, ankleFrames = 0, previousRig, previousDriverRig, previousSpinMatrix, previousSpinWeight, previousTurn, spinFrames = 0, fullTurnSeen = false, runSeen = false, floorSeen = false;
+    let actualContactAt, anklesSeen = false, ankleFrames = 0, previousRig, previousDriverRig, previousDriverFacing, previousSpinMatrix, previousSpinWeight, previousTurn, spinFrames = 0, fullTurnSeen = false, runSeen = false, floorSeen = false;
     const scoopStages = new Set();
     const clotheslineStages = new Set();
     let sharedFallSeen = false, standingBeforeGrip = false, oppositeHeadDirectionMs = 0, casterPassedVictim = false;
@@ -152,7 +152,11 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       assert.ok(inside(scene.sim.bodies.get(actual.aggressor)), `caster stays inside: ${detail(elapsed, frame)}`);
       if ((kind === 'powerbomb' || kind === 'scoopslam' || kind === 'clothesline' || kind === 'spinebuster' || (kind === 'backbodydrop' && elapsed >= frame.pickupReadyAt)) && window.launchAt != null && (!exit || spinFinish && elapsed - exit.launchedAt <= 750) && previousDriverRig) {
         const cap = 8 + frameDelta * .9;
-        for (const [point, prior] of paintedPoints(paintedDriver).map((point, index) => [point, paintedPoints(previousDriverRig)[index]])) assert.ok(distance(point, prior) < cap, `receiving the back or reaching for the ankles cannot reverse a caster joint by ${distance(point, prior).toFixed(2)}px in one frame: ${detail(elapsed, frame)}`);
+        // Before the spin plane begins, turning toward the ankles relabels
+        // both ordinary hip/heel pairs. Compare the same physical soles.
+        const relabeled = driver.facing !== previousDriverFacing && driver.ankleApproach !== undefined && driver.pivotTurn === undefined;
+        const priorDriver = relabeled ? { ...previousDriverRig, feet: [...previousDriverRig.feet].reverse() } : previousDriverRig;
+        for (const [point, prior] of paintedPoints(paintedDriver).map((point, index) => [point, paintedPoints(priorDriver)[index]])) assert.ok(distance(point, prior) < cap, `receiving the back or reaching for the ankles cannot reverse a caster joint by ${distance(point, prior).toFixed(2)}px in one frame: ${detail(elapsed, frame)}`);
       }
       if (kind !== 'dropkick' && window.contactAt != null && !exit && previousRig) {
         const cap = 8 + frameDelta * .9;
@@ -390,7 +394,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         assert.ok(moved.x * velocity.x + moved.y * velocity.y > 0, 'the first free frame continues the measured release tangent');
         assert.ok((moved.x * velocity.x + moved.y * velocity.y) / (Math.hypot(moved.x, moved.y) * Math.hypot(velocity.x, velocity.y)) > .85, 'free flight does not change to an unrelated straight throw direction');
       }
-      previousRig = structuredClone(paintedVictim); previousDriverRig = structuredClone(paintedDriver);
+      previousRig = structuredClone(paintedVictim); previousDriverRig = structuredClone(paintedDriver); previousDriverFacing = driver.facing;
       previousSpinMatrix = victim.animation.spinSnapshot?.matrix ? [...victim.animation.spinSnapshot.matrix] : undefined;
       previousSpinWeight = victim.spinSuspension?.weight;
     }

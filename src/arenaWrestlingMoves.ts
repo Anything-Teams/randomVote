@@ -285,7 +285,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   if (kind === 'clothesline') {
     const jump = ARENA_CLOTHESLINE_JUMP_TIMING, origin = initial.launchDriver ?? goal;
     const flightAge = launched ? Math.max(0, elapsed - launch) : 0, flight = clamp(flightAge / jump.flight);
-    const landing = { x: initial.victim.x + side * 48, y: initial.victim.y };
+    const landing = { x: initial.victim.x + side * 64, y: initial.victim.y };
     const runway = distance(initial.driver, goal), runDirection = runway > .001 ? { x: (goal.x - initial.driver.x) / runway, y: (goal.y - initial.driver.y) / runway } : { x: side, y: 0 };
     const airborne = (p: number) => {
       const tangent = p * (1 - p) ** 2, tangentVelocity = (1 - p) * (1 - 3 * p), duration = jump.flight / 1000;
@@ -398,7 +398,9 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
       frame.powerbombSupport = { x: start.x + (gathered.x - start.x) * load + lifted.x - gathered.x + dropped.x - raised.x, y: start.y + (gathered.y - start.y) * load + lifted.y - gathered.y + dropped.y - raised.y };
     }
     frame.gripTargets = targets; frame.gripMode = 'waist';
-    frame.gripStrength = contacted ? 1 - ease((down - .45) / .40) : ease(preparation / .60);
+    // Follow the downward weight through one continuous release instead of
+    // squeezing the whole elbow return into the middle of the floor stroke.
+    frame.gripStrength = contacted ? 1 - ease((down - .30) / .70) : ease(preparation / .60);
     frame.canContact = frame.canContact && frame.gripStrength > .95;
     frame.stage = !contacted && preparation === 0 ? 'approach' : !contacted ? 'attack' : age < power.load ? 'contact' : lift < 1 ? 'lift' : age < power.load + power.lift + power.hold ? 'turn' : down < 1 ? 'fall' : rise < 1 ? 'recover' : 'groggy';
     return finishAnkles();
@@ -458,7 +460,10 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
         [0, scoopTiming.load, scoopTiming.load + scoopTiming.lift, scoopTiming.load + scoopTiming.lift + scoopTiming.turn, scoopDuration], age, impactVelocity);
     }
     frame.gripTargets = targets; frame.gripMode = 'cradle';
-    frame.gripStrength = launched ? contacted ? 1 - ease((downClock - .82) / .18) : preparation : 0;
+    // Release through the last descent and follow the weight below the chest.
+    // The impact clock stays fixed; a tiny last-frame release forced the two
+    // supporting elbows back to guard all at once.
+    frame.gripStrength = launched ? contacted ? 1 - ease((downClock - .68) / .32) : preparation : 0;
     frame.canContact = frame.canContact && frame.gripStrength > .95;
     frame.stage = !launched ? frame.stage : !contacted ? 'attack' : age < scoopTiming.load ? 'contact'
       : lift < 1 ? 'lift' : turn < 1 ? 'turn' : down < 1 ? 'fall' : recover < 1 ? 'recover' : 'groggy';

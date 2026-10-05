@@ -34,6 +34,12 @@ const W = 1000, H = 620;
 const clamp = (p: number, low = 0, high = 1) => Math.max(low, Math.min(high, p));
 const ease = (p: number) => { const n = clamp(p); return n * n * (3 - 2 * n); };
 
+function clotheslineNeck(rig: ReturnType<typeof sampleArenaFighterContacts>): ArenaPoint {
+  const head = { x: (rig.headSides[0].x + rig.headSides[1].x) / 2, y: (rig.headSides[0].y + rig.headSides[1].y) / 2 };
+  const shoulders = { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 };
+  return { x: head.x + (shoulders.x - head.x) * .65, y: head.y + (shoulders.y - head.y) * .65 };
+}
+
 /** A rear rim fall disappears behind the sand ledge, rather than falling onto it. */
 function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ChoreographedActor, clock: number) {
   if (actor.rearExitCutoff === undefined) { paintArenaFighter(ctx, actor, clock); return; }
@@ -456,7 +462,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         if (!contact.wrestlingMoveOrigins && victim) {
           victim.pose = 'guard'; victim.gripTarget = undefined; victim.secondaryGripTarget = undefined; prepareContactActor(victim);
           const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock), kind = exchange.wrestlingMove.kind;
-          const target = kind === 'clothesline' ? { x: rig.head.x, y: rig.head.y + victim.scale * 20 }
+          const target = kind === 'clothesline' ? clotheslineNeck(rig)
             : kind === 'dropkick' ? { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 + victim.scale * 5 } : rig.waist;
           const thigh = { x: rig.waist.x + ((rig.feet[0].x + rig.feet[1].x) / 2 - rig.waist.x) * .28, y: rig.waist.y + ((rig.feet[0].y + rig.feet[1].y) / 2 - rig.waist.y) * .28 };
           const contactTargets: [ArenaPoint, ArenaPoint] = kind === 'scoopslam' ? [rig.back, thigh] : [{ x: target.x, y: target.y - 6 }, { x: target.x, y: target.y + 6 }];
@@ -520,9 +526,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             driver.clotheslineInner = frame.clotheslineInner;
             if (window.kind === 'clothesline' && window.contactAt != null && frame.clotheslineStrength > 0 && victim) {
               const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock);
-              const head = { x: (rig.headSides[0].x + rig.headSides[1].x) / 2, y: (rig.headSides[0].y + rig.headSides[1].y) / 2 };
-              const shoulders = { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 };
-              const liveNeck = { x: head.x + (shoulders.x - head.x) * .65, y: head.y + (shoulders.y - head.y) * .65 };
+              const liveNeck = clotheslineNeck(rig);
               // The flying inside elbow bears down on the neckline. A small
               // upward arc of the victim's turning head must not pull the
               // striking arm back up through the neck after contact.
@@ -613,7 +617,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             // current neck/chest after this frame's pose settles, rather than
             // at the point captured before the victim changed into its guard.
             const rig = sampleArenaFighterContacts(victim, reduced ? 0 : clock);
-            const target = window.kind === 'clothesline' ? { x: rig.head.x, y: rig.head.y + victim.scale * 20 }
+            const target = window.kind === 'clothesline' ? clotheslineNeck(rig)
               : { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 + victim.scale * 5 };
             contact.wrestlingMoveOrigins.target = target;
             contact.wrestlingMoveOrigins.contactTargets = [{ x: target.x, y: target.y - 6 }, { x: target.x, y: target.y + 6 }];

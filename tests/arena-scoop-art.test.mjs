@@ -169,7 +169,10 @@ test('the reversed scoop finish turns its loaded trunk and keeps each actual sup
     Object.assign(actor, { facing: -facing, pose: 'drag', gripMode: 'ankle', gripLocked: true, gripTarget: target[1], secondaryGripTarget: target[0], gripStrength: 1, ankleApproach: 0 });
     const points = frame => [frame.contacts.head, frame.contacts.waist, ...frame.contacts.headSides, ...frame.contacts.shoulders, ...frame.contacts.elbows, ...frame.contacts.hands, ...frame.contacts.feet];
     const entered = paint(actor, 1000);
-    points(entered).forEach((point, index) => assert.ok(distance(point, points(rested)[index]) < .001, 'turning to the reversed resting ankles begins at the same actual trunk and material limbs'));
+    // The ordinary hips and their heels change labels together on this
+    // facing reversal; the physical soles remain at the same world points.
+    const relabeled = { ...rested, contacts: { ...rested.contacts, feet: [...rested.contacts.feet].reverse() } };
+    points(entered).forEach((point, index) => assert.ok(distance(point, points(relabeled)[index]) < .001, 'turning to the reversed resting ankles begins at the same actual trunk and material limbs'));
     let previous = entered;
     for (let elapsed = step; elapsed <= 240 + step; elapsed += step) {
       actor.ankleApproach = smooth(elapsed / 240);

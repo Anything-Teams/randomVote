@@ -431,8 +431,11 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   else if (state.facing !== undefined && state.facing !== facing) {
     // Mirroring the body swaps the projected hips. Keep each world heel paired with its same hip.
     if (state.scoopAnkleMotion && actor.carrierRelease && actor.gripMode === 'ankle') state.scoopAnkleReversed = !state.scoopAnkleReversed;
-    if (state.feet && !state.scoopAnkleMotion) state.feet = [state.feet[1], state.feet[0]];
-    if (state.localFeet) state.localFeet = state.scoopAnkleMotion ? state.localFeet.map(foot => ({ x: -foot.x, y: foot.y })) as [Point, Point] : [{ x: -state.localFeet[1].x, y: state.localFeet[1].y }, { x: -state.localFeet[0].x, y: state.localFeet[0].y }];
+    // The ankle approach turns the ordinary hips, so its heels change labels
+    // with them. Only the captured release plane retains the old physical slots.
+    const retainAnkleSlots = !!state.scoopAnkleMotion && ankleMaterialFacing !== undefined;
+    if (state.feet && !retainAnkleSlots) state.feet = [state.feet[1], state.feet[0]];
+    if (state.localFeet) state.localFeet = retainAnkleSlots ? state.localFeet.map(foot => ({ x: -foot.x, y: foot.y })) as [Point, Point] : [{ x: -state.localFeet[1].x, y: state.localFeet[1].y }, { x: -state.localFeet[0].x, y: state.localFeet[0].y }];
     if (state.supportHip) state.supportHip.x *= -1;
     state.gait += .5;
   }
@@ -1144,7 +1147,15 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     hands = hands.map((_, arm) => {
       const restShoulder = { x: shoulders[arm].x, y: -20 }, restHand = scoopVictim ? { x: mix(arm ? 11 : -6, arm ? 12 : -11, scoopDown), y: mix(arm ? -22 : -16, -2, scoopDown) } : powerVictim ? { x: mix(arm ? 11 : -6, arm ? 12 : -11, powerDown), y: mix(arm ? -22 : -16, -2, powerDown) } : cradleCarry || spineCarry ? { x: arm ? 11 : -6, y: arm ? -22 : -16 } : actor.pairCarry ? { x: arm ? 12 : -10, y: arm ? -7 : -9 } : { x: arm ? 12 : -11, y: -2 }, restElbow = knee(restShoulder, restHand, 11, 10.5, -1);
       const upperAngle = arc(Math.atan2(source.elbows[arm].y - source.shoulders[arm].y, source.elbows[arm].x - source.shoulders[arm].x), Math.atan2(restElbow.y - restShoulder.y, restElbow.x - restShoulder.x));
-      const lowerAngle = arc(Math.atan2(source.hands[arm].y - source.elbows[arm].y, source.hands[arm].x - source.elbows[arm].x), Math.atan2(restHand.y - restElbow.y, restHand.x - restElbow.x));
+      const startUpper = Math.atan2(source.elbows[arm].y - source.shoulders[arm].y, source.elbows[arm].x - source.shoulders[arm].x), startLower = Math.atan2(source.hands[arm].y - source.elbows[arm].y, source.hands[arm].x - source.elbows[arm].x);
+      const restUpper = Math.atan2(restElbow.y - restShoulder.y, restElbow.x - restShoulder.x), restLower = Math.atan2(restHand.y - restElbow.y, restHand.x - restElbow.x);
+      const elbowTurn = (upper: number, lower: number) => Math.atan2(Math.sin(lower - upper), Math.cos(lower - upper));
+      // A caught runner brings both elbows toward the chest through extension.
+      // Independent shortest arcs made the forearm pass through its upper arm
+      // when the running bend and the protective bend had opposite signs.
+      const lowerAngle = powerVictim || scoopVictim
+        ? upperAngle + mix(elbowTurn(startUpper, startLower), elbowTurn(restUpper, restLower), carryMorph)
+        : arc(startLower, restLower);
       elbows[arm] = { x: shoulders[arm].x + Math.cos(upperAngle) * upperArm, y: shoulders[arm].y + Math.sin(upperAngle) * upperArm };
       return { x: elbows[arm].x + Math.cos(lowerAngle) * lowerArm, y: elbows[arm].y + Math.sin(lowerAngle) * lowerArm };
     });
@@ -1216,7 +1227,15 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
         state.carrierReleaseArcs[arm] = { follow: [followUpper, followLower], rest: [restUpper, restLower] };
       }
       const upperAngle = mix(mix(startUpper, followUpper, release), restUpper, retract);
-      const lowerAngle = mix(mix(startLower, followLower, release), restLower, retract);
+      // The released arm turns as one upper arm and a bent elbow. Separate
+      // shortest arcs for the two bones could sweep the forearm through its
+      // upper arm while the chest faced the departing body. Interpolate the
+      // signed elbow bend instead, passing through extension when the bend
+      // changes sides rather than folding the palm into its own shoulder.
+      const elbowTurn = (upper: number, lower: number) => Math.atan2(Math.sin(lower - upper), Math.cos(lower - upper));
+      const lowerAngle = source.followThrough && source.stance
+        ? upperAngle + mix(mix(elbowTurn(startUpper, startLower), elbowTurn(followUpper, followLower), release), elbowTurn(restUpper, restLower), retract)
+        : mix(mix(startLower, followLower, release), restLower, retract);
       elbows[arm] = { x: shoulder.x + Math.cos(upperAngle) * upperArm, y: shoulder.y + Math.sin(upperAngle) * upperArm };
       return { x: elbows[arm].x + Math.cos(lowerAngle) * lowerArm, y: elbows[arm].y + Math.sin(lowerAngle) * lowerArm };
     });
@@ -1437,6 +1456,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const supportedSlam = state.slamStart && (actor.spineDown ?? 0) > 0 && actor.gripMode === 'waist';
   const cradleGrip = pose === 'scoopslam' && actor.gripMode === 'cradle';
   const powerGrip = powerbomb && actor.gripMode === 'waist';
+  const slamRelease = cradleGrip && scoopDown > 0 || powerGrip && powerDown > 0;
   if ((supportedSlam || cradleGrip || powerGrip) && actor.gripTarget && actor.secondaryGripTarget) {
     const determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2], strength = clamp(actor.gripStrength ?? 1);
     const targets = [actor.secondaryGripTarget, actor.gripTarget];
@@ -1447,7 +1467,10 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
       const local = rotate({ x: (matrix[3] * dx - matrix[2] * dy) / determinant - hip.x, y: (-matrix[1] * dx + matrix[0] * dy) / determinant - hip.y }, -lean);
       const shoulder = shoulders[arm], supported = reachable(shoulder, local, upperArm + lowerArm - .02, Math.abs(upperArm - lowerArm) + .02), memory = state.supportedGripArms![arm];
       const unwrap = (from: number, to: number) => from + Math.atan2(Math.sin(to - from), Math.cos(to - from));
-      const freeHand = cradleGrip || powerGrip ? reachable(shoulder, { x: arm ? motion.frontX : motion.backX, y: arm ? motion.frontY : motion.backY }, upperArm + lowerArm - .02, Math.abs(upperArm - lowerArm) + .02) : hand;
+      // Once the supported waist leaves the palms, return below the chest.
+      // The lifting pose's old hand coordinates passed through the moving
+      // shoulder during descent and chose a new angular branch mid-release.
+      const freeHand = slamRelease ? { x: shoulder.x + 8, y: shoulder.y + 17 } : cradleGrip || powerGrip ? reachable(shoulder, { x: arm ? motion.frontX : motion.backX, y: arm ? motion.frontY : motion.backY }, upperArm + lowerArm - .02, Math.abs(upperArm - lowerArm) + .02) : hand;
       const freeElbow = cradleGrip || powerGrip ? knee(shoulder, freeHand, upperArm, lowerArm, -1) : elbows[arm];
       const free = [Math.atan2(freeElbow.y - shoulder.y, freeElbow.x - shoulder.x), Math.atan2(freeHand.y - freeElbow.y, freeHand.x - freeElbow.x)].map((angle, bone) => memory ? unwrap(memory.free[bone], angle) : angle) as [number, number];
       const releasing = strength < (memory?.strength ?? 1) - 1e-6 || !!memory?.releasing && strength <= (memory.strength ?? 1) + 1e-6;
@@ -1456,14 +1479,30 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
         const held = [Math.atan2(joint.y - shoulder.y, joint.x - shoulder.x), Math.atan2(supported.y - joint.y, supported.x - joint.x)].map((angle, bone) => unwrap(memory?.held[bone] ?? free[bone], angle)) as [number, number];
         const resting = releasing && !memory?.releasing ? free.map((angle, bone) => unwrap(held[bone], angle)) as [number, number] : free;
         const upper = mix(resting[0], held[0], strength), lower = mix(resting[1], held[1], strength);
-        const elbow = { x: shoulder.x + Math.cos(upper) * upperArm, y: shoulder.y + Math.sin(upper) * upperArm };
-        const palm = { x: elbow.x + Math.cos(lower) * lowerArm, y: elbow.y + Math.sin(lower) * lowerArm };
+        let elbow = { x: shoulder.x + Math.cos(upper) * upperArm, y: shoulder.y + Math.sin(upper) * upperArm };
+        let palm = { x: elbow.x + Math.cos(lower) * lowerArm, y: elbow.y + Math.sin(lower) * lowerArm };
+        if (slamRelease) {
+          // Release one connected upper arm and signed elbow bend. Opposite
+          // bends pass through extension; the forearm never takes a separate
+          // shortest route through its upper arm. Full strength stays exact IK.
+          const elbowTurn = (angles: [number, number]) => Math.atan2(Math.sin(angles[1] - angles[0]), Math.cos(angles[1] - angles[0]));
+          const upperAngle = mix(unwrap(held[0], free[0]), held[0], strength);
+          const lowerAngle = upperAngle + mix(elbowTurn(free), elbowTurn(held), strength);
+          elbow = { x: shoulder.x + Math.cos(upperAngle) * upperArm, y: shoulder.y + Math.sin(upperAngle) * upperArm };
+          palm = { x: elbow.x + Math.cos(lowerAngle) * lowerArm, y: elbow.y + Math.sin(lowerAngle) * lowerArm };
+        }
         return { elbow, palm, free: resting, held, bend, world: worldPoint(bodyPoint(elbow)) };
       });
       const first = solutions[0], second = solutions[1] ?? first, previous = !reset ? state.contactPoints?.elbows[arm] : undefined;
       const chosen = previous && Math.hypot(second.world.x - previous.x, second.world.y - previous.y) < Math.hypot(first.world.x - previous.x, first.world.y - previous.y) ? second : first;
       elbows[arm] = chosen.elbow;
       state.supportedGripArms![arm] = { free: chosen.free, held: chosen.held, bend: chosen.bend, releasing, strength };
+      if (slamRelease && strength < .01) {
+        // Recovery starts from the palms that actually followed the released
+        // weight, rather than from the unused overhead pose's hand markers.
+        state.motion![arm ? 'frontX' : 'backX'] = chosen.palm.x;
+        state.motion![arm ? 'frontY' : 'backY'] = chosen.palm.y;
+      }
       return chosen.palm;
     });
   } else state.supportedGripArms = undefined;
@@ -1627,8 +1666,21 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     const unwrap = (from: number, to: number) => from + Math.atan2(Math.sin(to - from), Math.cos(to - from));
     const rawFree = [Math.atan2(elbows[arm].y - shoulder.y, elbows[arm].x - shoulder.x), Math.atan2(hands[arm].y - elbows[arm].y, hands[arm].x - elbows[arm].x)];
     const free = rawFree.map((angle, bone) => memory ? unwrap(memory.free[bone], angle) : angle) as [number, number];
-    const upper = Math.atan2(local.y - shoulder.y, local.x - shoulder.x);
-    const strike = [upper, upper + .18].map((angle, bone) => unwrap(memory?.strike[bone] ?? free[bone], angle)) as [number, number];
+    // Aim the inside of the elbow and the first quarter of the forearm at
+    // the neck. A straight radial arm only grazed it on the way past and
+    // read as a fist strike; this connected bend hooks the neckline while
+    // the ordinary forearm and palm continue beyond the opponent.
+    const wrap = ease((actor.slamProgress?.slump ?? 0) / .08);
+    const insideLength = lowerArm * mix(.25, .8, wrap);
+    const inside = reachable(shoulder, local, upperArm + insideLength - .02, Math.abs(upperArm - insideLength) + .02);
+    const choices = [1, -1].map(bend => {
+      const hooked = knee(shoulder, inside, upperArm, insideLength, bend);
+      return [Math.atan2(hooked.y - shoulder.y, hooked.x - shoulder.x), Math.atan2(inside.y - hooked.y, inside.x - hooked.x)]
+        .map((angle, bone) => unwrap(memory?.strike[bone] ?? free[bone], angle)) as [number, number];
+    });
+    const reference = memory?.strike ?? free;
+    const distance = (angles: [number, number]) => angles.reduce((sum, angle, bone) => sum + Math.abs(angle - reference[bone]), 0);
+    const strike = distance(choices[0]) <= distance(choices[1]) ? choices[0] : choices[1];
     const upperAngle = mix(free[0], strike[0], strength), lowerAngle = mix(free[1], strike[1], strength);
     elbows[arm] = { x: shoulder.x + Math.cos(upperAngle) * upperArm, y: shoulder.y + Math.sin(upperAngle) * upperArm };
     hands[arm] = { x: elbows[arm].x + Math.cos(lowerAngle) * lowerArm, y: elbows[arm].y + Math.sin(lowerAngle) * lowerArm };
