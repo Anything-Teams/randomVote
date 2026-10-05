@@ -10,13 +10,16 @@ const require = createRequire(import.meta.url);
 let source = await readFile('src/ArenaShow.tsx', 'utf8');
 const draw = 'arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));';
 assert.ok(source.includes(draw), 'the harness captures the real scene draw loop');
+const rankRead = 'const ranks = props.preview ? {} : resolvedRanks(order, rounds, elapsed);';
+assert.ok(source.includes(rankRead), 'the harness captures the actual published ranking clock');
 source = source.replaceAll('drawArenaScenery(ctx, clock,', 'motionTestScenery(ctx, clock,')
+  .replace(rankRead, `${rankRead} motionTestRanks = ranks;`)
   .replace(draw, `motionTestActors = actors; ${draw}`);
-source += '\nlet motionTestActors; const motionTestScenery = () => {}; export const capturedActors = () => motionTestActors; export { render, createArenaCamera, arenaRounds, arenaStartingPoint, arenaFloorExitTiming, arenaRimTargets, arenaRimChargeTargets, arenaTechniqueTargets, arenaRecoveryTargets }; export { arenaMinimumDuration } from "./arenaLogic";';
+source += '\nlet motionTestActors, motionTestRanks; const motionTestScenery = () => {}; export const capturedActors = () => motionTestActors; export const capturedRanks = () => motionTestRanks; export { render, createArenaCamera, arenaRounds, arenaStartingPoint, arenaFloorExitTiming, arenaRimTargets, arenaRimChargeTargets, arenaTechniqueTargets, arenaRecoveryTargets }; export { arenaMinimumDuration } from "./arenaLogic";';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaStartingPoint, arenaMinimumDuration, arenaFloorExitTiming, arenaRimTargets, arenaRimChargeTargets, arenaTechniqueTargets, arenaRecoveryTargets, capturedActors } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaStartingPoint, arenaMinimumDuration, arenaFloorExitTiming, arenaRimTargets, arenaRimChargeTargets, arenaTechniqueTargets, arenaRecoveryTargets, capturedActors, capturedRanks } = module.exports;
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const noop = () => {};
 const context = () => new Proxy({ measureText: text => ({ width: text.length * 8 }), createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }) }, { get: (target, key) => key in target ? target[key] : noop, set: (target, key, value) => (target[key] = value, true) });
@@ -41,17 +44,28 @@ test('a live sidekick never throws its opponent before the recorded sole contact
   const found = fixture('sidekick', { predicate: round => round.tactic === 'sidekick' && !round.wrestlingMove && !round.kickCatch && !round.recovery && !round.rim && !round.rimCharge && round.rimPushRoll >= 700 });
   const scene = game(found.order, found.seed, found.duration), round = found.round;
   assert.ok(round);
-  let launched = false, contactAt;
-  for (let elapsed = 0; elapsed < round.resolve; elapsed += 16) {
+  let launched = false, contactAt, rankResolved = false, actualResolve;
+  // App extends playback from the Scene's published end as earlier physical
+  // finishes take longer. A later kick cannot use its original planned slot.
+  let playbackEnd = scene.rounds.at(-1).end;
+  const playbackCeiling = playbackEnd + 30000;
+  for (let elapsed = 0; elapsed <= playbackEnd && elapsed < playbackCeiling; elapsed += 16) {
     scene.step(elapsed);
+    playbackEnd = Math.max(playbackEnd, ...[...scene.sim.contacts.values()].map(contact => contact.round.end));
     const actual = scene.sim.contacts.get(round.id)?.round;
     if (!actual) continue;
     const launch = actual.sidekickLaunchAt;
     if (Number.isFinite(launch)) contactAt = launch + Math.min(650 * Math.min(1, actual.timeScale ?? 1), (actual.impact - actual.start) * .68) * .5;
     const exit = scene.sim.exits.get(round.victim);
     if (exit) { assert.ok(Number.isFinite(contactAt) && elapsed >= contactAt, 'the ranking clock cannot launch the opponent before a real sole contact'); assert.equal(exit.launchedAt, contactAt); launched = true; }
+    if (capturedRanks()[round.victim] !== undefined) {
+      assert.ok(launched && Number.isFinite(contactAt), 'a ranking cannot reveal before the actual sole contact and release');
+      assert.equal(capturedRanks()[round.victim], found.order.indexOf(round.victim) + 1);
+      assert.ok(elapsed >= actual.resolve, 'the ranking uses the actual recorded resolution clock');
+      actualResolve = actual.resolve; rankResolved = true; break;
+    }
   }
-  assert.ok(launched && contactAt < round.resolve, 'the physical kick happens before the unchanged ranking reveal');
+  assert.ok(launched && rankResolved && contactAt < actualResolve, 'the physical kick happens before its actual published ranking reveal');
 });
 
 // The scene reads the last painted skeleton before the next frame's movement.

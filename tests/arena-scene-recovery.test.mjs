@@ -102,8 +102,13 @@ for (const fixture of fixtures) for (const [mirrored, frameDelta] of [[false, 16
   const scene = game(fixture.seed, false, mirrored, order, fixture.order, frameDelta);
   let landedGap, departureGap, running = false, airborne = false, previous, maxClosing = 0, finished = false, deciding = false, rankResolved = false, called = false;
   const isOldPair = round => [round.aggressor, round.victim].includes(originalThrower) && [round.aggressor, round.victim].includes(planned.victim);
-  for (let elapsed = 0; elapsed < 16000; elapsed += frameDelta) {
+  // Follow the same monotonic Scene deadline as App. The deciding bout can
+  // finish later when its uninterrupted outside flight needs more distance.
+  let playbackEnd = arenaRounds(fixture.order, duration, rushRoll, fixture.seed).at(-1).end;
+  const playbackCeiling = playbackEnd + 30000;
+  for (let elapsed = 0; elapsed <= playbackEnd && elapsed < playbackCeiling; elapsed += frameDelta) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
+    playbackEnd = Math.max(playbackEnd, ...[...scene.sim.contacts.values()].map(other => other.round.end));
     if (!contact) continue;
     const actual = contact.round, frame = arenaRecoveryTargets(actual, elapsed, contact.center);
     const survivor = actors.get(planned.victim), thrower = actors.get(originalThrower);
@@ -131,6 +136,7 @@ for (const fixture of fixtures) for (const [mirrored, frameDelta] of [[false, 16
       deciding ||= !!contact.metAt || !!contact.committed;
       if (capturedRanks()[planned.victim] !== undefined) {
         assert.equal(capturedRanks()[planned.victim], fixture.order.indexOf(planned.victim) + 1);
+        assert.ok(elapsed >= actual.resolve, 'the deciding bout reveals its rank only at its actual recorded resolution');
         rankResolved = true; break;
       }
     }

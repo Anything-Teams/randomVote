@@ -183,7 +183,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           releasedVelocity = exit.spinFlight.velocity;
           assert.ok(releasedVelocity.y <= -300 && exit.spinFlight.gravity > 0, 'the low hand stroke throws upward with a real falling acceleration');
           releaseWaistY = rig.waist.y;
-          assert.ok(Math.abs(exit.spinFlight.angularVelocity) * exit.spinFlight.duration / 2000 < .65, 'the released body cannot tumble through another large rotation');
+          assert.ok(Math.abs(exit.spinFlight.angularVelocity) * (exit.spinFlight.rotationDuration ?? exit.spinFlight.duration) / 2000 < .65, 'the released body cannot tumble through another large rotation');
           assert.ok(previous && paintedPoints(rig).every((p, i) => distance(p, paintedPoints(previous)[i]) < 10 + frameDelta * .9), 'the release preserves the actually held skeleton');
         }
         if (elapsed - releaseAt <= exit.spinFlight.duration) {
@@ -271,6 +271,37 @@ test('both dragged finishes share the same throw and hand-release clock in a lon
     assert.ok(releaseAt !== undefined && followFrames >= 10, `${kind}: the complete shared throw and follow-through play naturally`);
   }
 });
+
+for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) for (const frameDelta of [16, 50]) {
+  test(`${kind} dragged rim throw lands its entire painted body beyond the widest side rim (${mirrored ? 'mirrored' : 'ordinary'}, ${frameDelta}ms)`, () => {
+    const scene = game(kind, { mirrored, controlled: false, frameDelta });
+    let release, landed = false;
+    for (let elapsed = 0; elapsed < 25000; elapsed += frameDelta) {
+      const actors = scene.step(elapsed), exit = scene.sim.exits.get(scene.planned.victim);
+      if (!exit?.floorThrow || !exit.spinFlight || exit.launchedAt === undefined) continue;
+      const victim = actors.get(scene.planned.victim), caster = actors.get(scene.planned.aggressor);
+      assert.ok(victim?.animation?.contactPoints && caster?.animation?.contactPoints);
+      const outward = Math.sign(exit.spinFlight.velocity.x);
+      assert.equal(outward, exit.side, 'the free body travels toward the chosen left or right exit');
+      release ??= { at: exit.launchedAt, velocity: { ...exit.spinFlight.velocity } };
+      assert.deepEqual(exit.spinFlight.velocity, release.velocity, 'the free path keeps the measured hand-release momentum');
+      assert.ok(inside(scene.sim.bodies.get(scene.planned.aggressor)), 'the thrower remains planted inside the arena');
+      const age = elapsed - release.at;
+      if (age < exit.spinFlight.duration) continue;
+      assert.ok(age < exit.spinFlight.duration + frameDelta, 'inspect the first actual landing frame, before recovery changes the pose');
+      const rig = victim.animation.contactPoints, record = scene.ctx.records.get(scene.planned.victim);
+      const jointClearance = Math.min(...paintedPoints(rig).map(point => (point.x - 500) * outward - 303));
+      assert.ok(jointClearance > 24, `the full head, trunk, arms and feet clear the widest left/right rim by 24px (${jointClearance.toFixed(2)}px)`);
+      assert.ok(record?.rectangles.length > 0, 'the actual painted pixel rectangles are captured at landing');
+      const world = inverse(record.sceneMatrix);
+      const pixelClearance = Math.min(...record.rectangles.flat().map(point => (project(world, point).x - 500) * outward - 303));
+      assert.ok(pixelClearance > 24, `every painted body pixel clears the widest rim by 24px (${pixelClearance.toFixed(2)}px)`);
+      assert.equal(capturedRanks()[scene.planned.victim], undefined, 'the complete outside landing is visible before the ranking reveal');
+      landed = true; break;
+    }
+    assert.ok(release && landed, 'the actual ankle grip, hand release and outside landing all play through');
+  });
+}
 
 
 test('a late natural ten-person finish completes on the extended playback clock with the same draw', () => {
