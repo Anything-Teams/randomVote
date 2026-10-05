@@ -9,6 +9,8 @@ export type ArenaWrestlingMoveKind = 'clothesline' | 'dropkick' | 'powerbomb' | 
 export const arenaWrestlingMoveIsCounter = (kind: ArenaWrestlingMoveKind) => kind === 'powerbomb' || kind === 'backbodydrop' || kind === 'spinebuster' || kind === 'scoopslam';
 export type ArenaWrestlingMoveWindow = {
   kind: ArenaWrestlingMoveKind; start: number; end: number;
+  /** A rare defender ducks under the single extended-arm rush. */
+  duck?: boolean;
   launchAt?: number | null; contactAt?: number | null; releaseAt?: number | null;
   kickAt?: number | null; ankleGripAt?: number | null; dragEndAt?: number;
   plannedLaunchAt?: number; plannedContactAt?: number; counterReadyAt?: number;
@@ -35,7 +37,7 @@ export type ArenaWrestlingMoveFrame = {
   driverPhase: number; victimPhase: number; driverHeight: number; victimHeight: number;
   driverAngle: number; victimAngle: number; driverSuspension: number; victimSuspension: number;
   driverJumpTuck: number; victimJumpTuck: number; driverSlam?: Slam; victimSlam?: Slam;
-  clotheslineTarget?: ArenaPoint; clotheslineStrength: number; clotheslineInner?: boolean;
+  clotheslineTarget?: ArenaPoint; clotheslineStrength: number; clotheslineInner?: boolean; victimDuck: number;
   footTargets?: [ArenaPoint, ArenaPoint]; feetStrength: number; dropkickProgress: number;
   gripTargets?: [ArenaPoint, ArenaPoint]; gripStrength: number; gripMode?: 'head' | 'waist' | 'ankle' | 'cradle'; bulldogProgress: number; bulldogHeadlock?: boolean; backBodyProgress: number; backBodyRaise?: number; backBodySupport?: ArenaPoint;
   spinebusterProgress: number; spineLoad: number; spineLift: number; spineDown: number; spineSupport?: ArenaPoint; scoopSlamProgress: number; victimCarryStretch?: number; counterPreparation: number; counterReadyAt: number;
@@ -58,6 +60,8 @@ export const ARENA_WRESTLING_MOVE_TIMING = {
   bulldogFall: 620, bulldogRecover: 480, backFlip: 1200, slamLift: 420, slamFall: 360, slamKick: 240, ankleReach: 240, ankleThrow: 300,
 } as const;
 export const ARENA_CLOTHESLINE_JUMP_TIMING = { flight: 640, height: 40, contact: 320 } as const;
+export const ARENA_CLOTHESLINE_DUCK_CHANCE = .005;
+export const ARENA_CLOTHESLINE_DUCK_TIMING = { start: 120, low: 280, rise: 560, upright: 900, recover: 980 } as const;
 export const ARENA_POWERBOMB_TIMING = { load: 320, lift: 620, hold: 180, slam: 560, recover: 300, groggy: 300, ankleLoad: 520, ankleSpin: 1400, ankleThrow: 0 } as const;
 export const ARENA_SCOOP_SLAM_TIMING = { load: 300, lift: 560, turn: 620, slam: 760 } as const;
 export const ARENA_SCOOP_RECOVERY_TIMING = { stand: 360, groggy: 240 } as const;
@@ -96,6 +100,12 @@ function supportedPath(points: ArenaPoint[], times: number[], age: number, impac
 export function arenaWrestlingMoveOutcome(roll: number): boolean {
   if (!Number.isInteger(roll) || roll < 0 || roll > 999) throw new RangeError('Wrestling move roll must be 0–999');
   return roll < 40;
+}
+
+/** Independent of selecting the move: five of a thousand attempts. */
+export function arenaClotheslineDuckOutcome(roll: number): boolean {
+  if (!Number.isInteger(roll) || roll < 0 || roll > 999) throw new RangeError('Clothesline duck roll must be 0–999');
+  return roll < ARENA_CLOTHESLINE_DUCK_CHANCE * 1000;
 }
 
 /** The rim finish lifts the ankles to the chest and sends the feet out first. */
@@ -205,7 +215,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     driver: { ...initial.driver }, victim: { ...initial.victim }, driverVelocity: zero(), victimVelocity: zero(),
     driverFacing: side, victimFacing: side === 1 ? -1 : 1, driverPose: 'guard', victimPose: 'guard', driverPhase: 0, victimPhase: 0,
     driverHeight: 0, victimHeight: 0, driverAngle: 0, victimAngle: 0, driverSuspension: 0, victimSuspension: 0,
-    driverJumpTuck: 0, victimJumpTuck: 0, clotheslineStrength: 0, feetStrength: 0, dropkickProgress: 0,
+    driverJumpTuck: 0, victimJumpTuck: 0, clotheslineStrength: 0, victimDuck: 0, feetStrength: 0, dropkickProgress: 0,
     gripStrength: 0, bulldogProgress: 0, backBodyProgress: 0, spinebusterProgress: 0, spineLoad: 0, spineLift: 0, spineDown: 0, scoopSlamProgress: 0,
     scoopLoad: 0, scoopLift: 0, scoopTurn: 0, scoopDown: 0, powerbombLoad: 0, powerbombLift: 0, powerbombDown: 0, slamImpact: 0, counterPreparation: 0, counterReadyAt,
     kickAt, ankleGripAt, canKick: false, canGrabAnkle: false, footStrength: 0,
@@ -324,6 +334,27 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     frame.clotheslineTarget = { ...target }; frame.clotheslineInner = true;
     frame.clotheslineStrength = launched ? contacted ? 1 - ease((age - 160) / 180) : ease((flight - .08) / .24) * (1 - ease((flight - .8) / .2)) : 0;
     frame.canContact = frame.canContact && flightAge >= jump.contact && flight < .86;
+    if (window.duck && !contacted) {
+      const duck = ARENA_CLOTHESLINE_DUCK_TIMING;
+      frame.victimDuck = launched ? ease((flightAge - duck.start) / (duck.low - duck.start)) * (1 - ease((flightAge - duck.rise) / (duck.upright - duck.rise))) : 0;
+      frame.victimPose = 'guard'; frame.victimEyesClosed = false;
+      // Unfold into the landing across the last part of the empty jump,
+      // rather than snapping the horizontal trunk upright at touchdown.
+      frame.driverAngle = -side * Math.PI * .47 * ease(flight / .36) * (1 - ease((flight - .56) / .44));
+      frame.landingAt = launch + jump.flight;
+      frame.requiredEndAt = launch + duck.recover;
+      frame.recovered = launched && elapsed >= frame.requiredEndAt;
+      frame.missed = frame.recovered; frame.canRelease = false;
+      frame.active = elapsed >= window.start && elapsed < Math.max(window.end, frame.requiredEndAt);
+      // The empty strike keeps its original jump and momentum. Let the
+      // attacker land and the defender stand before resuming their bout.
+      if (launched && flight === 1) {
+        const settle = clamp((flightAge - jump.flight) / timing.landing);
+        frame.driverPose = settle < 1 ? 'land' : 'guard'; frame.driverPhase = settle;
+        frame.stage = 'recover';
+      }
+      return frame;
+    }
     if (contacted) {
       frame.victim = { x: victimOrigin.x + side * 24 * fall, y: victimOrigin.y };
       frame.victimAngle = side * Math.PI * .47 * fall;

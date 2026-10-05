@@ -526,7 +526,10 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         const driver = actors.get(exchange.aggressor)!, victim = actors.get(exchange.victim);
         const fallback = () => {
           const impact = elapsed + 3200 * unit;
-          contact.round = arenaContactRound({ ...exchange, wrestlingMove: undefined, start: elapsed, impact, resolve: impact + 1100 * unit, end: impact + 1100 * unit }, contact.center, { aggressor: a, victim: v });
+          const ducked = exchange.wrestlingMove?.duck;
+          const ceremony = ducked && exchange.final ? Math.max(0, exchange.end - exchange.resolve) : 0;
+          if (ducked) contact.center = arenaInsidePoint({ x: (a.x + v.x) / 2, y: (a.y + v.y) / 2 });
+          contact.round = arenaContactRound({ ...exchange, wrestlingMove: undefined, start: elapsed, impact, resolve: impact + 1100 * unit, end: impact + 1100 * unit + ceremony }, contact.center, { aggressor: a, victim: v });
           exchange = contact.round; contact.metAt = undefined; contact.committed = false;
         };
         if (!contact.wrestlingMoveOrigins && victim) {
@@ -582,6 +585,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               actor.slamImpact = frame.slamImpact;
               if (actor === victim) {
                 actor.eyesClosed = frame.victimEyesClosed;
+                actor.duckProgress = frame.victimDuck > 0 ? frame.victimDuck : undefined;
                 actor.carryStretch = frame.victimCarryStretch; actor.carrySupport = frame.victimCarryStretch !== undefined ? window.kind === 'scoopslam' && frame.gripMode !== 'ankle' ? 'cradle' : 'shoulder' : undefined;
                 actor.carryEntry = window.kind === 'scoopslam' && frame.gripMode !== 'ankle';
                 actor.scoopVictim = frame.scoopVictim; actor.scoopLoad = frame.scoopLoad; actor.scoopLift = frame.scoopLift; actor.scoopTurn = frame.scoopTurn; actor.scoopDown = frame.scoopDown; actor.scoopRecover = frame.scoopRecover;
@@ -682,7 +686,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             prepareContactActor(driver);
           };
           apply();
-          if (window.contactAt === null && victim && !sim.exits.has(exchange.victim) && (window.kind === 'clothesline' || window.kind === 'dropkick')) {
+          if (window.contactAt === null && victim && !sim.exits.has(exchange.victim) && (window.kind === 'clothesline' || window.kind === 'dropkick') && !(window.duck && (frame.victimDuck > 0 || frame.stage === 'recover'))) {
             // The preceding bout can leave a lean in the live rig. Aim at the
             // current neck/chest after this frame's pose settles, rather than
             // at the point captured before the victim changed into its guard.
@@ -738,13 +742,16 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               const dx = to.x - from.x, dy = to.y - from.y, along = clamp(((point.x - from.x) * dx + (point.y - from.y) * dy) / Math.max(.001, dx * dx + dy * dy));
               return Math.hypot(point.x - from.x - dx * along, point.y - from.y - dy * along);
             };
+            // Keep aiming along the original attack line, but test the
+            // real lowered neck so a duck cannot become a phantom hit.
+            const neck = window.duck ? clotheslineNeck(defending) : contact.wrestlingMoveOrigins!.target!;
             const extendedArmTouches = (rig: typeof attacking) => {
               const shoulder = rig.shoulders[1], elbow = rig.elbows[1], hand = rig.hands[1];
               const upper = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y }, lower = { x: hand.x - elbow.x, y: hand.y - elbow.y };
               const bend = Math.abs(Math.atan2(upper.x * lower.y - upper.y * lower.x, upper.x * lower.x + upper.y * lower.y));
               const upperInside = { x: shoulder.x + upper.x * .5, y: shoulder.y + upper.y * .5 };
               const lowerInside = { x: elbow.x + lower.x * .45, y: elbow.y + lower.y * .45 };
-              return bend <= .3 && Math.min(segmentGap(contact.wrestlingMoveOrigins!.target!, upperInside, elbow), segmentGap(contact.wrestlingMoveOrigins!.target!, elbow, lowerInside)) < 8 && pointGap(contact.wrestlingMoveOrigins!.target!, hand) > 12;
+              return bend <= .3 && Math.min(segmentGap(neck, upperInside, elbow), segmentGap(neck, elbow, lowerInside)) < 8 && pointGap(neck, hand) > 12;
             };
             let touched = window.kind === 'clothesline' ? frame.clotheslineStrength > .75 && extendedArmTouches(attacking)
               : window.kind === 'dropkick' ? frame.feetStrength > .9 && attacking.feet.every((foot, leg) => pointGap(foot, frame.footTargets![leg]) < 7)

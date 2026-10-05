@@ -13,7 +13,7 @@ import { arenaSlideTripOutcome, arenaSlideTripEvadeOutcome, arenaSlideTripTarget
 import { arenaLinkedRushOutcome, type ArenaLinkedRushWindow } from './arenaLinkedRush';
 import { arenaSupermanPunchOutcome, arenaSupermanPunchTargets, type ArenaSupermanPunchWindow } from './arenaSupermanPunch';
 import { arenaKickCatchOutcome, arenaKickCatchTargets, type ArenaKickCatchWindow } from './arenaKickCatch';
-import { arenaWrestlingMoveTargets, arenaWrestlingMoveOutcome, arenaWrestlingMoveIsCounter, type ArenaWrestlingMoveKind, type ArenaWrestlingMoveWindow } from './arenaWrestlingMoves';
+import { arenaWrestlingMoveTargets, arenaWrestlingMoveOutcome, arenaWrestlingMoveIsCounter, arenaClotheslineDuckOutcome, type ArenaWrestlingMoveKind, type ArenaWrestlingMoveWindow } from './arenaWrestlingMoves';
 export { arenaTechniqueTargets, arenaTechniqueExit, isArenaFinalTechnique } from './arenaTechniques';
 
 export type ArenaTactic = 'team' | 'bait' | 'catch' | 'ram' | 'spin' | 'shove' | 'double-shove' | 'edge' | 'counter' | 'betrayal' | 'brace' | 'lift' | 'final' | 'armspin' | 'trip' | 'suplex' | 'sidekick' | 'elbow';
@@ -615,6 +615,12 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
     title = word === '돌진!' ? '상대를 향해 돌진!' : '발을 딛고 중심을 잡는다';
     detail = reverse ? `${v}가 ${a}를 향해 달려옵니다.` : `${a}가 ${v} 앞에서 발을 딛고 거리를 좁힙니다.`;
   }
+  if (window.kind === 'clothesline' && window.duck && window.contactAt == null && (frame.victimDuck > 0 || stage === 'recover')) {
+    step = frame.driverSuspension > 0 ? 1 : 3;
+    wordId = round.victim; word = frame.victimDuck > .05 ? '회피!' : '';
+    title = frame.victimDuck > 0 ? '몸을 숙여 편 팔 아래로 피한다' : '빗나간 뒤 다시 마주선다';
+    detail = frame.driverSuspension > 0 ? `${v}가 허리를 숙여 목을 낮춥니다. ${a}의 편 팔이 머리 위를 지나갑니다.` : `${a}가 지나친 자리에서 착지하고, ${v}도 자세를 되찾아 다시 공방을 이어갑니다.`;
+  }
   return { title, detail, word, wordId, label: performed ? labels[window.kind] : word.replace(/!$/, ''), steps, step, reverse, stage };
 }
 
@@ -624,7 +630,7 @@ export function arenaActionWords(round: ArenaRound, elapsed: number): { id: stri
   if (round.wrestlingMove && elapsed >= round.wrestlingMove.start && elapsed < round.resolve) {
     const beat = arenaWrestlingPresentation(round, elapsed);
     const frame = arenaWrestlingMoveTargets(round.wrestlingMove, elapsed, { x: 500, y: 416 }, undefined, round.contactSide);
-    const runner = frame.victimPose === 'run' ? round.victim : frame.driverPose === 'run' ? round.aggressor : undefined;
+    const runner = frame.victimPose === 'run' ? round.victim : frame.driverPose === 'run' || frame.victimDuck > 0 && frame.driverSuspension > 0 ? round.aggressor : undefined;
     return [...(beat.word || runner === beat.wordId ? [{ id: beat.wordId, word: runner === beat.wordId ? '돌진!' : beat.word }] : []), ...(runner && runner !== beat.wordId ? [{ id: runner, word: '돌진!' }] : []), ...(beat.stage === 'release' ? [{ id: round.victim, word: '장외로!' }] : [])];
   }
   if (round.kickCatch && elapsed >= round.kickCatch.start && elapsed < round.resolve) {
@@ -861,7 +867,8 @@ export function arenaRounds(order: string[], duration = 44_000, rushRoll = 7, es
       const kind = choices.find(([, offset]) => arenaWrestlingMoveOutcome(arenaEscapeRoll(escapeSeed ?? seed, round.index + offset) % 1000))?.[0];
       if (kind) {
         const fallback: Record<ArenaWrestlingMoveKind, ArenaTactic> = { clothesline: 'ram', dropkick: 'sidekick', powerbomb: 'brace', backbodydrop: 'catch', spinebuster: 'counter', scoopslam: 'lift' };
-        round = { ...round, tactic: fallback[kind], wrestlingMove: { kind, start: 0, end: 0 } };
+        const duck = kind === 'clothesline' && arenaClotheslineDuckOutcome(arenaEscapeRoll(escapeSeed ?? seed, round.index + 1637) % 1000);
+        round = { ...round, tactic: fallback[kind], wrestlingMove: { kind, start: 0, end: 0, ...(duck ? { duck: true } : {}) } };
       }
     }
     const pairDodge = round.pairDodge ? { ...round.pairDodge, start: entry, end: entry + 4500, launchAt: undefined } : undefined;
