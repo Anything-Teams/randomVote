@@ -545,7 +545,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             if (spinExit && armRelease) {
               const translated = (points: [ArenaPoint, ArenaPoint]) => points.map(point => ({ x: point.x + driver.x - armRelease.root.x, y: point.y + driver.y - armRelease.root.y })) as [ArenaPoint, ArenaPoint];
               const followThrough = spinFollowThrough(spinExit);
-              driver.carrierRelease = { hands: translated(armRelease.hands), elbows: translated(armRelease.elbows), shoulders: translated(armRelease.shoulders), progress: clamp((elapsed - spinExit.launchedAt!) / 650), direction: Math.sign(followThrough?.x ?? 0) || driver.facing, followThrough, stance: armRelease.stance };
+              driver.carrierRelease = { hands: translated(armRelease.hands), elbows: translated(armRelease.elbows), shoulders: translated(armRelease.shoulders), progress: clamp((elapsed - spinExit.launchedAt!) / 650), direction: Math.sign(followThrough?.x ?? 0) || driver.facing, sourceFacing: armRelease.facing, followThrough, stance: armRelease.stance };
+              driver.facing = a.facing = driver.carrierRelease.direction < 0 ? -1 : 1;
             }
             driver.frontKick = frame.frontKick; driver.footTarget = frame.driverFootTarget; driver.footStrength = frame.footStrength; driver.kickLeg = 1;
             const waistSupport = frame.gripMode === 'cradle' ? frame.scoopSupport : frame.gripMode === 'waist' ? frame.powerbombSupport ?? frame.backBodySupport ?? frame.spineSupport : undefined;
@@ -737,7 +738,11 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             exit.launchedAt = elapsed; exit.heldFacing = victim.facing; sim.exits.set(exchange.victim, exit);
             driver.gripTarget = undefined; driver.secondaryGripTarget = undefined; driver.gripStrength = 0; driver.gripLocked = false;
             const releasedArms = contact.pairArmRelease?.get(exchange.aggressor);
-            if (releasedArms) { const followThrough = spinFollowThrough(exit); driver.carrierRelease = { ...releasedArms, progress: 0, direction: Math.sign(followThrough?.x ?? 0) || driver.facing, followThrough }; }
+            if (releasedArms) {
+              const followThrough = spinFollowThrough(exit);
+              driver.carrierRelease = { ...releasedArms, progress: 0, direction: Math.sign(followThrough?.x ?? 0) || driver.facing, sourceFacing: releasedArms.facing, followThrough };
+              driver.facing = a.facing = driver.carrierRelease.direction < 0 ? -1 : 1;
+            }
             const resolve = Math.max(elapsed + Math.max(1100 * unit, (exit.spinFlight?.duration ?? 0) + 560), frame.requiredEndAt);
             contact.round = { ...exchange, wrestlingMove: { ...window, end: resolve }, impact: elapsed, resolve, end: resolve }; exchange = contact.round;
           }
