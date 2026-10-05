@@ -1,4 +1,6 @@
 import type { ArenaPoint } from './arenaLogic';
+import { arenaAnkleSwingProjection } from './arenaAnkleSwing';
+export { arenaAnkleSwingProjection } from './arenaAnkleSwing';
 
 export type ArenaWrestlingMoveKind = 'clothesline' | 'dropkick' | 'powerbomb' | 'backbodydrop' | 'spinebuster' | 'scoopslam';
 /** The survivor receives the other player's rush rather than running the slam in. */
@@ -71,12 +73,12 @@ const zero = (): ArenaPoint => ({ x: 0, y: 0 });
 const easeVelocity = (age: number, duration: number) => { const p = age / duration; return p > 0 && p < 1 ? 6000 * p * (1 - p) / duration : 0; };
 
 /** The supported waist passes through each key pose without stopping between holds. */
-function supportedPath(points: ArenaPoint[], times: number[], age: number): ArenaPoint {
+function supportedPath(points: ArenaPoint[], times: number[], age: number, impactVelocity?: ArenaPoint): ArenaPoint {
   if (age <= times[0]) return { ...points[0] };
   if (age >= times.at(-1)!) return { ...points.at(-1)! };
   const segment = times.findIndex(time => time > age) - 1, duration = times[segment + 1] - times[segment];
   const p = (age - times[segment]) / duration, p2 = p * p, p3 = p2 * p;
-  const tangent = (index: number, coordinate: 'x' | 'y') => index === 0 || index === points.length - 1 ? 0
+  const tangent = (index: number, coordinate: 'x' | 'y') => index === 0 ? 0 : index === points.length - 1 ? (impactVelocity?.[coordinate] ?? 0) / 1000
     : (points[index + 1][coordinate] - points[index - 1][coordinate]) / (times[index + 1] - times[index - 1]);
   const coordinate = (axis: 'x' | 'y') => (2 * p3 - 3 * p2 + 1) * points[segment][axis]
     + (p3 - 2 * p2 + p) * tangent(segment, axis) * duration
@@ -95,18 +97,20 @@ export function arenaAnkleRimThrowTargets(age: number, origins: {
   driver: ArenaPoint; ankles: [ArenaPoint, ArenaPoint]; orbit?: number; facing: 1 | -1; direction: 1 | -1;
 }) {
   const timing = ARENA_DRAGGED_ANKLE_THROW_TIMING;
-  const raise = ease(age / timing.raise), heaveClock = clamp((age - timing.raise) / timing.heave);
+  const raise = ease(age / timing.raise), heaveClock = Math.max(0, (age - timing.raise) / timing.heave);
   // The last stroke still has momentum when the hands open.
-  const heave = heaveClock * heaveClock * (2 - heaveClock);
+  const heave = heaveClock >= 1 ? 1 : heaveClock * heaveClock * (2 - heaveClock);
+  const motionHeave = heaveClock <= 1 ? heave : heaveClock;
   const originalOrbit = origins.orbit ?? (origins.direction === 1 ? Math.PI : 0);
   const downOrbit = originalOrbit + Math.atan2(Math.sin(Math.PI / 2 - originalOrbit), Math.cos(Math.PI / 2 - originalOrbit));
   const exitOrbit = origins.direction === 1 ? 0 : Math.PI;
   const lastTurn = Math.atan2(Math.sin(exitOrbit - downOrbit), Math.cos(exitOrbit - downOrbit));
-  const orbit = originalOrbit + (downOrbit - originalOrbit) * raise + lastTurn * heave;
+  const orbit = originalOrbit + (downOrbit - originalOrbit) * raise + lastTurn * motionHeave;
   const midpoint = blend(origins.ankles[0], origins.ankles[1], .5);
-  const raised = { x: origins.driver.x + origins.facing * 8, y: origins.driver.y - 132 };
+  const raised = { x: origins.driver.x + origins.facing * 8, y: origins.driver.y - 145 };
   const backstroke = { x: origins.driver.x + origins.direction * 12, y: origins.driver.y - 115 };
-  const support = blend(blend(midpoint, raised, raise), backstroke, heave);
+  const held = blend(midpoint, raised, raise);
+  const support = { x: held.x + (backstroke.x - held.x) * motionHeave, y: held.y + (backstroke.y - held.y) * motionHeave };
   const angleAt = (phase: number) => Math.atan2(Math.cos(phase), -.45 * Math.sin(phase));
   const difference = Math.atan2(Math.sin(angleAt(orbit) - angleAt(originalOrbit)), Math.cos(angleAt(orbit) - angleAt(originalOrbit))) * raise;
   const axis = { x: origins.ankles[1].x - origins.ankles[0].x, y: origins.ankles[1].y - origins.ankles[0].y };
@@ -114,7 +118,7 @@ export function arenaAnkleRimThrowTargets(age: number, origins: {
   const gripTargets: [ArenaPoint, ArenaPoint] = [{ x: support.x - span.x, y: support.y - span.y }, { x: support.x + span.x, y: support.y + span.y }];
   // The caller opens the hands on its first ready frame. Preserve the final
   // heave derivative when that frame samples just beyond the planned end.
-  const angularVelocity = age >= timing.raise ? lastTurn * heaveClock * (4 - 3 * heaveClock) / (timing.heave / 1000) : 0;
+  const angularVelocity = age >= timing.raise ? lastTurn * (heaveClock <= 1 ? heaveClock * (4 - 3 * heaveClock) : 1) / (timing.heave / 1000) : 0;
   return {
     raise, heave, overheadRaise: raise, gripTargets, angularVelocity,
     ankleSpin: { orbit, flatness: 1, weight: raise, gripLimb: 'feet' as const, gripBoth: true as const, planar: false },
@@ -242,26 +246,26 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     frame.canGrabAnkle = ankleGripAt === null && (frame.ankleApproach === undefined || frame.ankleApproach === 1);
     frame.canRelease = ankleGripAt !== null && elapsed >= requiredReleaseAt && !released;
     if (ankleSpinFinish && ankleGripAt !== null && elapsed >= ankleGripAt) {
-      const load = ease(gripAge / ankleLoad), progress = clamp((gripAge - ankleLoad) / spinDuration), ramp = .18;
-      const drive = (progress < ramp ? progress * progress / (2 * ramp) : progress - ramp / 2) / (1 - ramp / 2);
+      const load = ease(gripAge / ankleLoad), spinAge = released ? Math.min(gripAge, releaseAt! - ankleGripAt!) : gripAge;
+      const spinClock = Math.max(0, (spinAge - ankleLoad) / spinDuration), progress = clamp(spinClock), ramp = .18;
+      const drive = (spinClock < ramp ? spinClock * spinClock / (2 * ramp) : spinClock - ramp / 2) / (1 - ramp / 2);
       const turn = frame.driverFacing * Math.PI * 2 * drive;
       // Use the wrist-spin's horizontal orbit, with the feet as its anchor.
       // This depth projection circles the body around the planted caster
       // rather than turning it as a vertical wheel. Its quarter-phase release
       // gives the real mass a horizontal tangent at the end of one full turn.
       const orbit = -Math.PI / 2 + turn;
-      const radial = { x: Math.cos(orbit), y: .30 + Math.sin(orbit) * .10 };
-      const targetAngle = Math.atan2(-radial.x, radial.y);
+      const projection = arenaAnkleSwingProjection(orbit), targetAngle = projection.angle;
       const angle = frame.victimAngle + Math.atan2(Math.sin(targetAngle - frame.victimAngle), Math.cos(targetAngle - frame.victimAngle)) * load;
-      const width = mix(1, .42 + Math.abs(Math.sin(orbit)) * .58, load);
-      const raised = { x: frame.driver.x + Math.cos(orbit) * 18, y: frame.driver.y - 76 + Math.sin(orbit) * 5 };
+      const width = mix(1, projection.width, load);
+      const raised = { x: frame.driver.x - Math.cos(orbit) * 18, y: frame.driver.y - 80 + Math.sin(orbit) * 5 };
       const center = blend(midpoint, raised, load);
       const halfSpan = mix(distance(ankles[0], ankles[1]) / 2, 9 * 2.04 / 2, load);
       const axis = { x: Math.cos(angle) * frame.victimFacing * width, y: Math.sin(angle) * frame.victimFacing * width };
       frame.gripTargets = [-1, 1].map(direction => ({ x: center.x + axis.x * halfSpan * direction, y: center.y + axis.y * halfSpan * direction })) as [ArenaPoint, ArenaPoint];
       frame.ankleSpin = { orbit, flatness: 1, weight: load, gripLimb: 'feet', gripBoth: true, planar: true };
       frame.ankleSpinProgress = progress; frame.pivotTurn = turn; frame.driverYaw = turn;
-      frame.ankleAngularVelocity = gripAge >= ankleLoad ? frame.driverFacing * Math.PI * 2 / (spinDuration / 1000) * Math.min(1, progress / ramp) / (1 - ramp / 2) : 0;
+      frame.ankleAngularVelocity = gripAge >= ankleLoad ? frame.driverFacing * Math.PI * 2 / (spinDuration / 1000) * Math.min(1, spinClock / ramp) / (1 - ramp / 2) : 0;
       frame.ankleOrbitVelocity = frame.ankleAngularVelocity;
       frame.ankleSpinRaise = undefined;
       frame.driverPose = 'grapple'; frame.driverPhase = load; frame.ankleThrowProgress = load;
@@ -409,8 +413,12 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const downStart = scoopTiming.load + scoopTiming.lift + scoopTiming.turn * .9;
     const load = ease(age / scoopTiming.load), lift = ease((age - liftStart) / (scoopTiming.load + scoopTiming.lift - liftStart));
     const turn = ease((age - turnStart) / (scoopTiming.load + scoopTiming.lift + scoopTiming.turn - turnStart));
-    const downDuration = scoopDuration - downStart, downClock = clamp((age - downStart) / downDuration);
-    const down = ease(downClock), recover = contacted ? ease((elapsed - floorAt) / ARENA_SCOOP_RECOVERY_TIMING.stand) : 0;
+    const downDuration = scoopDuration - downStart, downClock = contacted && elapsed >= floorAt ? 1 : clamp((age - downStart) / downDuration);
+    // Drive through the last part of the drop. Braking to zero before the
+    // back reaches the sand makes a slam look like setting a body down.
+    const down = downClock * downClock * (2 - downClock), recover = contacted ? ease((elapsed - floorAt) / ARENA_SCOOP_RECOVERY_TIMING.stand) : 0;
+    const impactAge = elapsed - floorAt;
+    const recoil = contacted ? ease(impactAge / 50) * (1 - ease((impactAge - 50) / 170)) : 0;
     const victimOrigin = initial.contactVictim ?? goal, driverOrigin = initial.contactDriver ?? initial.driver;
     const runner = rush(initial.launchVictim ?? initial.victim, goal, launched ? elapsed - launch : 0);
     const preparationAge = contacted ? Math.min(elapsed, contactAt!) : elapsed;
@@ -419,10 +427,11 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const floorRoot = initial.scoopFloorVictim ?? { x: driverOrigin.x + side * 62, y: victimOrigin.y };
     // Receiving feet step into the incoming weight; the hips then carry both
     // bodies through the pivot and follow the back onto the floor.
-    frame.driver = { x: driverOrigin.x + side * (8 * load + 8 * turn + 24 * down), y: driverOrigin.y };
+    frame.driver = { x: driverOrigin.x + side * (8 * load + 8 * turn + 24 * down - 3 * recoil), y: driverOrigin.y };
     frame.driverVelocity = contacted ? { x: side * (8 * easeVelocity(age, scoopTiming.load)
       + 8 * easeVelocity(age - turnStart, scoopTiming.load + scoopTiming.lift + scoopTiming.turn - turnStart)
-      + 24 * easeVelocity(age - downStart, downDuration)), y: 0 } : zero();
+      + (downClock < 1 ? 24000 * downClock * (4 - 3 * downClock) / downDuration : 0)
+      - 3 * (easeVelocity(impactAge, 50) * (1 - ease((impactAge - 50) / 170)) - ease(impactAge / 50) * easeVelocity(impactAge - 50, 170))), y: 0 } : zero();
     frame.victim = contacted ? blend(victimOrigin, floorRoot, down) : runner.point;
     frame.victimVelocity = contacted ? zero() : runner.velocity;
     frame.driverPose = contacted ? recover === 1 ? 'guard' : 'scoopslam' : preparation > 0 ? 'scoopslam' : 'guard';
@@ -440,8 +449,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     if (contacted && age > 0 && elapsed < floorAt) frame.victimCarryStretch = load;
     frame.victimSlam = contacted && down > 0 ? { tuck: .12 * Math.sin(down * Math.PI), slump: down } : undefined;
     frame.slamImpactAt = floorAt;
-    const impactAge = elapsed - frame.slamImpactAt;
-    frame.slamImpact = contacted ? ease(impactAge / 28) * (1 - ease((impactAge - 110) / 570)) : 0;
+    frame.slamImpact = contacted && impactAge >= 0 ? 1 - ease(impactAge / 220) : 0;
     frame.victimEyesClosed = contacted && elapsed >= frame.slamImpactAt;
     if (contacted) {
       const start = initial.scoopWaist ?? { x: victimOrigin.x, y: victimOrigin.y - 40 };
@@ -449,8 +457,9 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
       const raised = { x: driverOrigin.x + side * 12, y: driverOrigin.y - 72 };
       const turned = { x: driverOrigin.x + side * 38, y: driverOrigin.y - 62 };
       const floor = initial.scoopFloorWaist ?? { x: floorRoot.x + side * 25, y: floorRoot.y - 19 };
+      const impactVelocity = { x: (floor.x - turned.x) * 2.3 / (scoopTiming.slam / 1000), y: (floor.y - turned.y) * 2.8 / (scoopTiming.slam / 1000) };
       frame.scoopSupport = supportedPath([start, gathered, raised, turned, floor],
-        [0, scoopTiming.load, scoopTiming.load + scoopTiming.lift, scoopTiming.load + scoopTiming.lift + scoopTiming.turn, scoopDuration], age);
+        [0, scoopTiming.load, scoopTiming.load + scoopTiming.lift, scoopTiming.load + scoopTiming.lift + scoopTiming.turn, scoopDuration], age, impactVelocity);
     }
     frame.gripTargets = targets; frame.gripMode = 'cradle';
     frame.gripStrength = launched ? contacted ? 1 - ease((downClock - .82) / .18) : preparation : 0;

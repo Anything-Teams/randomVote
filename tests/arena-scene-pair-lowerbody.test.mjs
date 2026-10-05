@@ -42,6 +42,8 @@ test('both joint carriers retain visible complete knees and trouser cuffs throug
         const actor = capturedActors().get(id);
         if (!actor || !(actor.pose === 'pairlift' && frame.pairLoad > .5 || actor.carrierRelease?.stance)) continue;
         const skeleton = actor.animation.skeleton, detail = `${reversed}/${delta}ms/${elapsed}/${frame.stage}/${id}`;
+        const memories = actor.animation.feet;
+        assert.ok(memories.some(foot => !foot.swinging && foot.lift < .05), `one material sole supports the loaded body while the other takes a replacement step: ${detail}`);
         for (let leg = 0; leg < 2; leg++) {
           const origin = skeleton.hips[leg], knee = skeleton.knees[leg], foot = skeleton.feet[leg];
           const thigh = distance(origin, knee), calf = distance(knee, foot);
@@ -49,6 +51,10 @@ test('both joint carriers retain visible complete knees and trouser cuffs throug
           const direction = { x: (knee.x - origin.x) / thigh, y: (knee.y - origin.y) / thigh };
           const cuff = Math.max(...skeleton.shorts[leg].map(point => (point.x - origin.x) * direction.x + (point.y - origin.y) * direction.y));
           assert.ok(cuff <= thigh - 1.19, `the actual painted trouser cuff cannot cover or pass through the knee: ${detail}/${leg}`);
+          if (actor.carrierRelease && actor.carrierRelease.progress > .25) {
+            assert.ok(foot.y - origin.y > 7, `the returning helper cannot leave its sole beside its pelvis: ${detail}/${leg}/${foot.y - origin.y}`);
+            assert.ok(knee.y - origin.y > -1.5, `the returning helper cannot fold both leg bones above its pelvis: ${detail}/${leg}/${knee.y - origin.y}`);
+          }
         }
         if (actor.carrierRelease) releasedFrames++; else loadedFrames++;
       }

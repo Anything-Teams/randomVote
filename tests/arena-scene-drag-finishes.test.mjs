@@ -74,9 +74,9 @@ function roots(kind) {
   return ['powerbomb', 'backbodydrop', 'spinebuster', 'scoopslam'].includes(kind) ? { driver: { x: 525, y: 416 }, victim: { x: 300, y: 416 } }
       : { driver: { x: 320, y: 416 }, victim: { x: 520, y: 416 } };
 }
-function game(kind, { mirrored = false, controlled = true, frameDelta = 16 } = {}) {
-  const seed = seeds[kind], props = { candidates: ['1', '2'].map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
-  const planned = arenaRounds(order, duration, rushRoll, seed)[0];
+function game(kind, { mirrored = false, controlled = true, frameDelta = 16, matchDuration = duration } = {}) {
+  const seed = seeds[kind], props = { candidates: ['1', '2'].map(id => ({ id, name: id, color: '#ffad72' })), order, duration: matchDuration, arenaRushRoll: rushRoll, arenaEscapeSeed: seed, paused: false, preview: false };
+  const planned = arenaRounds(order, matchDuration, rushRoll, seed)[0];
   assert.equal(planned.wrestlingMove?.kind ?? planned.tactic, kind);
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
   // Change only the actual starting layout, before the production Scene samples
@@ -146,6 +146,35 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
     assert.ok(landed && releaseAt != null && gripFrames >= 1000 / frameDelta - 2, `${kind}/${mirrored}/${frameDelta}: natural full finishing action completes`);
     assert.ok(tangentFrames > 0);
     assert.ok(actualEnd >= releaseAt + 1100, 'the declared actual end includes the throw flight and ranking reveal');
+  }
+});
+
+test('all four dragged finishes share the same throw and hand-release clock in a longer match', () => {
+  const frameDelta = 50;
+  for (const kind of Object.keys(seeds)) {
+    const scene = game(kind, { controlled: false, frameDelta, matchDuration: 62000 });
+    let raisedAt, releaseAt, followFrames = 0;
+    for (let elapsed = 0; elapsed < 35000; elapsed += frameDelta) {
+      const actors = scene.step(elapsed), round = scene.sim.contacts.get(scene.planned.id)?.round;
+      const caster = actors.get(scene.planned.aggressor), victim = actors.get(scene.planned.victim), exit = scene.sim.exits.get(scene.planned.victim);
+      if (caster?.pose === 'overhead' && victim?.spinSuspension && releaseAt === undefined) raisedAt ??= elapsed;
+      if (exit?.spinFlight && exit.launchedAt !== undefined) {
+        if (releaseAt === undefined) {
+          releaseAt = exit.launchedAt;
+          const throwAt = round.wrestlingMove?.dragEndAt ?? round.floorFinish?.throwAt;
+          assert.ok(raisedAt !== undefined && throwAt !== undefined, `${kind}: the actual supported throw is visible`);
+          assert.ok(releaseAt - throwAt >= 1000 && releaseAt - throwAt < 1000 + frameDelta, `${kind}: the same full 1000ms raise/heave precedes opening the palms`);
+        }
+        const age = elapsed - releaseAt;
+        if (age > 0 && age <= 650) {
+          assert.ok(caster.carrierRelease, `${kind}: releasing the ankles preserves the painted throwing arms`);
+          assert.ok(Math.abs(caster.carrierRelease.progress - age / 650) < 1e-10, `${kind}: the same 650ms follow-through applies to every finish`);
+          followFrames++;
+        }
+        if (age > 650) break;
+      }
+    }
+    assert.ok(releaseAt !== undefined && followFrames >= 10, `${kind}: the complete shared throw and follow-through play naturally`);
   }
 });
 

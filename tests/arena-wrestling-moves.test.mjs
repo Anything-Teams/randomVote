@@ -511,8 +511,8 @@ test('a planted rim throw lifts both held ankles and finishes a live backward he
       const lateRelease = arenaAnkleRimThrowTargets(sampledAt, origins);
       assert.equal(lateRelease.releaseReady, true);
       assert.equal(lateRelease.angularVelocity, released.angularVelocity, `the first ready ${step}ms frame must inherit the full terminal heave momentum`);
-      assert.deepEqual(lateRelease.gripTargets, released.gripTargets, 'an overshoot holds the real final hand support until the caller releases it');
-      assert.equal(lateRelease.ankleSpin.orbit, released.ankleSpin.orbit);
+      assert.ok((midpoint(lateRelease).x - midpoint(released).x) * origins.direction > 0, 'the real held hand support keeps heaving until the first actual release frame');
+      assert.ok(Math.abs((lateRelease.ankleSpin.orbit - released.ankleSpin.orbit) * 1000 / (sampledAt - duration) - released.angularVelocity) < 1e-9, 'the late frame retains the actual continuing angular momentum instead of pausing at the nominal clock');
     }
     assert.deepEqual(origins, saved, 'sampling the same throw does not mutate either real ankle origin');
   }

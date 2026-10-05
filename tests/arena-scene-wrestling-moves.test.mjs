@@ -152,13 +152,13 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           }
           const matrix = victim.animation.spinSnapshot.matrix;
           const paintedAngle = Math.atan2(matrix[1] * victim.facing, matrix[0] * victim.facing);
-          const radial = { x: Math.cos(frame.ankleSpin.orbit), y: .30 + Math.sin(frame.ankleSpin.orbit) * .10 };
+          const radial = { x: Math.cos(frame.ankleSpin.orbit), y: -.55 * Math.sin(frame.ankleSpin.orbit) };
           const expectedAngle = Math.atan2(-radial.x, radial.y);
           assert.ok(Math.abs(Math.atan2(Math.sin(paintedAngle - expectedAngle), Math.cos(paintedAngle - expectedAngle))) < 1e-8, 'the actual body circles the ankle support instead of resetting its orbital angle');
-          assert.equal(frame.ankleSpin.planar, true, 'the ankle swing uses the same horizontal plane as the existing wrist spin');
+          assert.equal(frame.ankleSpin.planar, true, 'the ankle swing crosses both halves of the horizontal plane');
           const width = Math.hypot(matrix[0], matrix[1]) / victim.scale, depth = Math.hypot(matrix[2], matrix[3]) / victim.scale;
           assert.ok(Math.abs(width - (.42 + Math.abs(Math.sin(frame.ankleSpin.orbit)) * .58)) < 1e-8 && width >= .42 - 1e-8, 'depth turns retain full visible body width of the existing wrist spin');
-          assert.ok(Math.abs(depth - Math.hypot(radial.x, radial.y)) < 1e-8, 'the body follows the known horizontal depth projection rather than rotating vertically');
+          assert.ok(Math.abs(depth - Math.hypot(radial.x, radial.y)) < 1e-8 && depth >= .55 - 1e-8, 'the complete rotating body remains readable at every depth phase');
           const skeleton = victim.animation.skeleton;
           for (let leg = 0; leg < 2; leg++) {
             assert.ok(distance(skeleton.hips[leg], skeleton.knees[leg]) <= 11.001 && distance(skeleton.knees[leg], skeleton.feet[leg]) <= 11.001, 'both supported legs keep complete normal bones during the full revolution');
@@ -298,7 +298,8 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         if (spinFinish) {
           assert.equal(frame.requiredReleaseAt, window.ankleGripAt + (kind === 'backbodydrop' ? 1670 : 1920), 'the actual ankle grip owns the load and complete revolution, with no separate throw pause');
           assert.ok(spinFrames >= (frameDelta === 16 ? 55 : 17), 'the actual caster visibly completes one full revolution before release');
-          assert.ok(Math.abs(Math.abs(frame.pivotTurn) - Math.PI * 2) < 1e-8);
+          const releaseTurn = Math.abs(frame.pivotTurn), lateTurn = Math.abs(frame.ankleOrbitVelocity) * frameDelta / 1000;
+          assert.ok(releaseTurn >= Math.PI * 2 - 1e-8 && releaseTurn <= Math.PI * 2 + lateTurn + 1e-8, 'the full turn continues only through the actual hand-opening frame');
           fullTurnSeen = true;
           assert.ok(elapsed - frame.requiredReleaseAt < frameDelta, 'release occurs on the first frame that finishes the full revolution');
           assert.ok(Math.abs(frame.ankleAngularVelocity) > 4.8, 'the full revolution releases while it still carries angular momentum');
@@ -316,7 +317,20 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         }
         if (previousRig) {
           const cap = 15 + frameDelta * .5;
-          for (const [point, prior] of paintedPoints(paintedVictim).map((point, index) => [point, paintedPoints(previousRig)[index]])) assert.ok(distance(point, prior) < cap, `release cannot reset the current painted body by ${distance(point, prior).toFixed(2)}px: ${detail(elapsed, frame)}`);
+          const spinningRelease = spinFinish && previousSpinWeight === 1 && previousSpinMatrix;
+          const transport = spinningRelease ? multiply(exit.spinSnapshot.matrix, inverse(previousSpinMatrix)) : undefined;
+          if (transport) {
+            const speed = Math.hypot(exit.spinFlight.velocity.x, exit.spinFlight.velocity.y);
+            assert.ok(distance(paintedVictim.waist, previousRig.waist) < speed * frameDelta / 1000 * 1.15 + 2, 'the real release mass cannot teleport under its rotating silhouette');
+            const priorAngle = Math.atan2(previousSpinMatrix[1] * victim.facing, previousSpinMatrix[0] * victim.facing);
+            const currentAngle = Math.atan2(exit.spinSnapshot.matrix[1] * victim.facing, exit.spinSnapshot.matrix[0] * victim.facing);
+            const angularStep = Math.abs(Math.atan2(Math.sin(currentAngle - priorAngle), Math.cos(currentAngle - priorAngle)));
+            assert.ok(angularStep <= Math.abs(frame.ankleOrbitVelocity) * frameDelta / 1000 / .55 + 1e-8, 'the release turns only by the elapsed visible orbital motion');
+          }
+          for (const [point, prior] of paintedPoints(paintedVictim).map((point, index) => [point, paintedPoints(previousRig)[index]])) {
+            const expected = transport ? project(transport, prior) : prior;
+            assert.ok(distance(point, expected) < (transport ? 3 : cap), `release cannot reset its actually rotating skeleton (gap ${distance(point, expected).toFixed(2)}px): ${detail(elapsed, frame)}`);
+          }
         }
         assert.equal(exit.round.victim, scene.planned.victim);
       }
