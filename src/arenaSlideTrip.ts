@@ -34,7 +34,7 @@ export const ARENA_SLIDE_TRIP_MIN_GAP = 130;
 export const ARENA_SLIDE_TRIP_MIN_RUN = 320;
 export const ARENA_SLIDE_TRIP_ENTRY_GAP = 124;
 export const ARENA_SLIDE_TRIP_JUMP_DURATION = 520;
-export const ARENA_SLIDE_TRIP_TIMING = { runRamp: 180, slideRamp: 100, hook: 80, fall: 320, rise: 400, kickWindup: 240, kickRetract: 170 } as const;
+export const ARENA_SLIDE_TRIP_TIMING = { runRamp: 180, slideRamp: 100, hook: 24, fall: 320, rise: 400, kickWindup: 240, kickRetract: 170 } as const;
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const ease = (value: number) => { const p = clamp(value); return p * p * (3 - 2 * p); };
 const mix = (a: number, b: number, p: number) => a + (b - a) * clamp(p);
@@ -95,19 +95,29 @@ export function arenaSlideTripTargets(window: ArenaSlideTripWindow, elapsed: num
   const slide = slidingTravel(slideOrigin, slideGoal, elapsed - (launchAt ?? elapsed));
   const plannedHookAt = (launchAt ?? plannedLaunchAt) + (window.plannedPassAt === undefined ? slide.duration : window.plannedPassAt - plannedLaunchAt);
   const hookAt = window.hookAt === null || launchAt === null ? null : Math.max(launchAt, window.hookAt ?? plannedHookAt);
-  const landedAt = hookAt === null ? null : hookAt + ARENA_SLIDE_TRIP_TIMING.hook + ARENA_SLIDE_TRIP_TIMING.fall;
+  // The contact label overlaps the start of the fall. A real ankle hit does
+  // not freeze both fighters before the defender loses balance.
+  const landedAt = hookAt === null ? null : hookAt + ARENA_SLIDE_TRIP_TIMING.fall;
   const kickReadyAt = landedAt === null ? null : landedAt + ARENA_SLIDE_TRIP_TIMING.rise;
   const kickAt = window.kickAt === null || kickReadyAt === null ? null : Math.max(kickReadyAt, window.kickAt ?? kickReadyAt + ARENA_SLIDE_TRIP_TIMING.kickWindup);
   const slideProgress = launchAt === null ? 0 : ease((elapsed - launchAt) / 180);
   const hookAge = hookAt === null ? -1 : elapsed - hookAt;
-  const fall = ease((hookAge - ARENA_SLIDE_TRIP_TIMING.hook) / ARENA_SLIDE_TRIP_TIMING.fall);
+  const fallClock = clamp(hookAge / ARENA_SLIDE_TRIP_TIMING.fall);
+  const fall = .25 * fallClock + .75 * ease(fallClock);
   const rise = landedAt === null ? 0 : ease((elapsed - landedAt) / ARENA_SLIDE_TRIP_TIMING.rise);
   const beforeLaunch = launchAt === null || elapsed < launchAt;
   const hooked = hookAt !== null && elapsed >= hookAt;
   const victim = hooked ? { ...(initial.hookVictim ?? initial.victim) } : { ...initial.victim };
   const hookDriver = initial.hookDriver ?? slideGoal;
+  // Keep the remaining ground momentum after the actual sole contact, then
+  // settle into the same footprint used by the rise and following kick.
+  const contactVelocity = hookAt === null ? { x: 0, y: 0 } : slidingTravel(slideOrigin, slideGoal, hookAt - launchAt!).velocity;
+  const settleSeconds = .12, settle = clamp(hookAge / (settleSeconds * 1000));
+  const carry = { x: contactVelocity.x * settleSeconds / 2, y: contactVelocity.y * settleSeconds / 2 };
+  const carried = { x: hookDriver.x + carry.x * (2 * settle - settle * settle), y: hookDriver.y + carry.y * (2 * settle - settle * settle) };
+  const settled = { x: hookDriver.x + carry.x, y: hookDriver.y + carry.y };
   const kickStep = initial.kickTarget ? { x: initial.kickTarget.x - side * 48, y: hookDriver.y } : hookDriver;
-  const driver = beforeLaunch ? run.point : hooked ? blend(hookDriver, side * (kickStep.x - hookDriver.x) > 0 ? kickStep : hookDriver, rise) : slide.point;
+  const driver = beforeLaunch ? run.point : hooked ? blend(carried, side * (kickStep.x - settled.x) > 0 ? kickStep : settled, rise) : slide.point;
   const inKick = kickReadyAt !== null && elapsed >= kickReadyAt;
   const released = kickAt !== null && elapsed >= kickAt;
   const frontKick = inKick ? released ? mix(.62, 1, ease((elapsed - kickAt!) / ARENA_SLIDE_TRIP_TIMING.kickRetract)) : .62 * ease((elapsed - kickReadyAt) / ARENA_SLIDE_TRIP_TIMING.kickWindup) : undefined;
@@ -149,14 +159,14 @@ export function arenaSlideTripTargets(window: ArenaSlideTripWindow, elapsed: num
   }
   return {
     active: elapsed >= window.start && elapsed < window.end, side, stage, driver: canPerform ? driver : { ...initial.driver }, victim,
-    driverVelocity: beforeLaunch ? run.velocity : hooked ? { x: 0, y: 0 } : slide.velocity, driverFacing: side,
+    driverVelocity: beforeLaunch ? run.velocity : hooked ? { x: contactVelocity.x * (1 - settle) * (1 - rise), y: contactVelocity.y * (1 - settle) * (1 - rise) } : slide.velocity, driverFacing: side,
     driverPose: beforeLaunch ? 'run' : !hooked || fall < 1 ? 'slide' : !inKick ? 'recover' : 'trip', driverPhase: inKick ? frontKick! : fall >= 1 ? rise : slideProgress,
     slideProgress, driverFootTarget: inKick ? kickTarget : ankle, footStrength: inKick ? 1 : !beforeLaunch && !hooked ? ease(slideProgress / .75) : 0, frontKick,
     victimPose: !hooked ? 'brace' : fall < 1 ? 'roll' : 'stunned', victimAngle: side * Math.PI * .47 * fall, victimSuspension: 0,
     victimHeight: 0, victimJumpTuck: 0, victimPhase: fall,
     victimSlam: hooked ? { tuck: .5 * Math.sin(fall * Math.PI), slump: fall } : undefined,
     launchAt, hookAt, kickAt, plannedLaunchAt, plannedHookAt, kickReadyAt,
-    requiredImpactAt: kickAt ?? (kickReadyAt ?? plannedHookAt + ARENA_SLIDE_TRIP_TIMING.hook + ARENA_SLIDE_TRIP_TIMING.fall + ARENA_SLIDE_TRIP_TIMING.rise) + ARENA_SLIDE_TRIP_TIMING.kickWindup,
+    requiredImpactAt: kickAt ?? (kickReadyAt ?? plannedHookAt + ARENA_SLIDE_TRIP_TIMING.fall + ARENA_SLIDE_TRIP_TIMING.rise) + ARENA_SLIDE_TRIP_TIMING.kickWindup,
     canLaunch: canPerform && elapsed >= plannedLaunchAt, canHook: canPerform && !beforeLaunch && !hooked && slideProgress >= .6, canKick: canPerform && inKick && !released,
     canPerform, startingGap, plannedJumpAt, jumpAt: null, passAt: null, landingAt, requiredEndAt, canJump: false, canPass: false, recovered: false,
   };

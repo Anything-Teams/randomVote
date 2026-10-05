@@ -24,15 +24,15 @@ const context = () => new Proxy({ measureText: value => ({ width: String(value).
 const midpoint = points => ({ x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
-for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`powerbomb: walk past the toes and face back toward the stunned opponent before lifting (${mirrored ? 'mirrored' : 'ordinary'}, ${delta}ms)`, () => {
-  const order = ['2', '1'], duration = 44000, seed = 4, planned = arenaRounds(order, duration, 7, seed)[0];
-  assert.equal(planned.wrestlingMove?.kind, 'powerbomb');
+for (const [kind, seed] of [['powerbomb', 4], ['clothesline', 19], ['scoopslam', 40]]) for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`${kind}: walk past the toes and face back toward the stunned opponent before lifting (${mirrored ? 'mirrored' : 'ordinary'}, ${delta}ms)`, () => {
+  const order = ['2', '1'], duration = 44000, planned = arenaRounds(order, duration, 7, seed)[0];
+  assert.equal(planned.wrestlingMove?.kind, kind);
   const props = { candidates: ['1', '2'].map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: 7, arenaEscapeSeed: seed, paused: false, preview: false };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
   setInitialize((current, reset) => {
     if (current !== sim || !reset) return;
-    Object.assign(sim.bodies.get(planned.aggressor), { x: 525, y: 416 });
-    Object.assign(sim.bodies.get(planned.victim), { x: 300, y: 416 });
+    Object.assign(sim.bodies.get(planned.aggressor), { x: kind === 'clothesline' ? 320 : 525, y: 416 });
+    Object.assign(sim.bodies.get(planned.victim), { x: kind === 'clothesline' ? 520 : 300, y: 416 });
     for (const body of sim.bodies.values()) {
       if (mirrored) { body.x = 1000 - body.x; body.facing *= -1; }
       body.vx = 0; body.vy = 0; body.motorX = 0; body.motorY = 0; body.animation = undefined;
@@ -43,15 +43,20 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`powerb
     render(ctx, props, elapsed, elapsed, sim, delta, false);
     const actors = capture(), caster = actors.get(planned.aggressor), victim = actors.get(planned.victim);
     const actual = sim.contacts.get(planned.id)?.round, window = actual?.wrestlingMove;
-    assert.equal(window?.kind, 'powerbomb', 'the incoming run, received slam and toe pickup retain their actual selected technique');
+    assert.equal(window?.kind, kind, 'the incoming run, received slam and toe pickup retain their actual selected technique');
     const rig = caster.animation.contactPoints, victimRig = victim.animation.contactPoints;
-    const approaching = caster.ankleApproach !== undefined && caster.pivotTurn === undefined;
+    const approaching = caster.gripMode === 'ankle' && caster.pivotTurn === undefined;
     if (approaching) {
       approachFrames++;
       floor ??= { feet: midpoint(victimRig.feet), head: { ...victimRig.head } };
       approachStart ??= { x: caster.x, y: caster.y };
       const outside = Math.sign(floor.feet.x - floor.head.x);
-      assert.equal(caster.facing, -outside, 'the receiver faces inward from the toe side, never toward the toes from over the torso');
+      if (caster.pose === 'drag') assert.equal(caster.facing, -outside, 'the receiver faces inward from the toe side while reaching down');
+      if (caster.pose === 'walk') {
+        assert.equal(caster.facing, outside, 'the approach steps forward toward the toe end instead of bent backward walking');
+        assert.equal(caster.gripStrength, 0, 'the hands do not try to pick up ankles while still beside the torso');
+        assert.ok(Math.abs(caster.animation.motion.lean) < 16, 'the approach stays upright until the actual toe-side arrival');
+      }
       assert.ok(distance(midpoint(victimRig.feet), floor.feet) < .01 && distance(victimRig.head, floor.head) < .01, 'the unconscious body stays planted while the caster walks to its toes');
       assert.ok((caster.x - approachStart.x) * outside >= -.01, 'the approach moves farther past the toes instead of back over the opponent');
       if (previous?.approaching) assert.ok(distance(caster, previous.root) < 2 + delta * .17, 'the approach reaches the outside position through continuous actual steps');
@@ -59,8 +64,9 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`powerb
     if (!pickupSeen && window.ankleGripAt != null) {
       assert.ok(floor && approachFrames >= (delta === 16 ? 8 : 3), 'the real outside approach is visible before the four-contact pickup');
       const outside = Math.sign(floor.feet.x - floor.head.x);
-      assert.ok((caster.x - floor.feet.x) * outside > 10, 'the feet are held from a root beyond the toe endpoints, not from the torso side');
+      assert.ok((caster.x - floor.feet.x) * outside > 10, `the feet are held from a root beyond the toe endpoints, not from the torso side: ${JSON.stringify({casterX:caster.x,floor:floor.feet,outside,goal:sim.contacts.get(planned.id)?.wrestlingMoveOrigins.ankleDriver})}`);
       assert.ok((caster.x - approachStart.x) * outside > 10, 'the caster takes a visible step farther along the toe side before lifting');
+      assert.ok(caster.y - floor.feet.y > 8, 'the caster stands below the actual toe ends rather than reaching across the head or torso');
       assert.equal(caster.facing, -outside, 'the genuine two-toe hold faces back toward the floored opponent');
       assert.equal(caster.ankleGripReversed, true, 'approaching from the opposite end exchanges ankle ownership so the two supporting arms cannot cross');
       rig.hands.forEach((palm, arm) => assert.ok(distance(palm, victimRig.feet[caster.ankleGripReversed ? 1 - arm : arm]) < 8, 'both normal hands actually close on the two live toes'));

@@ -67,7 +67,9 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       contactRoot = { x: driver.x, y: driver.y };
       assert.ok(ran, 'the strike follows a visible actual run');
       const driverRig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
-      const liveNeck = { x: victimRig.head.x, y: victimRig.head.y + victim.scale * 20 };
+      const temples = { x: (victimRig.headSides[0].x + victimRig.headSides[1].x) / 2, y: (victimRig.headSides[0].y + victimRig.headSides[1].y) / 2 };
+      const shoulders = { x: (victimRig.shoulders[0].x + victimRig.shoulders[1].x) / 2, y: (victimRig.shoulders[0].y + victimRig.shoulders[1].y) / 2 };
+      const liveNeck = { x: temples.x + (shoulders.x - temples.x) * .65, y: temples.y + (shoulders.y - temples.y) * .65 };
       const trunkLength = distance(driverRig.head, driverRig.waist);
       assert.ok(airborneApproachMs >= 80, 'the real approach shows at least 80ms of visible flight before the arm catches the neck');
       assert.ok(driver.depthY - driver.y >= 8 && driver.suspension > .5, 'the neck hook happens while the actual driver is airborne');
@@ -105,7 +107,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       assert.equal(victim.spinSuspension?.planar, true, 'the selected finish swings the body through the horizontal plane');
       const driverRig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
       for (let limb = 0; limb < 2; limb++) {
-        assert.ok(distance(driverRig.hands[limb], victimRig.feet[limb]) < 1, `${elapsed}: each actual palm supports its own material toe through the complete turn`);
+        assert.ok(distance(driverRig.hands[limb], victimRig.feet[driver.ankleGripReversed ? 1 - limb : limb]) < 1, `${elapsed}: each actual palm supports its own material toe through the complete turn`);
         assert.ok(Math.abs(distance(driverRig.shoulders[limb], driverRig.elbows[limb]) - 11 * driver.scale) < .001);
         assert.ok(Math.abs(distance(driverRig.elbows[limb], driverRig.hands[limb]) - 10.5 * driver.scale) < .001);
         const skeleton = victim.animation.skeleton;

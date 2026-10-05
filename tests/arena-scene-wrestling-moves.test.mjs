@@ -154,9 +154,9 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         const cap = 8 + frameDelta * .9;
         // Before the spin plane begins, turning toward the ankles relabels
         // both ordinary hip/heel pairs. Compare the same physical soles.
-        const relabeled = driver.facing !== previousDriverFacing && driver.ankleApproach !== undefined && driver.pivotTurn === undefined;
+        const relabeled = driver.facing !== previousDriverFacing && driver.gripMode === 'ankle' && driver.pivotTurn === undefined;
         const priorDriver = relabeled ? { ...previousDriverRig, feet: [...previousDriverRig.feet].reverse() } : previousDriverRig;
-        for (const [point, prior] of paintedPoints(paintedDriver).map((point, index) => [point, paintedPoints(priorDriver)[index]])) assert.ok(distance(point, prior) < cap, `receiving the back or reaching for the ankles cannot reverse a caster joint by ${distance(point, prior).toFixed(2)}px in one frame: ${detail(elapsed, frame)}`);
+        for (const [point, prior] of paintedPoints(paintedDriver).map((point, index) => [point, paintedPoints(priorDriver)[index]])) assert.ok(distance(point, prior) < cap, `receiving the back or reaching for the ankles cannot reverse a caster joint by ${distance(point, prior).toFixed(2)}px in one frame: ${detail(elapsed, frame)}/joint${paintedPoints(paintedDriver).indexOf(point)}`);
       }
       if (kind !== 'dropkick' && window.contactAt != null && !exit && previousRig) {
         const cap = 8 + frameDelta * .9;

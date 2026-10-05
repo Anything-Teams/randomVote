@@ -31,6 +31,18 @@ function contacted(kind, side = 1) {
   values.actual = { ...values.actual, contactAt };
   return { ...values, contactAt };
 }
+// Find the observed transition rather than inventing an ankle-contact clock
+// while the caster is still walking to the toe side of the floored body.
+function firstPickupClock(values, side = 1, ready = frame => frame.canGrabAnkle) {
+  const at = clock => arenaWrestlingMoveTargets(values.actual, clock, center, values.initial, side);
+  let low = at(values.contactAt).pickupReadyAt, high = low + 4000;
+  assert.ok(ready(at(high)), 'the complete floor recovery, toe-side walk and reaching hand finish in a finite time');
+  for (let iteration = 0; iteration < 50; iteration++) {
+    const middle = (low + high) / 2;
+    if (ready(at(middle))) high = middle; else low = middle;
+  }
+  return high;
+}
 const fighter = (index, values) => ({ candidate: { id: String(index), name: String(index), color: '#ffad72' }, index, x: 500, y: 416, scale: 2.04, facing: 1, pose: 'guard', phase: 0, angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, motionImmediate: true, animation: createArenaFighterAnimation(), ...values });
 
 test('each new wrestling move uses an independent four percent cosmetic roll', () => {
@@ -383,11 +395,11 @@ test('a powerbomb folds the received waist, seats it overhead, slams the back an
 
 test('all five floor finishes reserve the loser until an actual two-ankle hold completes one full turn', () => {
   for (const kind of ['clothesline', 'spinebuster', 'powerbomb', 'backbodydrop', 'scoopslam']) for (const side of [-1, 1]) {
-    const values = contacted(kind, side), contactFrame = arenaWrestlingMoveTargets(values.actual, values.contactAt, center, values.initial, side);
-    const grabAt = contactFrame.pickupReadyAt + ARENA_WRESTLING_MOVE_TIMING.ankleReach;
+    const values = contacted(kind, side), grabAt = firstPickupClock(values, side);
     const initialFloor = arenaWrestlingMoveTargets(values.actual, grabAt, center, values.initial, side);
     assert.equal(initialFloor.victimHeight, 0); assert.equal(initialFloor.victimPose, 'stunned'); assert.equal(initialFloor.victimSlam.slump, 1);
     assert.equal(initialFloor.gripMode, 'ankle'); assert.equal(initialFloor.canGrabAnkle, true); assert.equal(initialFloor.canRelease, false);
+    assert.equal(arenaWrestlingMoveTargets(values.actual, grabAt - 1, center, values.initial, side).canGrabAnkle, false, 'the hold cannot start before the actual completed walk and reach');
     assert.equal(arenaWrestlingMoveTargets({ ...values.actual, releaseAt: undefined }, grabAt, center, values.initial, side).releaseAt, null);
     const held = { ...values.actual, ankleGripAt: grabAt };
     const grip = arenaWrestlingMoveTargets(held, held.ankleGripAt, center, values.initial, side);
@@ -526,15 +538,20 @@ test('an incoming scoop cradles the chest, pivots the hip and lands the complete
   assert.equal(arenaWrestlingMoveTargets(values.actual, floorAt + ARENA_SCOOP_RECOVERY_TIMING.stand, center, values.initial).stage, 'groggy');
   const beginningReach = arenaWrestlingMoveTargets(values.actual, floor.pickupReadyAt, center, values.initial);
   assert.equal(beginningReach.ankleApproach, 0); assert.equal(beginningReach.canGrabAnkle, false);
-  const midwayReach = arenaWrestlingMoveTargets(values.actual, floor.pickupReadyAt + ARENA_WRESTLING_MOVE_TIMING.ankleReach / 2, center, values.initial);
-  assert.equal(midwayReach.ankleApproach, .5); assert.equal(midwayReach.canGrabAnkle, false);
-  assert.equal(arenaWrestlingMoveTargets(values.actual, floor.pickupReadyAt + ARENA_WRESTLING_MOVE_TIMING.ankleReach, center, values.initial).canGrabAnkle, true, 'only the completed normal-bone reach can establish the two-ankle hold');
-  const waiting = arenaWrestlingMoveTargets(values.actual, floor.pickupReadyAt + 700, center, values.initial);
+  assert.equal(beginningReach.driverPose, 'walk'); assert.equal(beginningReach.gripTargets, undefined, 'the moving caster keeps its arms free until reaching the real toes');
+  const arrivedAt = firstPickupClock(values, 1, frame => frame.driverPose === 'drag');
+  assert.ok(arrivedAt > floor.pickupReadyAt, 'the recovery is followed by an actual toe-side walk before the low reach begins');
+  const midwayReach = arenaWrestlingMoveTargets(values.actual, arrivedAt + ARENA_WRESTLING_MOVE_TIMING.ankleReach / 2, center, values.initial);
+  assert.ok(Math.abs(midwayReach.ankleApproach - .5) < 1e-8); assert.equal(midwayReach.canGrabAnkle, false);
+  const grabAt = firstPickupClock(values);
+  assert.ok(Math.abs(grabAt - arrivedAt - ARENA_WRESTLING_MOVE_TIMING.ankleReach) < .001, 'the full normal-bone reach follows arrival instead of elapsing during the walk');
+  assert.equal(arenaWrestlingMoveTargets(values.actual, grabAt, center, values.initial).canGrabAnkle, true, 'only the completed normal-bone reach can establish the two-ankle hold');
+  const waitingAt = grabAt + 300, waiting = arenaWrestlingMoveTargets(values.actual, waitingAt, center, values.initial);
   assert.equal(waiting.victimHeight, 0); assert.equal(waiting.gripMode, 'ankle'); assert.equal(waiting.canGrabAnkle, true); assert.equal(waiting.canRelease, false);
-  assert.equal(arenaWrestlingMoveTargets({ ...values.actual, releaseAt: undefined }, floor.pickupReadyAt + 700, center, values.initial).releaseAt, null, 'an omitted release clock cannot bypass the actual ankle grip');
+  assert.equal(arenaWrestlingMoveTargets({ ...values.actual, releaseAt: undefined }, waitingAt, center, values.initial).releaseAt, null, 'an omitted release clock cannot bypass the actual ankle grip');
   values.initial.ankles = [{ x: waiting.victim.x - 80, y: waiting.victim.y - 4 }, { x: waiting.victim.x - 84, y: waiting.victim.y - 13 }];
   values.initial.ankleDriver = { ...waiting.driver };
-  const held = { ...values.actual, ankleGripAt: floor.pickupReadyAt + 700 };
+  const held = { ...values.actual, ankleGripAt: waitingAt };
   const finishDuration = ARENA_SCOOP_FINISH_TIMING.ankleLoad + ARENA_SCOOP_FINISH_TIMING.ankleSpin;
   assert.equal(arenaWrestlingMoveTargets(held, held.ankleGripAt + finishDuration - 1, center, values.initial).canRelease, false);
   const tossing = arenaWrestlingMoveTargets(held, held.ankleGripAt + finishDuration, center, values.initial);

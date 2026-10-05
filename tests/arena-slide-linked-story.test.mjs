@@ -70,7 +70,7 @@ test('slide story and visible head words wait for the actual slide, ankle hook a
   assert.ok(planned);
   const candidates = order.map(id => ({ id, name: id, color: '#ffad72' }));
   const start = 1000, launchAt = 1800, hookAt = 2500;
-  const riseAt = hookAt + ARENA_SLIDE_TRIP_TIMING.hook + ARENA_SLIDE_TRIP_TIMING.fall;
+  const riseAt = hookAt + ARENA_SLIDE_TRIP_TIMING.fall;
   const kickReady = riseAt + ARENA_SLIDE_TRIP_TIMING.rise, kickAt = kickReady + 300;
   const round = { ...planned, start, impact: kickAt, resolve: kickAt + 1100, end: kickAt + 1100, timeScale: 1,
     slideTrip: { start, end: kickAt + 1100, launchAt, hookAt, kickAt } };

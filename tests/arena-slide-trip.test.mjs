@@ -115,7 +115,7 @@ test('the low slide begins with room left and carries running momentum through a
 test('one recorded ankle hook causes one fall, a complete rise, then a distinct real kick before the roll exit', () => {
   for (const side of [-1, 1]) {
     const origins = { driver: { x: 500 - side * 180, y: 416 }, victim: { x: 520, y: 416 }, hookVictim: { x: 523, y: 419 }, hookDriver: { x: 523 - side * 43, y: 419 }, kickTarget: { x: 523 - side * 8, y: 406 } };
-    const recorded = { ...window, launchAt: 1500, hookAt: 1800, kickAt: null }, fallEnd = recorded.hookAt + ARENA_SLIDE_TRIP_TIMING.hook + ARENA_SLIDE_TRIP_TIMING.fall;
+    const recorded = { ...window, launchAt: 1500, hookAt: 1800, kickAt: null }, fallEnd = recorded.hookAt + ARENA_SLIDE_TRIP_TIMING.fall;
     let falls = 0, previousAngle = 0;
     for (let at = recorded.hookAt; at < fallEnd + 1200; at += 16) {
       const frame = arenaSlideTripTargets(recorded, at, center, origins, side);

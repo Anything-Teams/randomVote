@@ -28,7 +28,7 @@ export type ArenaWrestlingMoveFrame = {
   active: boolean; side: 1 | -1; canPerform: boolean; missed: boolean; recovered: boolean;
   driver: ArenaPoint; victim: ArenaPoint; driverVelocity: ArenaPoint; victimVelocity: ArenaPoint;
   driverFacing: 1 | -1; victimFacing: 1 | -1;
-  driverPose: 'run' | 'guard' | 'grapple' | 'overhead' | 'dropkick' | 'powerbomb' | 'bulldog' | 'backbodydrop' | 'spinebuster' | 'scoopslam' | 'land' | 'recover' | 'trip' | 'drag' | 'throw';
+  driverPose: 'run' | 'walk' | 'guard' | 'grapple' | 'overhead' | 'dropkick' | 'powerbomb' | 'bulldog' | 'backbodydrop' | 'spinebuster' | 'scoopslam' | 'land' | 'recover' | 'trip' | 'drag' | 'throw';
   victimPose: 'run' | 'guard' | 'airborne' | 'roll' | 'stunned' | 'carried' | 'recover';
   driverPhase: number; victimPhase: number; driverHeight: number; victimHeight: number;
   driverAngle: number; victimAngle: number; driverSuspension: number; victimSuspension: number;
@@ -227,18 +227,23 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const floorSide = Math.sin(frame.victimAngle) < 0 ? -1 : 1;
     if (initial.floorVictim) frame.victim = { ...initial.floorVictim };
     const ankles = initial.ankles ?? [{ x: frame.victim.x - floorSide * 84, y: frame.victim.y - 4 }, { x: frame.victim.x - floorSide * 86, y: frame.victim.y - 13 }];
-    const pickupSide = kind === 'powerbomb' ? -floorSide : floorSide;
+    const pickupSide = kind === 'powerbomb' || kind === 'clothesline' || kind === 'scoopslam' ? -floorSide : floorSide;
     const midpoint = blend(ankles[0], ankles[1], .5), ankleGoal = initial.ankleDriver ?? { x: midpoint.x + pickupSide * 32, y: frame.victim.y };
     const approach = travel(initial.pickupDriver ?? frame.driver, ankleGoal, elapsed - pickupReadyAt, 160);
     frame.driver = ankleGripAt !== null && elapsed >= ankleGripAt ? { ...(initial.ankleDriver ?? approach.point) } : approach.point;
     frame.driverVelocity = ankleGripAt !== null && elapsed >= ankleGripAt ? zero() : approach.velocity;
-    frame.driverFacing = initial.ankleFacing ?? (midpoint.x >= frame.driver.x ? 1 : -1);
+    const walkingPickup = kind === 'clothesline' || kind === 'scoopslam';
+    const arrivedAt = pickupReadyAt + approach.duration;
+    const walking = walkingPickup && elapsed < arrivedAt && (ankleGripAt === null || elapsed < ankleGripAt);
+    frame.driverFacing = walking ? pickupSide < 0 ? -1 : 1 : initial.ankleFacing ?? (midpoint.x >= frame.driver.x ? 1 : -1);
     const gripAge = ankleGripAt === null ? -1 : elapsed - ankleGripAt;
-    frame.driverPose = 'drag';
+    frame.driverPose = walking ? 'walk' : 'drag';
     frame.driverAngle = 0; frame.driverSlam = undefined;
-    frame.gripTargets = ankles; frame.gripMode = 'ankle'; frame.gripStrength = 1;
-    frame.ankleApproach = ease((elapsed - pickupReadyAt) / timing.ankleReach);
-    frame.canGrabAnkle = ankleGripAt === null && (frame.ankleApproach === undefined || frame.ankleApproach === 1);
+    frame.gripMode = 'ankle';
+    frame.ankleApproach = walking ? 0 : ease((elapsed - (walkingPickup ? arrivedAt : pickupReadyAt)) / timing.ankleReach);
+    frame.gripTargets = walking ? undefined : ankles;
+    frame.gripStrength = walkingPickup ? frame.ankleApproach ?? 0 : 1;
+    frame.canGrabAnkle = ankleGripAt === null && frame.ankleApproach === 1 && (!(kind === 'powerbomb' || walkingPickup) || elapsed >= arrivedAt);
     frame.canRelease = ankleGripAt !== null && elapsed >= requiredReleaseAt && !released;
     if (ankleGripAt !== null && elapsed >= ankleGripAt) {
       const load = ease(gripAge / ankleLoad), spinAge = released ? Math.min(gripAge, releaseAt! - ankleGripAt!) : gripAge;
