@@ -52,8 +52,10 @@ for (const side of [-1, 1]) for (const delta of [16, 50]) test(`a shared pickup 
       return actor;
     });
     let priorVictim = floor, raised = false, loaded = false, releaseClock;
-    for (let age = 0; age <= 900 + delta; age += delta) {
-      const load = smooth(age / 160), lift = smooth((age - 160) / 360), backload = smooth((age - 520) / 160), heave = smooth((age - 680) / 220);
+    // Use the live pickup cadence: compressing its 1600ms into 900ms moves
+    // the held body beyond normal arm reach while a supporting sole is planted.
+    for (let age = 0; age <= 1600 + delta; age += delta) {
+      const load = smooth(age / 300), lift = smooth((age - 300) / 600), backload = smooth((age - 900) / 300), heave = smooth((age - 1200) / 400);
       const height = 70 * lift - 6 * backload * (1 - heave) + 14 * heave;
       Object.assign(victim, { y: 416 - height, carryStretch: lift, pairLoad: load, pairLift: lift, pairBackload: backload, pairHeave: heave, suspension: lift, angle: side * Math.PI * (.47 + lift * .03) });
       const predicted = sampleArenaFighterContacts(victim, 1250 + age);
@@ -76,12 +78,13 @@ for (const side of [-1, 1]) for (const delta of [16, 50]) test(`a shared pickup 
         bones(actor);
         rig.hands.forEach((hand, arm) => {
           assert.ok(distance(hand, ends[1 - arm]) < .001, `each actual support keeps its painted shoulder or ankle: ${index}/${slot}/${age}`);
-          assert.ok((hand.x - rig.shoulders[arm].x) * actor.facing > 16, 'a caster never holds the body behind its shoulder');
-          assert.ok((rig.elbows[arm].x - rig.shoulders[arm].x) * actor.facing > -3, 'the upper arm cannot fold backward behind the torso');
+          assert.ok((hand.x - rig.shoulders[arm].x) * actor.facing > (actor.gripMode === 'shoulder' ? 0 : 16), 'each shoulder support stays in front while the ankle holder keeps its extended receiving stance');
+          const elbowBase = actor.gripMode === 'shoulder' ? rig.waist : rig.shoulders[arm];
+          assert.ok((rig.elbows[arm].x - elbowBase.x) * actor.facing > -3, 'a shoulder support can fold into the chest without reaching behind the torso');
         });
         assert.equal(actor.animation.airborne, false); assert.ok(actor.animation.feet.some(foot => foot.lift === 0), `load and heave retain a real supporting sole while the other heel adjusts: ${index}/${slot}/${age}`);
-        if (age > 80 && age < 160) { assert.ok(actor.animation.motion.crouch > 10, 'both carriers visibly receive the floor load with bent knees'); loaded = true; }
-        if (age > 520 && age < 680) {
+        if (age > 180 && age < 300) { assert.ok(actor.animation.motion.crouch > 10, 'both carriers visibly receive the floor load with bent knees'); loaded = true; }
+        if (age > 900 && age < 1200) {
           assert.ok(held.waist.y > rig.head.y && held.waist.y < rig.waist.y, 'the victim rests between waist and chest, below the carrier head'); raised = true;
         }
       });

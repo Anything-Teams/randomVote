@@ -277,7 +277,24 @@ export function arenaCarryHolderPoint(actor: ArenaActor, endpoints: readonly Poi
   if (actor.pose === 'pairlift') ground.y = midpoint.y - handMidpoint.y;
   // The intersection of the two reach disks is convex. Projecting the natural
   // low hand position into it keeps the pickup continuous as the hips rise.
-  const frontLimit = actor.pose === 'pairlift' ? Math.min(...centers.map(center => center.x * actor.facing)) - actor.scale * 10 : Infinity;
+  const shoulderPickup = actor.pose === 'pairlift' && actor.gripMode === 'shoulder';
+  const frontClearance = shoulderPickup ? 6 : 10;
+  let frontLimit = actor.pose === 'pairlift' ? Math.min(...centers.map(center => center.x * actor.facing)) - actor.scale * frontClearance : Infinity;
+  if (shoulderPickup) {
+    // The two shoulder holds have different heights. Keep the natural
+    // underhand stance inside both reach disks even at their narrow edge.
+    const dx = centers[1].x - centers[0].x, dy = centers[1].y - centers[0].y, separation = Math.hypot(dx, dy);
+    const boundary = centers.map(center => ({ x: center.x - actor.facing * radius, y: center.y }));
+    if (separation > .001 && separation <= radius * 2) {
+      const middle = pointMix(centers[0], centers[1], .5), reach = Math.sqrt(Math.max(0, radius * radius - separation * separation / 4));
+      for (const sign of [-1, 1]) boundary.push({ x: middle.x - dy / separation * reach * sign, y: middle.y + dx / separation * reach * sign });
+    }
+    const feasible = boundary.filter(point => centers.every(center => Math.hypot(point.x - center.x, point.y - center.y) <= radius + .001));
+    if (feasible.length) {
+      const shoulderRearLimit = Math.min(...feasible.map(point => point.x * actor.facing));
+      frontLimit = Math.max(frontLimit, shoulderRearLimit);
+    }
+  }
   for (let pass = 0; pass < 64; pass++) {
     for (const center of centers) ground = reachable(center, ground, radius, joint ? .7 * actor.scale : .04 * actor.scale);
     // Shared pickups are supported in front of each torso. A preferred root
@@ -1019,7 +1036,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   // overhead. Holding the far shoulder forward through this whole lift
   // brought its wrist through the shoulder and folded the elbow completely.
   const cradleShoulder = pose === 'scoopslam' && actor.gripMode === 'cradle' ? 1 - clamp(actor.scoopLoad ?? 0) * (1 - clamp(actor.scoopLift ?? 0)) : 1;
-  const shoulderContact = spin || released && releaseWeight > 0 ? 0 : jointOverhead ? motion.contact * (1 - clamp(actor.overheadRaise ?? 1)) : anklePivot ? motion.contact * (1 - clamp(actor.ankleThrowProgress!)) : motion.contact * cradleShoulder;
+  const shoulderPickupContact = pairLift && actor.gripMode === 'shoulder' ? 0 : undefined;
+  const shoulderContact = spin || released && releaseWeight > 0 ? 0 : shoulderPickupContact ?? (jointOverhead ? motion.contact * (1 - clamp(actor.overheadRaise ?? 1)) : anklePivot ? motion.contact * (1 - clamp(actor.ankleThrowProgress!)) : motion.contact * cradleShoulder);
   const shoulders = [mix(-shoulderWidth, 3.5, shoulderContact), shoulderWidth].map(offset => ({ x: offset * (casterPlane ? across.x : turnWidth), y: -20 - motion.shoulderLift + (casterPlane ? offset * across.y : 0) }));
   const chestBridge = scoopStance && motion.shoulderLift > 3 ? [
     { x: -bodyWidth / 2, y: -22 }, { x: shoulders[0].x / turnWidth, y: shoulders[0].y },
@@ -1054,7 +1072,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   if (released) hands = hands.map((hand, arm) => pointMix(hand, released.snapshot.hands[arm], releaseWeight));
   const overheadReach = pose === 'overhead' ? clamp(actor.overheadRaise ?? 1) * (1 - carrierSettle) : pose === 'scoop' ? ease((clamp(actor.scoopStroke ?? phase) - .18) / .54) : 0;
   const armRaise = jointOverhead ? 0 : overheadReach;
-  const upperArm = mix(11, 14, armRaise), lowerArm = mix(10.5, 14, armRaise), armReach = mix(21.3, 27.8, armRaise);
+  const upperArm = mix(11, 14, armRaise), lowerArm = mix(10.5, 14, armRaise), armReach = pairLift && actor.gripMode === 'shoulder' ? upperArm + lowerArm - .02 : mix(21.3, 27.8, armRaise);
   hands = hands.map((hand, arm) => reachable(shoulders[arm], hand, armReach, Math.abs(upperArm - lowerArm) + .02));
   if (pose === 'clap' && motion.contact < .03 && target.frontX - target.backX < 5.01 && hands[1].x - hands[0].x < 5.4) {
     // Resolve palm contact at the chest; two hands stay distinct and share one height.
@@ -1078,10 +1096,9 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
       // bones turn smoothly from the actual floor pickup during loading.
       return knee(shoulders[arm], hand, upperArm, lowerArm, arm === 0 ? -1 : 1);
     }
-    // The upper support opens above its palm while the lower support receives
-    // the load below it. Bending both elbows underneath crossed one forearm
-    // through the opposite upper arm as the horizontal body rose.
-    if (pairLift) return knee(shoulders[arm], hand, upperArm, lowerArm, arm === 0 ? 1 : -1);
+    // Receive the shoulder weight from underneath with two separate arm
+    // bases. The ankle holder keeps its split support around the two heels.
+    if (pairLift) return knee(shoulders[arm], hand, upperArm, lowerArm, actor.gripMode === 'shoulder' ? -1 : arm === 0 ? 1 : -1);
     if (state.ankleReach && actor.ankleApproach !== undefined && actor.pivotTurn === undefined && !actor.carrierRelease) {
       // Reach below the chest on either side of the fallen body. The same
       // IK sign lifts an elbow toward the head when the ankles are ahead.
