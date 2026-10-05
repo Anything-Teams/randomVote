@@ -33,6 +33,6 @@ test('the horizontal ankle ellipse passes in front and behind with a recognizabl
     depth.push(Math.hypot(basis[2], basis[3]) / 2.04); projectedSides.push(projection.radial.y);
     assert.ok(Math.abs(basis[0] * basis[3] - basis[1] * basis[2]) > .7, 'the actual ankle transform never collapses a body to a line');
   }
-  assert.ok(Math.min(...depth) >= .55 - 1e-12 && Math.max(...depth) <= 1 + 1e-12, 'the front and back crossings retain at least half the recognizable body length');
-  assert.ok(Math.min(...projectedSides) < -.5 && Math.max(...projectedSides) > .5, 'the held body actually crosses both sides of the caster instead of only rocking above its hands');
+  assert.ok(Math.min(...depth) >= .5 - 1e-12 && Math.max(...depth) <= 1 + 1e-12, 'the front and back crossings retain at least half the recognizable body length');
+  assert.ok(Math.min(...projectedSides) <= -.5 && Math.max(...projectedSides) >= .5, 'the held body actually crosses both sides of the caster instead of only rocking above its hands');
 });

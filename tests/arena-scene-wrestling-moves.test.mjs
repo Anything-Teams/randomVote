@@ -146,19 +146,19 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         assert.equal(driver.pivotTurn, frame.pivotTurn, 'the actual caster follows the recorded full-turn clock');
         assert.equal(victim.spinSuspension.gripBoth, true, 'both real foot ends are supported throughout the rotation');
         if (frame.ankleSpin.weight === 1) {
-          assert.ok(paintedVictim.head.y <= driver.depthY + 3, 'the crown clears the actual sand plane while the normal body passes beneath the supporting hands');
+          assert.ok(paintedVictim.head.y <= Math.max(driver.depthY, victim.depthY) + 3, 'the crown clears its actual sand depth while the normal body passes in front of the supporting hands');
           for (let arm = 0; arm < 2; arm++) {
             assert.ok(Math.abs(distance(paintedDriver.shoulders[arm], paintedDriver.elbows[arm]) - 11 * driver.scale) < .001 && Math.abs(distance(paintedDriver.elbows[arm], paintedDriver.hands[arm]) - 10.5 * driver.scale) < .001, 'raising the ankle support keeps both complete normal arm sections');
           }
           const matrix = victim.animation.spinSnapshot.matrix;
           const paintedAngle = Math.atan2(matrix[1] * victim.facing, matrix[0] * victim.facing);
-          const radial = { x: Math.cos(frame.ankleSpin.orbit), y: -.55 * Math.sin(frame.ankleSpin.orbit) };
+          const radial = { x: Math.cos(frame.ankleSpin.orbit), y: -.50 * Math.sin(frame.ankleSpin.orbit) };
           const expectedAngle = Math.atan2(-radial.x, radial.y);
           assert.ok(Math.abs(Math.atan2(Math.sin(paintedAngle - expectedAngle), Math.cos(paintedAngle - expectedAngle))) < 1e-8, 'the actual body circles the ankle support instead of resetting its orbital angle');
           assert.equal(frame.ankleSpin.planar, true, 'the ankle swing crosses both halves of the horizontal plane');
           const width = Math.hypot(matrix[0], matrix[1]) / victim.scale, depth = Math.hypot(matrix[2], matrix[3]) / victim.scale;
           assert.ok(Math.abs(width - (.42 + Math.abs(Math.sin(frame.ankleSpin.orbit)) * .58)) < 1e-8 && width >= .42 - 1e-8, 'depth turns retain full visible body width of the existing wrist spin');
-          assert.ok(Math.abs(depth - Math.hypot(radial.x, radial.y)) < 1e-8 && depth >= .55 - 1e-8, 'the complete rotating body remains readable at every depth phase');
+          assert.ok(Math.abs(depth - Math.hypot(radial.x, radial.y)) < 1e-8 && depth >= .50 - 1e-8, 'the complete rotating body retains at least half its length at every depth phase');
           const skeleton = victim.animation.skeleton;
           for (let leg = 0; leg < 2; leg++) {
             assert.ok(distance(skeleton.hips[leg], skeleton.knees[leg]) <= 11.001 && distance(skeleton.knees[leg], skeleton.feet[leg]) <= 11.001, 'both supported legs keep complete normal bones during the full revolution');
@@ -325,7 +325,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
             const priorAngle = Math.atan2(previousSpinMatrix[1] * victim.facing, previousSpinMatrix[0] * victim.facing);
             const currentAngle = Math.atan2(exit.spinSnapshot.matrix[1] * victim.facing, exit.spinSnapshot.matrix[0] * victim.facing);
             const angularStep = Math.abs(Math.atan2(Math.sin(currentAngle - priorAngle), Math.cos(currentAngle - priorAngle)));
-            assert.ok(angularStep <= Math.abs(frame.ankleOrbitVelocity) * frameDelta / 1000 / .55 + 1e-8, 'the release turns only by the elapsed visible orbital motion');
+            assert.ok(angularStep <= Math.abs(frame.ankleOrbitVelocity) * frameDelta / 1000 / .50 + 1e-8, 'the release turns only by the elapsed visible orbital motion');
           }
           for (const [point, prior] of paintedPoints(paintedVictim).map((point, index) => [point, paintedPoints(previousRig)[index]])) {
             const expected = transport ? project(transport, prior) : prior;

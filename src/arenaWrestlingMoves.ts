@@ -1,5 +1,5 @@
 import type { ArenaPoint } from './arenaLogic';
-import { arenaAnkleSwingProjection } from './arenaAnkleSwing';
+import { arenaAnkleSwingProjection, arenaAnkleSwingCasterProjection } from './arenaAnkleSwing';
 export { arenaAnkleSwingProjection } from './arenaAnkleSwing';
 
 export type ArenaWrestlingMoveKind = 'clothesline' | 'dropkick' | 'powerbomb' | 'backbodydrop' | 'spinebuster' | 'scoopslam';
@@ -258,7 +258,10 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
       const projection = arenaAnkleSwingProjection(orbit), targetAngle = projection.angle;
       const angle = frame.victimAngle + Math.atan2(Math.sin(targetAngle - frame.victimAngle), Math.cos(targetAngle - frame.victimAngle)) * load;
       const width = mix(1, projection.width, load);
-      const raised = { x: frame.driver.x - Math.cos(orbit) * 18, y: frame.driver.y - 80 + Math.sin(orbit) * 5 };
+      const caster = arenaAnkleSwingCasterProjection(orbit);
+      // Hold the feet in front of the lower chest while the whole caster
+      // follows the same orbit. The arms no longer orbit at neck height.
+      const raised = { x: frame.driver.x + caster.front.x * 18, y: frame.driver.y - 60 + caster.front.y * 18 };
       const center = blend(midpoint, raised, load);
       const halfSpan = mix(distance(ankles[0], ankles[1]) / 2, 9 * 2.04 / 2, load);
       const axis = { x: Math.cos(angle) * frame.victimFacing * width, y: Math.sin(angle) * frame.victimFacing * width };

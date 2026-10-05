@@ -1,7 +1,7 @@
 /** The ankle-held body crosses both halves of a horizontal swing, with readable depth. */
 export function arenaAnkleSwingProjection(orbit: number) {
-  const radial = { x: Math.cos(orbit), y: -.55 * Math.sin(orbit) };
-  const radialDerivative = { x: -Math.sin(orbit), y: -.55 * Math.cos(orbit) };
+  const radial = { x: Math.cos(orbit), y: -.50 * Math.sin(orbit) };
+  const radialDerivative = { x: -Math.sin(orbit), y: -.50 * Math.cos(orbit) };
   const length = Math.hypot(radial.x, radial.y), width = .42 + Math.abs(Math.sin(orbit)) * .58;
   return {
     radial, radialDerivative, length, width,
@@ -9,6 +9,16 @@ export function arenaAnkleSwingProjection(orbit: number) {
     angleDerivative: (radial.x * radialDerivative.y - radial.y * radialDerivative.x) / (length * length),
     widthDerivative: Math.sign(Math.sin(orbit)) * Math.cos(orbit) * .58,
     lengthDerivative: (radial.x * radialDerivative.x + radial.y * radialDerivative.y) / length,
+  };
+}
+
+/** Unmirrored ground axes: face the outward body and turn the shoulders across it. */
+export function arenaAnkleSwingCasterProjection(orbit: number) {
+  const c = Math.cos(orbit), s = Math.sin(orbit);
+  return {
+    front: { x: -c, y: .50 * s },
+    across: { x: s, y: .50 * c },
+    faceDirection: s,
   };
 }
 
