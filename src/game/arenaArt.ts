@@ -181,7 +181,32 @@ function drawScene(ctx: CanvasRenderingContext2D, time: number, intensity: numbe
   ctx.restore();
 }
 
-/** Fixed 1000×620 scenery; animation uses only the caller's clock and preserves its canvas state. */
+/** Extend the side corridors with geometry while the central bitmap stays at native size. */
+function drawSideCorridors(ctx: CanvasRenderingContext2D) {
+  const extension = 112;
+  ctx.save(); ctx.beginPath(); ctx.rect(-extension, 0, extension, HEIGHT); ctx.rect(WIDTH, 0, extension, HEIGHT); ctx.clip();
+  const wall = ctx.createLinearGradient(0, 0, 0, HEIGHT); wall.addColorStop(0, '#122632'); wall.addColorStop(.42, '#334852'); wall.addColorStop(1, '#293b3c');
+  const floor = ctx.createLinearGradient(0, 286, 0, 610); floor.addColorStop(0, '#344a4b'); floor.addColorStop(1, '#203539');
+  for (const left of [-extension, WIDTH]) {
+    ctx.fillStyle = wall; ctx.fillRect(left, 0, extension, HEIGHT);
+    panel(ctx, left, 238, extension, 59, '#172e37');
+    ctx.fillStyle = floor; ctx.fillRect(left, 287, extension, HEIGHT - 287);
+    for (let row = 0; row < 7; row++) {
+      const y = 298 + row * 47;
+      panel(ctx, left, y, extension, 1, '#69807728');
+      for (let joint = 0; joint < 2; joint++) panel(ctx, left + 16 + joint * 48 + row % 2 * 24, y + 1, 1, 46, '#69807718');
+    }
+    // Match the tangent and colors of the two rails at the bitmap edge.
+    const edge = left < 0 ? 0 : WIDTH, end = left < 0 ? -extension : WIDTH + extension;
+    for (const [y, color, thickness] of [[233, '#b6c0ad', 3], [244, '#617971', 2]] as const) {
+      ctx.strokeStyle = color; ctx.lineWidth = thickness; ctx.beginPath(); ctx.moveTo(edge, y); ctx.lineTo(end, y - extension * .042); ctx.stroke();
+    }
+    panel(ctx, edge + (left < 0 ? -62.5 : 62.5), 233 - 62.5 * .042, 3, 23, '#839c91');
+  }
+  ctx.restore();
+}
+
+/** Native 1000×620 scenery with side corridors; animation preserves the caller's canvas state. */
 export function drawArenaScenery(ctx: CanvasRenderingContext2D, clock: number, options: ArenaSceneryOptions = {}) {
   const reduced = options.reduced ?? false, time = reduced || !Number.isFinite(clock) ? 0 : clock;
   const intensity = reduced ? 0 : clamp(Number.isFinite(options.intensity) ? options.intensity! : .65);
@@ -191,10 +216,10 @@ export function drawArenaScenery(ctx: CanvasRenderingContext2D, clock: number, o
   }
   if (!cachedFrame) { cachedFrame = document.createElement('canvas'); cachedFrame.width = WIDTH; cachedFrame.height = HEIGHT; }
   const target = cachedFrame.getContext('2d');
-  if (!target) { drawScene(ctx, time, intensity, reduced); return; }
+  if (!target) { drawSideCorridors(ctx); drawScene(ctx, time, intensity, reduced); return; }
   // A paused or reduced-motion frame requires one bitmap draw, not hundreds of crowd updates.
   if (cachedTime !== time || cachedIntensity !== intensity || cachedReduced !== reduced) {
     drawScene(target, time, intensity, reduced); cachedTime = time; cachedIntensity = intensity; cachedReduced = reduced;
   }
-  ctx.save(); ctx.drawImage(cachedFrame, 0, 0); ctx.restore();
+  ctx.save(); drawSideCorridors(ctx); ctx.drawImage(cachedFrame, 0, 0); ctx.restore();
 }

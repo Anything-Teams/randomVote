@@ -22,6 +22,7 @@ import { ARENA_DRAGGED_ANKLE_THROW_HEIGHT, ARENA_DRAGGED_ANKLE_THROW_PACE, ARENA
 import { arenaAnkleSwingBasis, arenaAnkleSwingProjection } from './arenaAnkleSwing';
 import { arenaAnkleRimFlightSnapshot } from './arenaAnkleRimFlight';
 import { arenaAnkleFlightSnapshot } from './arenaAnkleFlight';
+import { arenaAnkleLanding } from './arenaAnkleLanding';
 import { createArenaCamera, sampleArenaCamera, type ArenaCamera } from './arenaCamera';
 import { presentArenaCanvasFrame } from './arenaCanvasFrame';
 import { arenaDelayRound } from './arenaTimeline';
@@ -111,6 +112,25 @@ function clash(ctx: CanvasRenderingContext2D, point: ArenaPoint, age: number, st
     const angle = ray * Math.PI / 5, distance = (12 + p * 29) * strength;
     ctx.save(); ctx.translate(point.x + Math.cos(angle) * distance, point.y + Math.sin(angle) * distance * .7); ctx.rotate(angle);
     ctx.fillStyle = ray % 2 ? '#fff1c8' : '#ffcd68'; ctx.fillRect(0, -2 * strength, (9 + (1 - p) * 8) * strength, 4 * strength); ctx.restore();
+  }
+  ctx.restore();
+}
+
+/** A fast, low burst marks the real outside-floor contact, below the body. */
+function ankleLandingDust(ctx: CanvasRenderingContext2D, point: ArenaPoint, frame: ReturnType<typeof arenaAnkleLanding>) {
+  if (frame.dust <= 0) return;
+  ctx.save();
+  const spread = frame.dustProgress;
+  if (frame.impact > 0) {
+    ctx.globalAlpha = frame.impact * .8; ctx.strokeStyle = '#ffe4aa'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.ellipse(point.x, point.y + 3, 16 + spread * 92, 4 + spread * 16, 0, 0, Math.PI * 2); ctx.stroke();
+  }
+  for (let particle = 0; particle < 24; particle++) {
+    const angle = particle * 2.399, radius = (32 + particle % 5 * 15) * spread;
+    const rise = Math.sin(spread * Math.PI) * (12 + particle % 4 * 5);
+    ctx.globalAlpha = frame.dust * (particle % 3 ? .72 : .9);
+    ctx.fillStyle = particle % 3 ? '#d9bb88' : '#ffedbe';
+    ctx.fillRect(point.x + Math.cos(angle) * radius, point.y + Math.sin(angle) * radius * .19 - rise, 5 + particle % 4 * 2, 3 + particle % 3);
   }
   ctx.restore();
 }
@@ -2216,6 +2236,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     const dodgeFlight = dodge ? { x: dodge.charger.x, y: dodge.charger.y - dodge.chargerHeight, groundX: dodge.charger.x, groundY: dodge.charger.y, height: dodge.chargerHeight, angle: dodge.chargerAngle * (1 - ease(dodgeAge / (500 * unit))), phase: clamp(age / (650 * unit)), stage: dodgeAge < 0 ? 'fall' as const : dodgeAge < 220 * unit ? 'land' as const : dodgeAge < 720 * unit ? 'recover' as const : 'walk' as const } : undefined;
     const floorTiming = isArenaFloorDrag(exit.round) && !exit.spinFlight ? arenaFloorExitTiming(exit.round, unit) : undefined;
     const pushFlight = doubleRush ? arenaPairPushFlight(age, exit.origin, exit.landing, exit.side, unit, { speed: exit.velocity || ARENA_PAIR_PUSH_SPEED, angle: exit.angle }) : undefined;
+    const ankleLanding = exit.spinFlight?.planarOrbit !== undefined && !exit.floorThrow
+      ? arenaAnkleLanding(reduced ? -1 : age - exit.spinFlight.duration, exit.side) : undefined;
     const spinFlight = exit.spinFlight ? (() => {
       const released = exit.spinFlight, duration = released.duration, p = clamp(age / duration), time = Math.min(age, duration) / 1000;
       const x = exit.origin.x + released.velocity.x * time;
@@ -2227,7 +2249,10 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       const rotationDuration = released.rotationDuration ?? duration;
       const rotationTime = Math.min(age, rotationDuration) / 1000, rotationPhase = clamp(age / rotationDuration);
       const turn = released.angularVelocity * rotationTime * (1 - rotationPhase / 2), angle = exit.angle + turn;
-      return { x, y, groundX: x, groundY, height, angle: age < duration ? angle : angle * (1 - ease((age - duration) / 180)), phase: p,
+      // Settle the physical angle, rather than unwinding a saved full revolution.
+      // The brief rebound moves the complete body and leaves its floor depth fixed.
+      const landingAngle = ankleLanding ? Math.atan2(Math.sin(angle), Math.cos(angle)) : angle;
+      return { x, y: y - (ankleLanding?.bounce ?? 0), groundX: x, groundY, height: height + (ankleLanding?.bounce ?? 0), angle: age < duration ? angle : landingAngle * (1 - ease((age - duration) / 180)) + (ankleLanding?.rotation ?? 0), phase: ankleLanding && age >= duration && age < duration + 180 ? clamp((age - duration) / 180) : p,
         stage: age < duration ? 'flight' as const : age < duration + 180 ? 'land' as const : age < duration + 560 ? 'recover' as const : 'walk' as const };
     })() : undefined;
     const flight = spinFlight ?? dodgeFlight ?? pairFlight ?? pushFlight ?? arenaTechniqueExit(exit.round, age, exit.origin, exit.landing, exit.side, unit, { lift: exit.lift, angle: exit.angle }) ?? (exit.round.tactic === 'bait' ? arenaChargeFall(age, exit.origin, exit.landing, exit.side, unit, exit.velocity) : exit.round.tactic === 'edge' || exit.round.tactic === 'shove' || exit.round.tactic === 'double-shove' && exit.round.rushOutcome !== 'counter-throw' ? arenaEdgeFall(age, exit.origin, exit.landing, exit.side, unit) : arenaThrow(age, exit.origin, exit.landing, exit.side, unit, { lift: exit.lift, angle: exit.angle, immediate: !!exit.round.wrestlingMove || !!exit.round.supermanPunch || ['ram', 'spin', 'armspin'].includes(exit.round.tactic) || !!exit.round.rushOutcome, rotation: exit.round.tactic === 'ram' || exit.round.tactic === 'sidekick' ? exit.side : undefined }));
@@ -2279,7 +2304,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         // Airborne rotation keeps the measured waist while the free body
         // restores ordinary proportions after leaving the ground projection.
         const finalTurn = exit.spinFlight.angularVelocity * (exit.spinFlight.rotationDuration ?? exit.spinFlight.duration) / 2000;
-        const turn = flight.stage === 'land' ? finalTurn : flight.angle - exit.angle, c = Math.cos(turn), s = Math.sin(turn);
+        const turn = flight.stage === 'land' ? finalTurn + (ankleLanding?.rotation ?? 0) : flight.angle - exit.angle, c = Math.cos(turn), s = Math.sin(turn);
         snapshot = { ...snapshot, matrix: [c * source[0] - s * source[1], s * source[0] + c * source[1], c * source[2] - s * source[3], s * source[2] + c * source[3], center.x + c * (source[4] - center.x) - s * (source[5] - center.y), center.y + s * (source[4] - center.x) + c * (source[5] - center.y)] };
       }
       const releaseWeight = flight.stage === 'hold' ? 1
@@ -2372,8 +2397,13 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     if (flight.stage === 'flight' || flight.stage === 'rim-toss') effects.push(() => { ctx.fillStyle = '#27332e40'; ctx.beginPath(); ctx.ellipse(flight.groundX, flight.groundY + 4, 32, 7, 0, 0, Math.PI * 2); ctx.fill(); });
     // Landing dust belongs to a real floor contact, never to a delayed drag or toss.
     if (!reduced && ['land', 'roll', 'recover'].includes(flight.stage)) {
-      const landingAge = (age - (exit.spinFlight?.duration ?? floorTiming?.tossUntil ?? 880 * unit)) / unit;
-      effects.push(() => dust(ctx, exit.landing.x, exit.landing.y, landingAge, 1.5));
+      if (ankleLanding) {
+        effects.push(() => ankleLandingDust(ctx, exit.landing, ankleLanding));
+        if (Math.abs(ankleLanding.shake) > Math.abs(collisionShake)) collisionShake = ankleLanding.shake;
+      } else {
+        const landingAge = (age - (exit.spinFlight?.duration ?? floorTiming?.tossUntil ?? 880 * unit)) / unit;
+        effects.push(() => dust(ctx, exit.landing.x, exit.landing.y, landingAge, 1.5));
+      }
     }
   }
   if (won) {
@@ -2433,7 +2463,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       }
     });
   }
-  const camera = sampleArenaCamera(sim.camera, { elapsed, final: !props.preview && !!exchange?.final && elapsed >= exchange.start && elapsed < exchange.resolve, fighters: order.slice(0, 2).map(id => actors.get(id)!).filter(Boolean), width: W, height: H, delta: props.paused ? 0 : delta, immediate: reset || reduced });
+  const rimExit = [...sim.exits.values()].filter(exit => exit.spinFlight?.planarOrbit !== undefined && !exit.floorThrow && exit.launchedAt !== undefined && elapsed >= exit.launchedAt && elapsed < exit.launchedAt + exit.spinFlight.duration + 450).sort((a, b) => b.launchedAt! - a.launchedAt!)[0];
+  const camera = sampleArenaCamera(sim.camera, { elapsed, final: !props.preview && !!exchange?.final && elapsed >= exchange.start && elapsed < exchange.resolve, fighters: order.slice(0, 2).map(id => actors.get(id)!).filter(Boolean), rimImpact: rimExit?.landing, width: W, height: H, delta: props.paused ? 0 : delta, immediate: reset || reduced });
   ctx.save(); ctx.translate(W / 2 + collisionShake, H / 2 + collisionShake * .35); ctx.scale(camera.zoom, camera.zoom); ctx.translate(-camera.x, -camera.y);
   drawArenaScenery(ctx, clock, { intensity: exchange?.tactic === 'team' || exchange?.tactic === 'betrayal' ? .8 : .35, reduced });
   effects.forEach(draw => draw());

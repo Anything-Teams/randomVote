@@ -40,3 +40,83 @@ test('paused seeks settle on the same framing and the podium returns to the wide
   for (let elapsed = 37016; elapsed <= 41000; elapsed += 16) sampleArenaCamera(camera, frame(elapsed, false, fighters));
   assert.ok(camera.zoom < 1.001 && Math.abs(camera.x - 500) < .5 && Math.abs(camera.y - 310) < .5);
 });
+
+test('the side landing corridor keeps the throw and both finalists visible at the first impact', () => {
+  for (const final of [false, true]) for (const side of [-1, 1]) for (const step of [16, 50]) for (const flightDuration of [650, 1307.5]) {
+    const camera = createArenaCamera(), impact = { x: side < 0 ? 0 : 1000, y: 436 };
+    const originX = 500 + side * 48;
+    sampleArenaCamera(camera, frame(0, final, [{ x: 500, y: 425 }, { x: originX, y: 425 }]));
+    let previousTime = 0, view;
+    for (let elapsed = step; previousTime < flightDuration;) {
+      elapsed = Math.min(elapsed, flightDuration);
+      const p = elapsed / flightDuration, thrown = { x: originX + (impact.x - originX) * p, y: 436 - Math.sin(Math.PI * p) * 136 };
+      view = sampleArenaCamera(camera, frame(elapsed, final, [{ x: 500, y: 425 }, thrown], { delta: elapsed - previousTime, rimImpact: impact }));
+      assert.ok(view.x - 500 / view.zoom >= -96 - 1e-7 && view.x + 500 / view.zoom <= 1096 + 1e-7, 'the shot stays within the actual side corridor');
+      if (!final) assert.equal(view.zoom, 1, 'a melee impact keeps the entire sand ring wide');
+      previousTime = elapsed; elapsed += step;
+    }
+    const radius = final || flightDuration > 650 ? 72 : 60;
+    for (const x of [impact.x - radius, impact.x + radius]) {
+      const screenX = 500 + (x - view.x) * view.zoom;
+      assert.ok(screenX >= -1e-7 && screenX <= 1000 + 1e-7, `the landing root and its ${radius}px body margin stay in the shot (${final ? 'final' : 'melee'}, ${side}, ${step}ms, flight ${flightDuration}ms)`);
+    }
+    if (final) {
+      const survivor = 500 + (500 - view.x) * view.zoom;
+      assert.ok(survivor > 70 && survivor < 930, 'preparing for the far landing retains the other finalist');
+      assert.ok(view.zoom >= 1 && view.zoom <= 1.4, 'the existing final zoom limits stay unchanged');
+    }
+  }
+});
+
+test('the landing allowance and side pan return continuously instead of snapping at the clamp', () => {
+  for (const final of [false, true]) for (const side of [-1, 1]) for (const step of [16, 50]) {
+    const camera = createArenaCamera(), fighters = [{ x: 500, y: 425 }, { x: side < 0 ? 0 : 1000, y: 436 }];
+    let previous = sampleArenaCamera(camera, frame(12000, final, fighters, { rimImpact: fighters[1], immediate: true }));
+    const paused = sampleArenaCamera(camera, frame(12000, false, fighters, { delta: 0 }));
+    assert.deepEqual(paused, previous, 'a paused frame cannot close the corridor');
+    let priorMargin = camera.rimMargin;
+    for (let elapsed = 12000 + step; elapsed <= 16000; elapsed += step) {
+      const view = sampleArenaCamera(camera, frame(elapsed, false, fighters, { delta: step }));
+      assert.ok(Math.abs(view.x - previous.x) < step * .5, 'closing the allowance cannot cause a sudden 96px clamp jump');
+      assert.ok(camera.rimMargin >= 0 && camera.rimMargin <= priorMargin && priorMargin - camera.rimMargin < step * .16);
+      assert.ok(view.x - 500 / view.zoom >= -camera.rimMargin - 1e-7 && view.x + 500 / view.zoom <= 1000 + camera.rimMargin + 1e-7);
+      previous = view; priorMargin = camera.rimMargin;
+    }
+    assert.ok(camera.rimMargin < .3 && Math.abs(camera.x - 500) < 1 && camera.zoom < 1.001);
+  }
+});
+
+test('reduced or immediate landing views settle safely and an immediate wide view removes the allowance', () => {
+  for (const side of [-1, 1]) {
+    const camera = createArenaCamera(), fighters = [{ x: 500, y: 425 }, { x: side < 0 ? 0 : 1000, y: 436 }];
+    const atImpact = sampleArenaCamera(camera, frame(23000, true, fighters, { delta: 0, immediate: true, rimImpact: fighters[1] }));
+    assert.equal(camera.rimMargin, 96);
+    for (const x of [fighters[1].x - 72, fighters[1].x + 72]) assert.ok(500 + (x - atImpact.x) * atImpact.zoom >= 0 && 500 + (x - atImpact.x) * atImpact.zoom <= 1000);
+    assert.deepEqual(sampleArenaCamera(camera, frame(23000, true, fighters, { delta: 0, rimImpact: fighters[1] })), atImpact);
+    assert.deepEqual(sampleArenaCamera(camera, frame(27000, false, fighters, { delta: 0, immediate: true })), { x: 500, y: 310, zoom: 1 });
+    assert.equal(camera.rimMargin, 0);
+  }
+});
+
+test('side corridors extend wall, paving and rail geometry without stretching the cached stadium', async () => {
+  const compiled = await build({ entryPoints: ['src/game/arenaArt.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
+  const { drawArenaScenery } = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
+  const commands = [], canvases = [], cachedCommands = [];
+  const context = output => new Proxy({ createLinearGradient: () => ({ addColorStop() {} }), createRadialGradient: () => ({ addColorStop() {} }) }, { get(object, key) { return key in object ? object[key] : (...args) => output.push({ key, args }); }, set(object, key, value) { object[key] = value; return true; } });
+  const previousDocument = globalThis.document;
+  globalThis.document = { createElement(type) { assert.equal(type, 'canvas'); const output = []; cachedCommands.push(output); const ctx = context(output), canvas = { width: 0, height: 0, getContext: () => ctx }; canvases.push(canvas); return canvas; } };
+  try {
+    const ctx = context(commands);
+    drawArenaScenery(ctx, 200, { intensity: .35 });
+    assert.deepEqual(canvases.map(canvas => [canvas.width, canvas.height]), [[1000, 620], [1000, 620]], 'architecture and crowd remain at native bitmap resolution');
+    assert.deepEqual(commands.filter(command => command.key === 'rect').map(command => command.args), [[-112, 0, 112, 620], [1000, 0, 112, 620]], 'both side corridors also cover the short impact shake');
+    assert.ok(commands.some(command => command.key === 'fillRect' && command.args[0] === -112 && command.args[2] === 112));
+    assert.ok(commands.some(command => command.key === 'fillRect' && command.args[0] === 1000 && command.args[2] === 112));
+    assert.equal(commands.some(command => command.key === 'fillText' || command.key === 'scale'), false, 'the extension paints no enlarged spectators or signs');
+    const blit = commands.filter(command => command.key === 'drawImage');
+    assert.equal(blit.length, 1); assert.deepEqual(blit[0].args, [canvases[1], 0, 0], 'the central stadium is still drawn once at its original size and coordinates');
+    const before = cachedCommands.map(output => output.length);
+    drawArenaScenery(ctx, 200, { intensity: .35 });
+    assert.deepEqual(cachedCommands.map(output => output.length), before, 'a paused scenery frame reuses both caches');
+  } finally { if (previousDocument === undefined) delete globalThis.document; else globalThis.document = previousDocument; }
+});
