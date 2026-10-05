@@ -89,6 +89,43 @@ function assertSupportedArmShape(actor, detail) {
 const intersectsViewport = values => Math.max(...values.map(point => point.x)) > 0 && Math.min(...values.map(point => point.x)) < 1000 && Math.max(...values.map(point => point.y)) > 0 && Math.min(...values.map(point => point.y)) < 620;
 const observedSides = new Set();
 
+function crossedArmBones(firstStart, firstEnd, secondStart, secondEnd) {
+  const cross = (a, b) => a.x * b.y - a.y * b.x;
+  const direction = (from, to) => ({ x: to.x - from.x, y: to.y - from.y });
+  const first = direction(firstStart, firstEnd), second = direction(secondStart, secondEnd), between = direction(firstStart, secondStart);
+  const denominator = cross(first, second);
+  if (Math.abs(denominator) < 1e-8) return false;
+  const alongFirst = cross(between, second) / denominator, alongSecond = cross(between, first) / denominator;
+  // Sharing a projected endpoint is harmless. An opposite forearm cutting
+  // through the interior of an upper arm makes the supporting arms look crossed.
+  return alongFirst > .001 && alongFirst < .999 && alongSecond > .001 && alongSecond < .999;
+}
+
+for (const reversed of [false, true]) for (const delta of [16, 50]) test(`the physical left helper lifts with separate connected support arms (${reversed ? 'reversed' : 'normal'}/${delta}ms)`, () => {
+  const scene = game(reversed, delta);
+  let frames = 0, previous;
+  for (let elapsed = 0; elapsed <= planned.resolve; elapsed += delta) {
+    const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
+    if (!contact?.pairCarryOrigins?.pickup || contact.round.pairPickupAt === null) continue;
+    const frame = arenaPairRushTargets(contact.round, elapsed, contact.center, contact.chargerOrigin, contact.pairCarryOrigins);
+    if (frame.stage !== 'lift' || frame.pairLift < .03 || frame.pairLift > .95) continue;
+    const helper = frame.pairIds.map(id => actors.get(id)).sort((a, b) => a.x - b.x)[0];
+    const rig = helper.animation.contactPoints, victimRig = actors.get(planned.victim).animation.contactPoints;
+    const heldPoints = helper.gripMode === 'shoulder' ? victimRig.shoulders : victimRig.feet;
+    const detail = `${reversed}/${delta}/${elapsed}/${helper.candidate.id}/${helper.gripMode}`;
+    assertSupportedArmShape(helper, detail);
+    heldPoints.forEach(point => assert.ok(Math.min(...rig.hands.map(hand => distance(hand, point))) < 4, `both actual palms stay on their original support endpoints: ${detail}`));
+    for (const arm of [0, 1]) assert.equal(crossedArmBones(rig.shoulders[arm], rig.elbows[arm], rig.elbows[1 - arm], rig.hands[1 - arm]), false, `a loaded upper arm cannot be crossed by its opposite forearm during the physical left helper's lift: ${detail}/${arm}`);
+    if (previous?.id === helper.candidate.id) {
+      const shift = { x: rig.origin.x - previous.rig.origin.x, y: rig.origin.y - previous.rig.origin.y };
+      for (const key of ['shoulders', 'elbows', 'hands']) rig[key].forEach((point, arm) => assert.ok(distance(point, { x: previous.rig[key][arm].x + shift.x, y: previous.rig[key][arm].y + shift.y }) < (delta === 16 ? 19 : 49), `opening the support arms cannot introduce a joint jump: ${detail}/${key}/${arm}`));
+    }
+    previous = { id: helper.candidate.id, rig: structuredClone(rig) };
+    frames++;
+  }
+  assert.ok(frames >= (delta === 16 ? 20 : 6), 'the naturally contacted encounter exercises the rising shoulder or ankle support, rather than a forced lift pose');
+});
+
 for (const reversed of [false, true]) test(`the live shared joint throw inherits its held rig, rises once and lands outside (${reversed ? 'reversed' : 'normal'} starting layout)`, () => {
   const scene = game(reversed);
   let previous, released = false, rising = false, falling = false, landed = false, peak = 0, lastHeight, lastClock, actualRound;

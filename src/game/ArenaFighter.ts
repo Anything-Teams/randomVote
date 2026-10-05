@@ -1044,6 +1044,10 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
       // bones turn smoothly from the actual floor pickup during loading.
       return knee(shoulders[arm], hand, upperArm, lowerArm, arm === 0 ? -1 : 1);
     }
+    // The upper support opens above its palm while the lower support receives
+    // the load below it. Bending both elbows underneath crossed one forearm
+    // through the opposite upper arm as the horizontal body rose.
+    if (pairLift) return knee(shoulders[arm], hand, upperArm, lowerArm, arm === 0 ? 1 : -1);
     if (state.scoopAnkleMotion && actor.ankleApproach !== undefined && actor.gripMode === 'ankle' && !reset && state.contactPoints) {
       const choices = [1, -1].map(bend => knee(shoulders[arm], hand, upperArm, lowerArm, bend));
       const world = (joint: Point) => {
@@ -1131,11 +1135,15 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
         const startAngle = Math.atan2(startHand.y, startHand.x), followAngle = unwrap(startAngle, Math.atan2(follow.y, follow.x));
         const restAngle = unwrap(followAngle, Math.atan2(rest.y, rest.x));
         const angle = mix(mix(startAngle, followAngle, release), restAngle, retract);
-        const radius = mix(mix(Math.hypot(startHand.x, startHand.y), Math.hypot(follow.x, follow.y), release), Math.hypot(rest.x, rest.y), retract);
-        const palm = { x: shoulder.x + Math.cos(angle) * radius, y: shoulder.y + Math.sin(angle) * radius };
+        const reach = mix(mix(Math.hypot(startHand.x, startHand.y), Math.hypot(follow.x, follow.y), release), Math.hypot(rest.x, rest.y), retract);
         const startSolutions = [1, -1].map(bend => ({ bend, point: knee({ x: 0, y: 0 }, startHand, upperArm, lowerArm, bend) }));
         const bend = startSolutions.reduce((nearest, candidate) => Math.hypot(candidate.point.x - upper.x, candidate.point.y - upper.y) < Math.hypot(nearest.point.x - upper.x, nearest.point.y - upper.y) ? candidate : nearest).bend;
-        elbows[arm] = knee(shoulder, palm, upperArm, lowerArm, bend);
+        // The upper support returns from its open elbow to the usual guard
+        // bend. Pass through extension during retraction so that changing
+        // sides cannot snap the elbow or start another throw after release.
+        const radius = bend === -1 ? reach : mix(reach, upperArm + lowerArm - .02, Math.sin(retract * Math.PI) ** 2);
+        const palm = { x: shoulder.x + Math.cos(angle) * radius, y: shoulder.y + Math.sin(angle) * radius };
+        elbows[arm] = knee(shoulder, palm, upperArm, lowerArm, bend === -1 || retract >= .5 ? -1 : bend);
         return palm;
       }
       const startUpper = Math.atan2(upper.y, upper.x), startLower = Math.atan2(lower.y, lower.x);
