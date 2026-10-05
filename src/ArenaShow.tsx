@@ -657,6 +657,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
                     : attacking.hands.some(hand => pointGap(hand, defending.waist) < 6);
             if (touched) {
               contact.wrestlingMoveOrigins.contactDriver = { x: a.x, y: a.y }; contact.wrestlingMoveOrigins.contactVictim = { x: v.x, y: v.y };
+              if (window.kind === 'clothesline') contact.wrestlingMoveOrigins.contactDriverVelocity = { ...frame.driverVelocity };
               if (window.kind === 'scoopslam') {
                 contact.wrestlingMoveOrigins.scoopWaist = { ...defending.waist };
                 const floor = arenaInsidePoint({ x: a.x + frame.side * 62, y: v.y }, 12);

@@ -13,7 +13,7 @@ export type ArenaWrestlingMoveWindow = {
 };
 export type ArenaWrestlingMoveOrigins = {
   driver: ArenaPoint; victim: ArenaPoint; target?: ArenaPoint; contactTargets?: [ArenaPoint, ArenaPoint];
-  launchDriver?: ArenaPoint; launchVictim?: ArenaPoint; contactDriver?: ArenaPoint; contactVictim?: ArenaPoint;
+  launchDriver?: ArenaPoint; launchVictim?: ArenaPoint; contactDriver?: ArenaPoint; contactVictim?: ArenaPoint; contactDriverVelocity?: ArenaPoint;
   ankles?: [ArenaPoint, ArenaPoint]; ankleDriver?: ArenaPoint; pickupDriver?: ArenaPoint; floorVictim?: ArenaPoint; kickTarget?: ArenaPoint; kickDriver?: ArenaPoint;
   ankleOrbit?: number; ankleFacing?: 1 | -1;
   scoopWaist?: ArenaPoint; scoopFloorWaist?: ArenaPoint; scoopFloorVictim?: ArenaPoint; scoopImpactWaist?: ArenaPoint; scoopHeadImpact?: ArenaPoint;
@@ -169,7 +169,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   const landingGoal = kind === 'dropkick' ? { x: initial.victim.x - side * 12, y: initial.victim.y } : goal;
   const behind = { x: initial.driver.x - side * 70, y: initial.driver.y };
   const canPerform = inside(initial.driver) && inside(initial.victim) && inside(goal)
-    && (kind === 'dropkick' ? gap >= 170 && inside(landingGoal) : catching ? gap >= 130 && (kind !== 'backbodydrop' || inside(behind)) : gap >= 130 && inside({ x: initial.victim.x + side * 24, y: initial.victim.y }));
+    && (kind === 'dropkick' ? gap >= 170 && inside(landingGoal) : catching ? gap >= 130 && (kind !== 'backbodydrop' || inside(behind)) : gap >= 130 && inside({ x: initial.victim.x + side * 56, y: initial.victim.y }));
   const launchAt = !canPerform || window.launchAt === null ? null : Math.max(window.start, window.launchAt ?? plannedLaunchAt);
   // A display frame can record takeoff just after the runway was completed.
   // Keep that event gate, but advance the jump from its physical takeoff
@@ -285,11 +285,19 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const victimOrigin = initial.contactVictim ?? initial.victim;
     const age = contacted ? Math.max(0, elapsed - contactAt!) : 0;
     const fall = ease(age / timing.clotheslineFall), rise = ease((age - timing.clotheslineFall) / ARENA_CLOTHESLINE_FINISH_TIMING.rise);
-    // Contact can be recorded before the nominal root gap. Continue through
-    // that real neck contact to an adjacent head-width fall, rather than
-    // preserving a fixed root separation from the earlier running frame.
-    frame.driver = contacted ? blend(base, { x: victimOrigin.x - side * 8, y: victimOrigin.y }, fall) : base;
-    frame.driverVelocity = contacted ? zero() : entry.velocity;
+    // The neck catches the inner elbow while the running body passes it.
+    // Carry the actual incoming velocity into the fall instead of stopping
+    // at contact and easing into a position behind the received player.
+    const runwayOrigin = initial.launchDriver ?? initial.driver, runway = distance(runwayOrigin, goal);
+    const measured = initial.contactDriverVelocity ?? rush(runwayOrigin, goal, contact - launch).velocity;
+    const incoming = Math.hypot(measured.x, measured.y) > 1 ? measured
+      : { x: (goal.x - runwayOrigin.x) / Math.max(1, runway) * 190, y: (goal.y - runwayOrigin.y) / Math.max(1, runway) * 190 };
+    const through = { x: victimOrigin.x + side * 56, y: victimOrigin.y };
+    const p = clamp(age / timing.clotheslineFall), tangent = p * (1 - p) ** 2, tangentVelocity = (1 - p) * (1 - 3 * p);
+    frame.driver = contacted ? { x: mix(base.x, through.x, fall) + incoming.x * timing.clotheslineFall / 1000 * tangent,
+      y: mix(base.y, through.y, fall) + incoming.y * timing.clotheslineFall / 1000 * tangent } : base;
+    frame.driverVelocity = contacted ? { x: (through.x - base.x) * easeVelocity(age, timing.clotheslineFall) + incoming.x * tangentVelocity,
+      y: (through.y - base.y) * easeVelocity(age, timing.clotheslineFall) + incoming.y * tangentVelocity } : entry.velocity;
     frame.driverPose = contacted && fall > 0 ? age < timing.clotheslineFall ? 'bulldog' : rise < 1 ? 'recover' : 'guard' : launched ? 'run' : 'guard';
     frame.driverPhase = contacted ? age < timing.clotheslineFall ? fall : rise : clamp((elapsed - launch) / Math.max(1, run.duration));
     frame.clotheslineTarget = { ...target }; frame.clotheslineInner = true;

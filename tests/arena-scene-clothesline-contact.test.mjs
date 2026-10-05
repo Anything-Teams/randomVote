@@ -42,6 +42,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
     for (const body of sim.bodies.values()) { body.x = 1000 - body.x; body.facing *= -1; }
   });
   let ran = false, contactSeen = false, knockoutSeen = false, released = false, finished = false, stoppedAt;
+  let contactRoot, leadingFallMs = 0, checkedEarlyMomentum = false;
   let ankleFrames = 0, spinFrames = 0, previousTurn;
   for (let elapsed = 0; elapsed <= 70000; elapsed += step) {
     render(ctx, props, elapsed, elapsed, sim, step, false);
@@ -58,6 +59,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
     }
     if (window.contactAt === elapsed) {
       contactSeen = true;
+      contactRoot = { x: driver.x, y: driver.y };
       assert.ok(ran, 'the strike follows a visible actual run');
       const driverRig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
       const liveNeck = { x: victimRig.head.x, y: victimRig.head.y + victim.scale * 20 };
@@ -65,6 +67,19 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       const neckGap = segmentGap(liveNeck, driverRig.elbows[1], insideForearm);
       assert.ok(neckGap < 8, `the painted inside elbow reaches the victim's current neck (${neckGap.toFixed(2)}px at ${elapsed}ms)`);
       assert.ok(distance(liveNeck, driverRig.hands[1]) > 12, 'the fist extends beyond the neck instead of punching it');
+    }
+    if (window.contactAt != null && elapsed < frame.floorAt) {
+      const age = elapsed - window.contactAt, driverRig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
+      // A neck hook is a running collision: after the inside elbow catches,
+      // the caster's trunk passes the opponent instead of settling behind it.
+      // Check the live roots and painted hips, not only a planned end point.
+      if (frame.side * (driver.x - victim.x) > 12 && frame.side * (driverRig.waist.x - victimRig.waist.x) > 12) leadingFallMs += step;
+      if (!checkedEarlyMomentum && age >= 96 && age <= 150) {
+        assert.ok(contactRoot, 'the real neck contact anchors the pass-through measurement');
+        const advance = frame.side * (driver.x - contactRoot.x);
+        assert.ok(advance >= age / 1000 * 100, `the actual caster carries at least 100px/s of its run through the first contact interval instead of stopping (${advance.toFixed(2)}px in ${age}ms)`);
+        checkedEarlyMomentum = true;
+      }
     }
     if (window.contactAt != null && elapsed >= frame.floorAt && !sim.exits.has(round.victim)) knockoutSeen ||= victim.pose === 'stunned' && frame.victimSlam?.slump === 1;
     if (window.ankleGripAt != null && !sim.exits.has(round.victim)) {
@@ -98,6 +113,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
     else if (!released) assert.equal(capturedRanks()[round.victim], undefined, 'the drawn rank cannot eliminate the victim before the actual held throw');
     if (Object.keys(capturedRanks()).length === order.length) { finished = true; break; }
   }
+  assert.ok(checkedEarlyMomentum && leadingFallMs >= 80, 'the actual caster keeps running momentum and visibly carries its trunk past the opponent before both hit the floor');
   assert.ok(contactSeen && knockoutSeen && released && finished, 'the same running strike must proceed through knockout, actual two-toe support, one full revolution, release and all drawn ranks');
   assert.deepEqual(capturedRanks(), { '1': 5, '2': 4, '3': 3, '4': 2, '5': 1 });
 });

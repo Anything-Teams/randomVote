@@ -127,7 +127,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
     let actualContactAt, anklesSeen = false, ankleFrames = 0, previousRig, previousDriverRig, previousSpinMatrix, previousSpinWeight, previousTurn, spinFrames = 0, fullTurnSeen = false, runSeen = false, floorSeen = false;
     const scoopStages = new Set();
     const clotheslineStages = new Set();
-    let sharedFallSeen = false, standingBeforeGrip = false, headsTouching = false;
+    let sharedFallSeen = false, standingBeforeGrip = false, headsTouching = false, casterPassedVictim = false;
     let counterGuardSeen = false, counterPrepareSeen = false;
     let overlapLiftTurnFrames = 0, overheadFrames = 0, scoopSupportFrames = 0, scoopFloatingMs = 0, scoopOverheadSeen = false, scoopImpactSeen = false, pivotFrames = 0, tangentFrames = 0;
     let spineOverlapFrames = 0, spinePause = 0, maxSpinePause = 0;
@@ -296,6 +296,9 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       }
       if (kind === 'clothesline' && contactSeen && !exit) {
         clotheslineStages.add(frame.stage);
+        if (frame.stage === 'fall') {
+          casterPassedVictim ||= frame.side * (driver.x - victim.x) > 12 && frame.side * (paintedDriver.waist.x - paintedVictim.waist.x) > 12;
+        }
         if (frame.stage === 'fall' && Math.abs(frame.driverAngle) > 1 && Math.abs(frame.victimAngle) > 1) {
           sharedFallSeen = true;
           assert.ok(driver.slamProgress.slump > .6 && victim.slamProgress.slump > .6, 'both painted bodies take the same fall');
@@ -404,7 +407,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       assert.ok(scoopOverheadSeen && scoopImpactSeen, 'the real supported waist clears the caster crown and lands with a visible unconscious impact');
       assert.ok(scoopSupportFrames > 0, 'the actual highest lift exercises its planted heel support');
     }
-    if (kind === 'clothesline') assert.ok(headsTouching && sharedFallSeen && standingBeforeGrip && ['fall', 'recover', 'ankle-approach', 'ankle-grip', 'spin', 'toss'].every(stage => clotheslineStages.has(stage)), 'the close shared fall, rise, ankle pickup, full turn and throw can each be seen');
+    if (kind === 'clothesline') assert.ok(casterPassedVictim && headsTouching && sharedFallSeen && standingBeforeGrip && ['fall', 'recover', 'ankle-approach', 'ankle-grip', 'spin', 'toss'].every(stage => clotheslineStages.has(stage)), 'the running caster passes the opponent before the close shared fall, rise, ankle pickup, full turn and throw');
   }
 });
 
