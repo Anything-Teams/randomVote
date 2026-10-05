@@ -379,9 +379,19 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   }
   if (actor.pairReach === undefined || reset) state.pairReach = undefined;
   if (actor.pairReach !== undefined && !state.pairReach && !reset && state.contactPoints && state.motion) {
-    const source = state.contactPoints, motion = { ...state.motion };
+    const source = state.contactPoints, motion = { ...state.motion }, reversed = state.facing !== undefined && state.facing !== facing;
     if (state.supportHip) { motion.hipX = state.supportHip.x; motion.crouch = state.supportHip.y + 20; }
-    state.pairReach = { motion, arms: { at: clock - delta, root: { ...source.origin }, shoulders: source.shoulders.map(point => ({ ...point })), elbows: source.elbows.map(point => ({ ...point })), hands: source.hands.map(point => ({ ...point })), angles: source.hands.map((hand, arm) => [Math.atan2(source.elbows[arm].y - source.shoulders[arm].y, source.elbows[arm].x - source.shoulders[arm].x), Math.atan2(hand.y - source.elbows[arm].y, hand.x - source.elbows[arm].x)]) } };
+    if (reversed) {
+      // Preserve the world chest lean as this helper turns toward the body.
+      // The far/near arm labels change with the facing; blending the old
+      // labels straight across the chest collapsed both shoulder roots.
+      for (const key of ['lean', 'hipX', 'head'] as const) motion[key] *= -1;
+      [motion.backX, motion.frontX] = [-motion.frontX, -motion.backX];
+      [motion.backY, motion.frontY] = [motion.frontY, motion.backY];
+    }
+    const armPoints = (points: Point[]) => (reversed ? [...points].reverse() : points).map(point => ({ ...point }));
+    const shoulders = armPoints(source.shoulders), elbows = armPoints(source.elbows), hands = armPoints(source.hands);
+    state.pairReach = { motion, arms: { at: clock - delta, root: { ...source.origin }, shoulders, elbows, hands, angles: hands.map((hand, arm) => [Math.atan2(elbows[arm].y - shoulders[arm].y, elbows[arm].x - shoulders[arm].x), Math.atan2(hand.y - elbows[arm].y, hand.x - elbows[arm].x)]) } };
   }
   if (!slam || reset) state.slamStart = undefined;
   if (slam && actor.slamEntry && !state.slamStart && !reset && state.rig) state.slamStart = structuredClone(state.rig);
