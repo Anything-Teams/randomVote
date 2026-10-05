@@ -97,7 +97,9 @@ test('all ankle spin finishes announce the throw during the continuing final tur
     const gripAt = landed.pickupReadyAt + 400, held = { ...window, ankleGripAt: gripAt };
     const round = { ...base, wrestlingMove: held };
     const receiving = arenaWrestlingMoveTargets(held, gripAt + 200, { x: 500, y: 416 });
-    assert.equal(receiving.stage, 'ankle-grip'); assert.equal(receiving.victimHeight, 0); assert.equal(receiving.ankleSpinProgress, 0);
+    assert.equal(receiving.stage, 'ankle-grip'); assert.equal(receiving.victimHeight, 0);
+    assert.ok(receiving.ankleSpinProgress > 0 && receiving.ankleSpinProgress < .1, 'the ankle pickup already begins turning without announcing the eventual throw');
+    assert.ok(arenaActionWords(round, gripAt + 200).every(word => word.word !== '던지기!'));
     const spinning = arenaWrestlingMoveTargets(held, gripAt + timing.ankleLoad + timing.ankleSpin / 2, { x: 500, y: 416 });
     assert.equal(spinning.stage, 'spin'); assert.equal(spinning.ankleSpin.gripBoth, true);
     assert.match(arenaWrestlingPresentation(round, gripAt + timing.ankleLoad + timing.ankleSpin / 2).title, /한 바퀴/);

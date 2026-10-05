@@ -291,10 +291,10 @@ test('a received hip throw leaves a readable stunned beat and takes the ankle we
       const frame = arenaWrestlingMoveTargets(held, grabAt + age, center, values.initial, side);
       assert.equal(frame.stage, 'ankle-grip'); assert.equal(frame.driverPose, 'grapple'); assert.equal(frame.victimHeight, 0);
       assert.equal(frame.victimPose, 'stunned'); assert.equal(frame.canRelease, false);
-      assert.ok(frame.ankleThrowProgress >= 0 && frame.ankleThrowProgress < 1, 'the actual low ankle hold gradually raises the caster before its rotation');
+      assert.ok(frame.ankleThrowProgress >= 0 && frame.ankleThrowProgress < 1, 'the actual low ankle hold gradually raises the caster while its rotation begins');
     }
     const spinning = arenaWrestlingMoveTargets(held, grabAt + timing.ankleLoad + timing.ankleSpin / 2, center, values.initial, side);
-    assert.equal(spinning.stage, 'spin'); assert.ok(Math.abs(Math.abs(spinning.pivotTurn) - Math.PI * 2 * (.5 - .09) / .91) < 1e-8); assert.equal(spinning.ankleSpin.gripBoth, true); assert.equal(spinning.canRelease, false);
+    assert.equal(spinning.stage, 'spin'); assert.ok(Math.abs(spinning.pivotTurn) > Math.PI * .9 && Math.abs(spinning.pivotTurn) < Math.PI * 1.1, 'the held body is halfway around during the middle of the swing'); assert.equal(spinning.ankleSpin.gripBoth, true); assert.equal(spinning.canRelease, false);
     const stroke = arenaWrestlingMoveTargets(held, grabAt + timing.ankleLoad + timing.ankleSpin - 16, center, values.initial, side);
     assert.equal(stroke.stage, 'toss'); assert.ok(stroke.ankleThrowProgress > .99); assert.equal(stroke.canRelease, false);
     const complete = arenaWrestlingMoveTargets(held, grabAt + timing.ankleLoad + timing.ankleSpin + timing.ankleThrow, center, values.initial, side);
@@ -302,6 +302,26 @@ test('a received hip throw leaves a readable stunned beat and takes the ankle we
     assert.equal(complete.requiredReleaseAt, grabAt + timing.ankleLoad + timing.ankleSpin, 'the recorded two-ankle hold owns the load and full revolution, then releases immediately');
     assert.ok(Math.abs(complete.ankleAngularVelocity) > 4.8, 'the full-turn release keeps its angular momentum');
     assert.ok(Math.abs(Math.cos(complete.ankleSpin.orbit)) < 1e-8 && Math.sin(complete.ankleSpin.orbit) < -.999, 'the head-up release phase gives the supported mass a horizontal tangent');
+  }
+});
+
+test('all two-ankle finishes begin turning during the pickup and retain velocity into the full swing', () => {
+  for (const kind of ['clothesline', 'spinebuster', 'powerbomb', 'backbodydrop', 'scoopslam']) for (const side of [-1, 1]) {
+    const values = contacted(kind, side), pickup = arenaWrestlingMoveTargets(values.actual, values.contactAt, center, values.initial, side).pickupReadyAt;
+    const held = { ...values.actual, ankleGripAt: pickup + 240 }, at = age => arenaWrestlingMoveTargets(held, held.ankleGripAt + age, center, values.initial, side);
+    const first = at(0), early = at(160), loaded = at(520);
+    assert.equal(Math.abs(first.pivotTurn), 0); assert.equal(Math.abs(first.ankleOrbitVelocity), 0);
+    assert.ok(early.ankleSpin.weight > 0 && early.ankleSpin.weight < 1 && Math.abs(early.pivotTurn) > .02, 'both held feet rise while the caster is already turning');
+    assert.ok(Math.abs(loaded.pivotTurn) > .3 && Math.abs(loaded.ankleOrbitVelocity) > 1, 'finishing the lift never leaves a motionless body');
+    for (let age = 505; age <= 535; age++) {
+      const before = at(age - .5), after = at(age + .5), current = at(age);
+      const actualVelocity = (after.pivotTurn - before.pivotTurn) * 1000;
+      assert.ok(Math.abs(actualVelocity - current.ankleOrbitVelocity) < .003, 'the painted turn and release derivative remain connected across the former pause');
+      assert.ok(Math.abs(after.pivotTurn) > Math.abs(before.pivotTurn), 'each pickup-to-swing frame keeps moving in the same direction');
+    }
+    const released = at(first.requiredReleaseAt - held.ankleGripAt);
+    assert.ok(Math.abs(Math.abs(released.pivotTurn) - Math.PI * 2) < 1e-8);
+    assert.ok(released.canRelease && released.ankleSpin.gripBoth, 'the continuous pickup still completes exactly one held revolution');
   }
 });
 

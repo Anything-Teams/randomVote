@@ -127,12 +127,18 @@ function groundedFeet(actor: ArenaActor, state: ArenaFighterAnimation, clock: nu
     }) as [FootMemory, FootMemory];
   }
   state.feet ??= [makeFoot(comfortable(0)), makeFoot(comfortable(1))];
-  if (actor.pivotTurn !== undefined && Math.abs(actor.pivotTurn) > 0) {
+  // The torso can start turning during a pickup step. Finish that real heel
+  // landing before pivot beats take its foot memory, or the old step can
+  // overwrite the new orbit and return the sole to its earlier position.
+  if (actor.pivotTurn !== undefined && Math.abs(actor.pivotTurn) > 0 && !state.feet.some(foot => foot.replant)) {
     const direction = Math.sign(actor.pivotTurn), steps = Math.abs(actor.pivotTurn) / (Math.PI * 2) * 8, step = Math.floor(steps), phase = steps - step;
     const leg = step % 2;
     if (state.pivotStep !== step) {
       // Commit the actual landing point; crossing a beat cannot snap a heel to its old target.
-      state.feet.forEach(foot => { if (foot.swinging) foot.anchor = { ...foot.ground }; foot.swinging = false; foot.lift = 0; });
+      state.feet.forEach(foot => {
+        foot.anchor = { ...foot.ground }; foot.swinging = false; foot.lift = 0;
+        foot.replant = undefined; foot.settleAt = -Infinity;
+      });
       const foot = state.feet[leg]; foot.from = { ...foot.ground }; foot.to = comfortable(leg, (step + 1) * direction * Math.PI / 4); foot.swinging = true;
       state.pivotStep = step;
     }
@@ -980,7 +986,11 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const footPoint = (leg: number, point: Point) => { const p = rotate(point, footAngles[leg]); return { x: feet[leg].x + p.x, y: feet[leg].y + p.y }; };
   const bodyWidth = 18 + index % 3, shoulderWidth = bodyWidth * .43;
   // A grip turns the chest toward the opponent, bringing the far shoulder forward.
-  const shoulderContact = spin || released && releaseWeight > 0 ? 0 : jointOverhead ? motion.contact * (1 - clamp(actor.overheadRaise ?? 1)) : anklePivot ? motion.contact * (1 - clamp(actor.ankleThrowProgress!)) : motion.contact;
+  // The receiving shoulder opens beneath the back before both arms press
+  // overhead. Holding the far shoulder forward through this whole lift
+  // brought its wrist through the shoulder and folded the elbow completely.
+  const cradleShoulder = pose === 'scoopslam' && actor.gripMode === 'cradle' ? 1 - clamp(actor.scoopLoad ?? 0) * (1 - clamp(actor.scoopLift ?? 0)) : 1;
+  const shoulderContact = spin || released && releaseWeight > 0 ? 0 : jointOverhead ? motion.contact * (1 - clamp(actor.overheadRaise ?? 1)) : anklePivot ? motion.contact * (1 - clamp(actor.ankleThrowProgress!)) : motion.contact * cradleShoulder;
   const shoulders = [mix(-shoulderWidth, 3.5, shoulderContact), shoulderWidth].map(offset => ({ x: offset * (casterPlane ? across.x : turnWidth), y: -20 - motion.shoulderLift + (casterPlane ? offset * across.y : 0) }));
   if (released?.snapshot.shoulders && releaseWeight > 0) shoulders.forEach((shoulder, arm) => Object.assign(shoulder, pointMix(shoulder, released.snapshot.shoulders![arm], releaseWeight)));
   if (actor.carrierRelease && (!actor.carrierRelease.stance || actor.carrierRelease.followThrough || actor.pivotTurn !== undefined && actor.gripMode === 'ankle')) {

@@ -238,9 +238,15 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     frame.canRelease = ankleGripAt !== null && elapsed >= requiredReleaseAt && !released;
     if (ankleGripAt !== null && elapsed >= ankleGripAt) {
       const load = ease(gripAge / ankleLoad), spinAge = released ? Math.min(gripAge, releaseAt! - ankleGripAt!) : gripAge;
-      const spinClock = Math.max(0, (spinAge - ankleLoad) / spinDuration), progress = clamp(spinClock), ramp = .18;
-      const drive = (spinClock < ramp ? spinClock * spinClock / (2 * ramp) : spinClock - ramp / 2) / (1 - ramp / 2);
-      const turn = frame.driverFacing * Math.PI * 2 * drive;
+      // Begin turning while lifting the ankles, then carry that velocity
+      // into the full swing. Loading and rotating are one connected motion.
+      const lead = Math.PI * .1, loadSeconds = ankleLoad / 1000;
+      const initialVelocity = 2 * lead / loadSeconds, spinSeconds = spinDuration / 1000, rampSeconds = spinSeconds * .18;
+      const finalVelocity = (Math.PI * 2 - lead - initialVelocity * rampSeconds / 2) / (spinSeconds - rampSeconds / 2);
+      const tailAge = Math.max(0, (spinAge - ankleLoad) / 1000), accelerating = Math.min(tailAge, rampSeconds);
+      const rotation = spinAge < ankleLoad ? lead * (spinAge / ankleLoad) ** 2
+        : lead + initialVelocity * accelerating + (finalVelocity - initialVelocity) * accelerating ** 2 / (2 * rampSeconds) + finalVelocity * Math.max(0, tailAge - rampSeconds);
+      const turn = frame.driverFacing * rotation, progress = clamp(rotation / (Math.PI * 2));
       // Use the wrist-spin's horizontal orbit, with the feet as its anchor.
       // This depth projection circles the body around the planted caster
       // rather than turning it as a vertical wheel. Its quarter-phase release
@@ -259,7 +265,8 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
       frame.gripTargets = [-1, 1].map(direction => ({ x: center.x + axis.x * halfSpan * direction, y: center.y + axis.y * halfSpan * direction })) as [ArenaPoint, ArenaPoint];
       frame.ankleSpin = { orbit, flatness: 1, weight: load, gripLimb: 'feet', gripBoth: true, planar: true };
       frame.ankleSpinProgress = progress; frame.pivotTurn = turn; frame.driverYaw = turn;
-      frame.ankleAngularVelocity = gripAge >= ankleLoad ? frame.driverFacing * Math.PI * 2 / (spinDuration / 1000) * Math.min(1, spinClock / ramp) / (1 - ramp / 2) : 0;
+      frame.ankleAngularVelocity = frame.driverFacing * (spinAge < ankleLoad ? initialVelocity * spinAge / ankleLoad
+        : initialVelocity + (finalVelocity - initialVelocity) * Math.min(1, tailAge / rampSeconds));
       frame.ankleOrbitVelocity = frame.ankleAngularVelocity;
       frame.ankleSpinRaise = undefined;
       frame.driverPose = 'grapple'; frame.driverPhase = load; frame.ankleThrowProgress = load;

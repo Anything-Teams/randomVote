@@ -334,7 +334,10 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
             assert.equal(frame.ankleApproach, 1, 'the caster finishes its normal arm reach before establishing an actual ankle hold');
             assert.ok(window.ankleGripAt - window.contactAt >= 1780 + 200 + 240, 'the supported load, lift, turn, floor landing and reaching hand each finish before the ankle grab');
             assert.equal(frame.requiredReleaseAt, window.ankleGripAt + 1920);
-            if (elapsed - window.ankleGripAt < 520) { assert.equal(frame.victimHeight, 0); assert.equal(frame.ankleSpinProgress, 0, 'the caster accepts both actual ankle weights before beginning its revolution'); }
+            if (elapsed - window.ankleGripAt < 520) {
+              assert.equal(frame.victimHeight, 0);
+              if (elapsed > window.ankleGripAt) assert.ok(Math.abs(driver.pivotTurn) > 0, 'taking the actual ankle weight flows directly into the beginning of the turn');
+            }
           }
           paintedDriver.hands.forEach((hand, arm) => assert.ok(distance(hand, paintedVictim.feet[arm]) < 8, `both painted toes stay in the palms for the complete preflight stroke (gap ${distance(hand, paintedVictim.feet[arm]).toFixed(2)}px): ${detail(elapsed, frame)}`));
         }
@@ -350,7 +353,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           assert.ok(releaseTurn >= Math.PI * 2 - 1e-8 && releaseTurn <= Math.PI * 2 + lateTurn + 1e-8, 'the full turn continues only through the actual hand-opening frame');
           fullTurnSeen = true;
           assert.ok(elapsed - frame.requiredReleaseAt < frameDelta, 'release occurs on the first frame that finishes the full revolution');
-          assert.ok(Math.abs(frame.ankleAngularVelocity) > 4.8, 'the full revolution releases while it still carries angular momentum');
+          assert.ok(Math.abs(frame.ankleAngularVelocity) > 4.4, 'the full revolution releases while it still carries forceful angular momentum');
           assert.ok(exit.spinFlight && Math.hypot(exit.spinFlight.velocity.x, exit.spinFlight.velocity.y) > 50, 'the exit inherits the real final mass velocity');
           assert.ok(Math.abs(exit.spinFlight.velocity.x) > Math.abs(exit.spinFlight.velocity.y) * 3, 'the actual final body motion exits left or right instead of downward');
           assert.ok(!inside(exit.landing), 'the inherited tangent carries the body beyond the actual rim');
@@ -403,6 +406,50 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
     }
     if (kind === 'clothesline') assert.ok(headsTouching && sharedFallSeen && standingBeforeGrip && ['fall', 'recover', 'ankle-approach', 'ankle-grip', 'spin', 'toss'].every(stage => clotheslineStages.has(stage)), 'the close shared fall, rise, ankle pickup, full turn and throw can each be seen');
   }
+});
+
+for (const kind of Object.keys(seeds).filter(kind => kind !== 'dropkick')) for (const mirrored of [false, true]) for (const frameDelta of [16, 50]) test(`${kind}: natural ankle pickup flows into its full swing (${mirrored ? 'mirrored' : 'ordinary'}, ${frameDelta}ms)`, () => {
+  const scene = game(kind, { controlled: false, mirrored, frameDelta });
+  let firstTurnAt, fullyRaisedIdle = 0, previousTurn, heldFrames = 0, released = false, completed = false;
+  for (let elapsed = 0; elapsed < 25000; elapsed += frameDelta) {
+    const actors = scene.step(elapsed), contact = scene.sim.contacts.get(scene.planned.id), window = contact?.round.wrestlingMove;
+    assert.equal(window?.kind, kind, 'the real encounter completes its selected slam without an ordinary fallback');
+    const driver = actors.get(scene.planned.aggressor), victim = actors.get(scene.planned.victim), exit = scene.sim.exits.get(scene.planned.victim);
+    if (capturedRanks()[scene.planned.victim]) { assert.deepEqual(capturedRanks(), { '1': 2, '2': 1 }); completed = true; break; }
+    const frame = arenaWrestlingMoveTargets(window, elapsed, contact.center, contact.wrestlingMoveOrigins, contact.round.contactSide);
+    if (window.ankleGripAt != null && !exit) {
+      heldFrames++;
+      assert.ok(window.ankleGripAt >= frame.pickupReadyAt, 'the actual floor recovery and hand approach precede the two-foot contact');
+      const palms = driver.animation.contactPoints, rig = victim.animation.contactPoints, weight = victim.spinSuspension?.weight;
+      for (let limb = 0; limb < 2; limb++) {
+        assert.ok(distance(palms.hands[limb], rig.feet[limb]) < 1, `${elapsed}: each live palm stays on its own foot while the lift and turn overlap`);
+        assert.ok(Math.abs(distance(palms.shoulders[limb], palms.elbows[limb]) - 11 * driver.scale) < .001);
+        assert.ok(Math.abs(distance(palms.elbows[limb], palms.hands[limb]) - 10.5 * driver.scale) < .001);
+        const skeleton = victim.animation.skeleton;
+        assert.ok(Math.abs(distance(skeleton.hips[limb], skeleton.knees[limb]) - 11) < .02);
+        assert.ok(Math.abs(distance(skeleton.knees[limb], skeleton.feet[limb]) - 11) < .02);
+      }
+      const turn = Math.abs(driver.pivotTurn);
+      if (firstTurnAt === undefined && turn > .01) {
+        firstTurnAt = elapsed;
+        assert.ok(weight < 1, `${elapsed}: the actual caster begins turning while it is still raising the ankle weight`);
+        assert.ok(elapsed - window.ankleGripAt <= 200 + frameDelta, 'the visible turn starts promptly after the real grip instead of waiting through a separate preparation pause');
+      }
+      if (weight >= .9) {
+        fullyRaisedIdle = previousTurn !== undefined && turn - previousTurn < .0001 ? fullyRaisedIdle + frameDelta : 0;
+        assert.ok(fullyRaisedIdle <= 80, 'the raised opponent cannot remain motionless before the full swing starts');
+      }
+      previousTurn = turn;
+    }
+    if (exit && !released) {
+      assert.ok(firstTurnAt !== undefined && heldFrames >= 8, 'the real two-foot pickup and overlapping turn occur before release');
+      assert.ok(Math.abs(driver.pivotTurn) >= Math.PI * 2 - 1e-8, 'the actual caster finishes one complete revolution');
+      assert.ok(elapsed >= frame.requiredReleaseAt && elapsed - frame.requiredReleaseAt < frameDelta, 'the hands open on the first completed-turn frame');
+      assert.ok(exit.spinFlight && Math.abs(exit.spinFlight.velocity.x) > 50 && Math.abs(exit.spinFlight.velocity.x) > Math.abs(exit.spinFlight.velocity.y) * 3, 'the real release continues its lateral tangent momentum');
+      released = true;
+    }
+  }
+  assert.ok(released && completed, 'the overlapping pickup, whole turn, free flight and original drawn result complete');
 });
 
 test('natural production starting layouts either complete the selected move or resume an ordinary bout with the same finalists', () => {

@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { build } from 'esbuild';
 
 const bundled = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
@@ -204,14 +206,69 @@ test('the complete scoop overlaps the load, rising turn and downward stroke befo
     const held = { ...window, ankleGripAt };
     for (let age = 0; age < finishTiming.ankleLoad; age += step) {
       const frame = arenaWrestlingMoveTargets(held, ankleGripAt + age, center, origins, facing);
-      assert.equal(frame.driverPose, 'grapple'); assert.equal(frame.victimHeight, 0); assert.equal(frame.ankleSpinProgress, 0);
-      assert.equal(frame.canRelease, false, 'the actual two-ankle hold receives the weight before its full turn');
+      assert.equal(frame.driverPose, 'grapple'); assert.equal(frame.victimHeight, 0);
+      if (age === 0) assert.equal(frame.ankleSpinProgress, 0, 'the actual ankle capture begins at its resting orientation');
+      else assert.ok(frame.ankleSpinProgress > 0 && frame.ankleSpinProgress < .1, 'weight receiving begins the grounded turn immediately without a stationary load pause');
+      assert.equal(frame.canRelease, false, 'the actual two-ankle hold receives the weight while beginning its full turn');
     }
     const release = ankleGripAt + finishTiming.ankleLoad + finishTiming.ankleSpin;
     assert.equal(arenaWrestlingMoveTargets(held, release - 1, center, origins, facing).canRelease, false);
     const ready = arenaWrestlingMoveTargets(held, release, center, origins, facing);
     assert.equal(ready.canRelease, true); assert.equal(ready.ankleThrowProgress, 1); assert.equal(ready.victimHeight, 0);
-    assert.ok(Math.abs(Math.abs(ready.pivotTurn) - Math.PI * 2) < 1e-8 && Math.abs(ready.ankleAngularVelocity) > 4.8);
+    assert.ok(Math.abs(Math.abs(ready.pivotTurn) - Math.PI * 2) < 1e-8 && Math.abs(ready.ankleAngularVelocity) > 4.4);
     assert.equal(ready.requiredReleaseAt, release, 'the actual ankle gate releases at the end of its full turn without a second heave pause');
+  }
+});
+
+test('the actual received scoop keeps both supporting elbows open as the back rises past shoulder height', async () => {
+  // Run the production Scene through real contact, including its receiver
+  // root correction and material back/thigh targets. Only scenery is skipped.
+  const require = createRequire(import.meta.url);
+  let source = await readFile('src/ArenaShow.tsx', 'utf8');
+  const draw = 'arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));';
+  const initialize = 'const ambient = won ? [] : active.filter';
+  assert.ok(source.includes(draw) && source.includes(initialize));
+  source = source.replaceAll('drawArenaScenery(ctx, clock,', 'scoopArmScenery(ctx, clock,')
+    .replace(draw, `scoopArmActors = actors; ${draw}`)
+    .replace(initialize, `scoopArmInitialize(sim, reset); ${initialize}`);
+  source += '\nlet scoopArmActors; const scoopArmScenery = () => {}; let scoopArmInitialize = () => {}; export const setInitialize = fn => { scoopArmInitialize = fn; }; export const capturedActors = () => scoopArmActors; export { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets };';
+  const result = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
+  const module = { exports: {} };
+  new Function('module', 'exports', 'require', result.outputFiles[0].text)(module, module.exports, require);
+  const { render, createArenaCamera, arenaRounds, capturedActors, setInitialize, arenaWrestlingMoveTargets: sceneTargets } = module.exports;
+  const noop = () => {};
+  const context = () => new Proxy({ measureText: value => ({ width: String(value).length * 8 }), createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }) }, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
+  for (const mirrored of [false, true]) for (const step of [16, 50]) {
+    const order = ['2', '1'], duration = 44000, props = { candidates: ['1', '2'].map(id => ({ id, name: id, color: '#ffad72' })), order, duration, arenaRushRoll: 7, arenaEscapeSeed: 40, paused: false, preview: false };
+    const planned = arenaRounds(order, duration, 7, 40)[0];
+    assert.equal(planned.wrestlingMove.kind, 'scoopslam');
+    const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
+    setInitialize((current, reset) => {
+      if (current !== sim || !reset || !mirrored) return;
+      for (const body of sim.bodies.values()) { body.x = 1000 - body.x; body.facing *= -1; body.vx = 0; body.vy = 0; body.motorX = 0; body.motorY = 0; body.animation = undefined; }
+    });
+    let previous, supported = 0, shoulderPassage = 0;
+    for (let clock = 0; clock < 5000; clock += step) {
+      render(ctx, props, clock, clock, sim, step, false);
+      const contact = sim.contacts.get(planned.id), window = contact?.round?.wrestlingMove;
+      if (window?.contactAt == null) continue;
+      const frame = sceneTargets(window, clock, contact.center, contact.wrestlingMoveOrigins, contact.round.contactSide);
+      if (frame.scoopDown > 0) break;
+      const actors = capturedActors(), driver = actors.get(planned.aggressor), victim = actors.get(planned.victim), held = driver.animation.contactPoints, body = victim.animation.contactPoints;
+      const thigh = { x: body.waist.x + ((body.feet[0].x + body.feet[1].x) / 2 - body.waist.x) * .28, y: body.waist.y + ((body.feet[0].y + body.feet[1].y) / 2 - body.waist.y) * .28 };
+      if (frame.gripStrength > .95) for (let arm = 0; arm < 2; arm++) {
+        const shoulder = held.shoulders[arm], elbow = held.elbows[arm], hand = held.hands[arm];
+        const upper = distance(shoulder, elbow), lower = distance(elbow, hand), span = distance(shoulder, hand);
+        assert.ok(Math.abs(upper - 11 * driver.scale) < .001 && Math.abs(lower - 10.5 * driver.scale) < .001, 'both supporting arms retain their two complete connected bones');
+        const opening = Math.acos(Math.max(-1, Math.min(1, (upper * upper + lower * lower - span * span) / (2 * upper * lower))));
+        assert.ok(opening >= Math.PI / 4, `the received back must not fold a support palm into its own shoulder: ${JSON.stringify({ mirrored, step, clock, arm, opening, span })}`);
+        assert.ok(distance(hand, arm ? thigh : body.back) < 8, 'opening the elbow keeps the actual palm on the received back or thigh');
+        if (previous) assert.ok(distance(elbow, previous.elbows[arm]) < 3 + step * .55, 'the lifting elbow travels continuously around the shoulder without reversing its bend');
+        supported++;
+      }
+      if (frame.scoopLoad === 1 && frame.scoopLift > 0 && frame.scoopLift < 1) shoulderPassage++;
+      previous = structuredClone(held);
+    }
+    assert.ok(supported > 20 && shoulderPassage > 4, 'the real charge contact exercises the complete shoulder-height passage at both playback rates');
   }
 });
