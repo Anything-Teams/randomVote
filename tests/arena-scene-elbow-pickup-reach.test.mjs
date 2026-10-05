@@ -65,7 +65,7 @@ for (const delta of [16, 50]) {
         throwAt ??= actual.floorFinish.throwAt;
         assert.ok(gripAt !== undefined && throwAt > gripAt, 'the attacker reaches the rim before beginning the throw');
         if (actual.floorFinish.releaseAt == null) {
-          assert.equal(caster.pose, 'overhead');
+          assert.equal(caster.pose, 'throw');
           assert.ok(victim.spinSuspension, 'the visible throw raises the body from its actual held feet');
           assert.ok(inside(sim.bodies.get(planned.aggressor)), 'the thrower stays inside the ring');
           const hands = caster.animation.contactPoints.hands, feet = victim.animation.contactPoints.feet;

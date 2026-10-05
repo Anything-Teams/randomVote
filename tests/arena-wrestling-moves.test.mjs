@@ -337,7 +337,7 @@ test('all four floor finishes reserve the loser until an actual two-ankle hold c
     const releaseReadyAt = grip.requiredReleaseAt;
     const toss = arenaWrestlingMoveTargets(held, releaseReadyAt, center, values.initial, side);
     assert.equal(grip.stage, 'ankle-grip'); assert.equal(grip.victimHeight, 0);
-    assert.equal(toss.stage, 'toss'); assert.equal(toss.victimHeight, kind === 'backbodydrop' || kind === 'scoopslam' || kind === 'powerbomb' ? 0 : 116); assert.equal(toss.canRelease, true);
+    assert.equal(toss.stage, 'toss'); assert.equal(toss.victimHeight, kind === 'backbodydrop' || kind === 'scoopslam' || kind === 'powerbomb' ? 0 : 34); assert.equal(toss.canRelease, true);
     if (kind === 'backbodydrop' || kind === 'scoopslam' || kind === 'powerbomb') assert.ok(toss.ankleSpin?.gripBoth && Math.abs(Math.abs(toss.pivotTurn) - Math.PI * 2) < 1e-8, 'the snapshot supplies the real release root at the end of the full two-ankle rotation');
     assert.equal(arenaWrestlingMoveTargets(held, releaseReadyAt - 1, center, values.initial, side).canRelease, false);
     assert.ok(inside(toss.driver), `${kind}: the two-hand throw leaves its caster on the sand`);
@@ -491,19 +491,22 @@ test('the received scoop keeps waist velocity continuous through the load, chest
   }
 });
 
-test('a planted rim throw lifts both held ankles and finishes a live backward heave before opening the hands', () => {
+test('a planted rim throw lifts both ankles below the head and sends the feet out first', () => {
   const duration = ARENA_DRAGGED_ANKLE_THROW_TIMING.raise + ARENA_DRAGGED_ANKLE_THROW_TIMING.heave;
   for (const facing of [-1, 1]) {
-    const origins = { driver: { x: 500, y: 416 }, ankles: [{ x: 500 + facing * 32, y: 411 }, { x: 500 + facing * 30, y: 400 }], orbit: facing === 1 ? Math.PI : 0, facing, direction: -facing };
+    const origins = { driver: { x: 500, y: 416 }, ankles: [{ x: 500 + facing * 32, y: 411 }, { x: 500 + facing * 30, y: 400 }], orbit: facing === 1 ? 0 : Math.PI, facing, direction: -facing };
     const saved = structuredClone(origins), first = arenaAnkleRimThrowTargets(0, origins);
     assert.deepEqual(first.gripTargets, origins.ankles); assert.equal(first.ankleSpin.weight, 0);
     const high = arenaAnkleRimThrowTargets(ARENA_DRAGGED_ANKLE_THROW_TIMING.raise, origins);
     const midpoint = frame => ({ x: (frame.gripTargets[0].x + frame.gripTargets[1].x) / 2, y: (frame.gripTargets[0].y + frame.gripTargets[1].y) / 2 });
-    assert.equal(high.overheadRaise, 1); assert.ok(midpoint(high).y < midpoint(first).y - 100);
+    assert.equal(high.overheadRaise, 0); assert.equal(midpoint(high).y, origins.driver.y - 52);
+    assert.equal(high.ankleSpin.orbit, origins.orbit, 'raising the ankles keeps the dragged body pointing the same way');
     assert.equal(high.ankleSpin.planar, false); assert.equal(high.ankleSpin.gripBoth, true);
     const before = arenaAnkleRimThrowTargets(duration - .1, origins), released = arenaAnkleRimThrowTargets(duration, origins);
     assert.equal(before.releaseReady, false); assert.equal(released.releaseReady, true);
-    assert.ok(Math.abs(released.angularVelocity) > 3, 'the backward stroke continues moving at the instant of release');
+    assert.ok(Math.abs(released.angularVelocity) > .5 && Math.abs(released.angularVelocity) < 1.1, 'a small tilt continues through release without an overhead flip');
+    assert.ok(Math.abs(released.ankleSpin.orbit - origins.orbit) <= Math.PI * .13 + 1e-12);
+    assert.ok(Math.cos(released.ankleSpin.orbit) * facing > .9, 'the victim leaves with its feet ahead of its head');
     assert.ok((midpoint(released).x - midpoint(before).x) * origins.direction > 0, 'the actual hand support moves towards the outside before the flight');
     assert.ok(midpoint(released).x > 480 && midpoint(released).x < 520, 'the stationary inside caster never follows the loser across the rim');
     for (const step of [16, 50]) {

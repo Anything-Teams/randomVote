@@ -20,6 +20,7 @@ import { arenaSupermanPunchTargets, type ArenaSupermanPunchOrigins } from './are
 import { ARENA_KICK_CATCH_TIMING, arenaKickCatchTargets, type ArenaKickCatchOrigins } from './arenaKickCatch';
 import { arenaAnkleRimThrowTargets, arenaWrestlingMoveTargets, type ArenaWrestlingMoveOrigins } from './arenaWrestlingMoves';
 import { arenaAnkleSwingBasis, arenaAnkleSwingProjection } from './arenaAnkleSwing';
+import { arenaAnkleRimFlightSnapshot } from './arenaAnkleRimFlight';
 import { createArenaCamera, sampleArenaCamera, type ArenaCamera } from './arenaCamera';
 import { presentArenaCanvasFrame } from './arenaCanvasFrame';
 import './arena.css';
@@ -525,10 +526,11 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             driver.overheadRaise = frame.overheadRaise; driver.scoopRecover = frame.scoopRecover;
             driver.scoopLoad = frame.scoopLoad; driver.scoopLift = frame.scoopLift; driver.scoopTurn = frame.scoopTurn; driver.scoopDown = frame.scoopDown;
             driver.ankleThrowProgress = frame.ankleThrowProgress; driver.ankleSpinRaise = frame.ankleSpinRaise;
+            driver.ankleRimToss = dragFinish && frame.gripMode === 'ankle';
             driver.ankleApproach = frame.ankleApproach;
             driver.pivotTurn = frame.pivotTurn; driver.yaw = frame.driverYaw;
             const spinExit = (spinFinish || dragFinish) ? sim.exits.get(exchange.victim) : undefined, armRelease = contact.pairArmRelease?.get(exchange.aggressor);
-            if (spinExit && armRelease) {
+            if (spinExit && armRelease && (!dragFinish || elapsed - spinExit.launchedAt! <= 650)) {
               const translated = (points: [ArenaPoint, ArenaPoint]) => points.map(point => ({ x: point.x + driver.x - armRelease.root.x, y: point.y + driver.y - armRelease.root.y })) as [ArenaPoint, ArenaPoint];
               const followThrough = spinFollowThrough(spinExit);
               driver.carrierRelease = { hands: translated(armRelease.hands), elbows: translated(armRelease.elbows), shoulders: translated(armRelease.shoulders), progress: clamp((elapsed - spinExit.launchedAt!) / 650), direction: Math.sign(followThrough?.x ?? 0) || driver.facing, followThrough, stance: armRelease.stance };
@@ -2116,6 +2118,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     if (exit.spinSnapshot) {
       let snapshot = exit.spinSnapshot;
       if (exit.spinFlight && (flight.stage === 'flight' || flight.stage === 'land')) {
+        const rimToss = !!exit.floorThrow || ['clothesline', 'spinebuster'].includes(exit.round.wrestlingMove?.kind ?? '');
+        if (rimToss) snapshot = arenaAnkleRimFlightSnapshot(snapshot, Math.min(age, exit.spinFlight.duration));
         const source = snapshot.matrix, center = exit.spinFlight.center;
         // Airborne rotation preserves the release silhouette and turns about
         // the same measured waist; depth foreshortening cannot resize it midair.
@@ -2153,9 +2157,11 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         driverBody.facing = -exit.side; driver.x = driverBody.x; driver.y = driverBody.y; driver.depthY = driverBody.y; driver.facing = driverBody.facing; driver.yaw = 0;
         driver.pose = pickupDistance < 40 || exit.floorThrow ? 'drag' : 'walk';
         driver.gripTarget = contacts.feet[1]; driver.secondaryGripTarget = contacts.feet[0]; driver.gripStrength = 1; driver.gripMode = 'ankle'; driver.gripLocked = true;
-        prepareContactActor(driver);
-        const hands = sampleArenaFighterContacts(driver, reduced ? 0 : clock).hands;
-        const ready = hands.every((hand, index) => Math.hypot(hand.x - contacts.feet[index].x, hand.y - contacts.feet[index].y) < 5);
+        // Once the toss begins, keep the preceding throwing rig. Sampling a
+        // fresh dragging pose here restarted its arm entry on every frame.
+        if (!exit.floorThrow) prepareContactActor(driver);
+        const hands = exit.floorThrow ? undefined : sampleArenaFighterContacts(driver, reduced ? 0 : clock).hands;
+        const ready = !hands || hands.every((hand, index) => Math.hypot(hand.x - contacts.feet[index].x, hand.y - contacts.feet[index].y) < 5);
         // Reaching is not yet a committed hold. Only painted palm contact
         // can lock the ankle grip or begin the rim throw.
         driver.gripLocked = ready;
@@ -2167,7 +2173,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         if (exit.floorThrow) {
           const throwAge = elapsed - exit.round.floorFinish!.throwAt!;
           const held = arenaAnkleRimThrowTargets(throwAge, { ...exit.floorThrow, direction: exit.side < 0 ? -1 : 1 });
-          driver.pose = 'overhead'; driver.phase = clamp(throwAge / 1000); driver.overheadRaise = held.overheadRaise; driver.ankleThrowProgress = driver.phase; driver.ankleSpinRaise = held.raise;
+          driver.pose = 'throw'; driver.ankleRimToss = true; driver.phase = clamp(throwAge / 1000); driver.ankleThrowProgress = driver.phase; driver.ankleSpinRaise = held.raise;
           driver.gripTarget = held.gripTargets[1]; driver.secondaryGripTarget = held.gripTargets[0]; prepareContactActor(driver);
           const palms = sampleArenaFighterContacts(driver, reduced ? 0 : clock).hands;
           actor.pose = 'stunned'; actor.angle = exit.angle; actor.suspension = 0; actor.carryStretch = undefined; actor.slamProgress = { tuck: 0, slump: 1 }; actor.eyesClosed = true;
@@ -2196,7 +2202,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     if (exit.floorArms && exit.launchedAt !== undefined && elapsed - exit.launchedAt <= 650) {
       const driver = actors.get(exit.round.aggressor), source = exit.floorArms;
       if (driver) {
-        driver.pose = 'overhead'; driver.overheadRaise = 1; driver.ankleThrowProgress = 1;
+        driver.pose = 'throw'; driver.ankleRimToss = true; driver.ankleThrowProgress = 1;
         const driverBody = sim.bodies.get(exit.round.aggressor)!; driverBody.x = source.root.x; driverBody.y = source.root.y; driverBody.motorX = 0; driverBody.motorY = 0;
         driver.x = source.root.x; driver.y = source.root.y; driver.depthY = source.root.y; driver.facing = exit.floorThrow!.facing;
         driver.gripTarget = undefined; driver.secondaryGripTarget = undefined; driver.gripStrength = 0; driver.gripLocked = false;

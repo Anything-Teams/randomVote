@@ -27,6 +27,12 @@ const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
 const project = (matrix, point) => ({ x: matrix[0] * point.x + matrix[2] * point.y + matrix[4], y: matrix[1] * point.x + matrix[3] * point.y + matrix[5] });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const midpoint = points => ({ x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 });
+const bodyHeading = rig => {
+  const feet = midpoint(rig.feet);
+  return Math.atan2(rig.head.y - feet.y, rig.head.x - feet.x);
+};
+const angleGap = (one, two) => Math.atan2(Math.sin(one - two), Math.cos(one - two));
 const order = ['2', '1'];
 const duration = 44000, rushRoll = 7;
 
@@ -70,6 +76,37 @@ const segmentGap = (point, from, to) => {
   const t = Math.max(0, Math.min(1, ((point.x - from.x) * dx + (point.y - from.y) * dy) / Math.max(.001, dx * dx + dy * dy)));
   return distance(point, { x: from.x + dx * t, y: from.y + dy * t });
 };
+function headQuad(rig, index) {
+  const center = midpoint(rig.headSides), width = [14, 15, 14, 16][index % 4];
+  // The temples include .5 local units beyond each skin edge. The crown is
+  // 12 units above the center; the painted skin rectangle extends 8 units.
+  const side = {
+    x: (rig.headSides[1].x - center.x) * width / (width + 1),
+    y: (rig.headSides[1].y - center.y) * width / (width + 1),
+  };
+  const up = { x: (rig.head.x - center.x) * 2 / 3, y: (rig.head.y - center.y) * 2 / 3 };
+  return [[-1, 1], [1, 1], [1, -1], [-1, -1]].map(([x, y]) => ({
+    x: center.x + side.x * x + up.x * y,
+    y: center.y + side.y * x + up.y * y,
+  }));
+}
+function segmentQuadGap(from, to, quad) {
+  const cross = (a, b, p) => (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+  const edges = quad.map((point, index) => [point, quad[(index + 1) % quad.length]]);
+  const inside = point => {
+    const sides = edges.map(([a, b]) => cross(a, b, point));
+    return sides.every(side => side >= 0) || sides.every(side => side <= 0);
+  };
+  if (inside(from) || inside(to)) return 0;
+  let gap = Infinity;
+  for (const [a, b] of edges) {
+    const overlap = Math.max(Math.min(from.x, to.x), Math.min(a.x, b.x)) <= Math.min(Math.max(from.x, to.x), Math.max(a.x, b.x))
+      && Math.max(Math.min(from.y, to.y), Math.min(a.y, b.y)) <= Math.min(Math.max(from.y, to.y), Math.max(a.y, b.y));
+    if (overlap && cross(from, to, a) * cross(from, to, b) <= 0 && cross(a, b, from) * cross(a, b, to) <= 0) return 0;
+    gap = Math.min(gap, segmentGap(from, a, b), segmentGap(to, a, b), segmentGap(a, from, to), segmentGap(b, from, to));
+  }
+  return gap;
+}
 function roots(kind) {
   return ['powerbomb', 'backbodydrop', 'spinebuster', 'scoopslam'].includes(kind) ? { driver: { x: 525, y: 416 }, victim: { x: 300, y: 416 } }
       : { driver: { x: 320, y: 416 }, victim: { x: 520, y: 416 } };
@@ -98,10 +135,11 @@ function game(kind, { mirrored = false, controlled = true, frameDelta = 16, matc
 }
 
 
-for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) test(`${kind} naturally grips, raises and releases an inside rim throw (${mirrored ? 'mirror' : 'ordinary'})`, () => {
+for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) test(`${kind} naturally grips and releases a low rim throw (${mirrored ? 'mirror' : 'ordinary'})`, () => {
   for (const frameDelta of [16, 50]) {
     const scene = game(kind, { mirrored, controlled: false, frameDelta });
-    let releasedVelocity, tangentFrames = 0, raisedAt, releaseAt, gripFrames = 0, landed = false, previous, actualEnd, maxGap = 0, minHeadY = Infinity;
+    let releasedVelocity, tangentFrames = 0, heldAt, releaseAt, gripFrames = 0, landed = false, previous, previousCaster, actualEnd;
+    let heldHeading, freeHeading, heldTurn = 0, freeTurn = 0, followFrames = 0, previousFinishing = false;
     for (let elapsed = 0; elapsed < 20000; elapsed += frameDelta) {
       const actors = scene.step(elapsed), round = scene.sim.contacts.get(scene.planned.id)?.round, exit = scene.sim.exits.get(scene.planned.victim);
       const caster = actors.get(scene.planned.aggressor), victim = actors.get(scene.planned.victim);
@@ -109,27 +147,47 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       assert.ok(caster && victim);
       const palms = caster.animation.contactPoints, rig = victim.animation.contactPoints;
       assert.ok(paintedPoints(palms).concat(paintedPoints(rig)).every(p => Number.isFinite(p.x) && Number.isFinite(p.y)));
-      if (caster.pose === 'overhead' && victim.spinSuspension && !releaseAt) {
-        raisedAt ??= elapsed; gripFrames++; minHeadY = Math.min(minHeadY, rig.head.y);
+      if (victim.spinSuspension && !victim.spinSuspension.planar && !exit?.spinFlight) {
+        heldAt ??= elapsed; gripFrames++;
+        assert.equal(caster.pose, 'throw', 'the held finish uses the grounded low throwing posture');
+        const hands = midpoint(palms.hands), head = midpoint(palms.headSides);
+        assert.ok(hands.y > head.y + 12, `${kind}/${mirrored}/${frameDelta}/${elapsed}: both hands stay below the thrower's head`);
+        assert.ok(palms.hands.every(hand => hand.y > head.y + 8), 'neither supporting palm swings above the head');
+        const heading = bodyHeading(rig);
+        if (heldHeading !== undefined) heldTurn += Math.abs(angleGap(heading, heldHeading));
+        heldHeading = heading;
+        assert.ok(heldTurn < .7, 'the held body keeps its feet-first heading instead of turning through a half revolution');
+        assert.ok(rig.head.y <= Math.max(caster.depthY ?? caster.y, victim.depthY ?? victim.y) + 3, 'the supported head remains clear of the sand');
         assert.ok(inside(scene.sim.bodies.get(scene.planned.aggressor)), `${kind}/${mirrored}/${frameDelta}/${elapsed}: caster remains inside`);
         for (let arm = 0; arm < 2; arm++) {
-          const gap = distance(palms.hands[arm], rig.feet[arm]); maxGap = Math.max(maxGap, gap);
-          assert.ok(gap < 8, `${kind}/${mirrored}/${frameDelta}/${elapsed}: actual ankle gap ${gap.toFixed(2)}`);
+          const gap = distance(palms.hands[arm], rig.feet[arm]);
+          assert.ok(gap < 1, `${kind}/${mirrored}/${frameDelta}/${elapsed}: actual ankle gap ${gap.toFixed(2)}`);
           assert.ok(Math.abs(distance(palms.shoulders[arm], palms.elbows[arm]) - 11 * caster.scale) < .01);
           assert.ok(Math.abs(distance(palms.elbows[arm], palms.hands[arm]) - 10.5 * caster.scale) < .01);
+        }
+        const legs = victim.animation.skeleton;
+        for (let leg = 0; leg < 2; leg++) {
+          assert.ok(Math.abs(distance(legs.hips[leg], legs.knees[leg]) - 11) < .02, 'fitting each held ankle preserves the thigh length');
+          assert.ok(Math.abs(distance(legs.knees[leg], legs.feet[leg]) - 11) < .02, 'fitting each held ankle preserves the shin length');
         }
         assert.equal(capturedRanks()[scene.planned.victim], undefined, 'a held body cannot be declared out before the hand release');
       }
       if (exit?.launchedAt != null && (exit.spinFlight || round?.floorFinish?.releaseAt != null)) {
         if (releaseAt === undefined) {
           releaseAt = exit.launchedAt;
-          assert.ok(raisedAt != null && releaseAt - raisedAt >= 1000 - frameDelta, `${kind}: the full raise and backstroke must be visible`);
-          assert.ok(minHeadY < caster.depthY - 70, 'the body is lifted clear of the sand before the backstroke');
+          assert.ok(heldAt != null && releaseAt - heldAt >= 1000 - frameDelta, `${kind}: the complete low loading stroke must be visible`);
           assert.ok(Math.hypot(exit.spinFlight.velocity.x, exit.spinFlight.velocity.y) > 20, 'the actual hand release carries real momentum');
           assert.ok(exit.spinFlight.velocity.x * exit.side > 5, 'the actual backward stroke sends the body toward its own outside rim');
           assert.ok(!inside(exit.landing), 'its continuous free path reaches outside the sand');
           releasedVelocity = exit.spinFlight.velocity;
+          assert.ok(Math.abs(exit.spinFlight.angularVelocity) * exit.spinFlight.duration / 2000 < .65, 'the released body cannot tumble through another large rotation');
           assert.ok(previous && paintedPoints(rig).every((p, i) => distance(p, paintedPoints(previous)[i]) < 10 + frameDelta * .9), 'the release preserves the actually held skeleton');
+        }
+        if (elapsed - releaseAt <= exit.spinFlight.duration) {
+          const heading = bodyHeading(rig);
+          if (freeHeading !== undefined) freeTurn += Math.abs(angleGap(heading, freeHeading));
+          freeHeading = heading;
+          assert.ok(freeTurn < .65, 'the actual painted flight follows a restrained rotation instead of a spinning wheel');
         }
         if (elapsed > releaseAt && elapsed - releaseAt <= 100 && previous) {
           const moved = { x: rig.waist.x - previous.waist.x, y: rig.waist.y - previous.waist.y };
@@ -141,10 +199,36 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           assert.ok(inside(scene.sim.bodies.get(scene.planned.aggressor)));
         }
       }
+      if (caster.carrierRelease) {
+        const age = elapsed - releaseAt;
+        assert.ok(age >= 0 && age <= 650);
+        assert.ok(Math.abs(caster.carrierRelease.progress - age / 650) < 1e-10, 'the full 650ms follow-through uses the actual opening clock');
+        for (let arm = 0; arm < 2; arm++) {
+          assert.ok(Math.abs(distance(palms.shoulders[arm], palms.elbows[arm]) - 11 * caster.scale) < .01);
+          assert.ok(Math.abs(distance(palms.elbows[arm], palms.hands[arm]) - 10.5 * caster.scale) < .01);
+        }
+        followFrames++;
+      }
+      const finishing = !!(victim.spinSuspension || caster.carrierRelease);
+      if (finishing) {
+        const quad = headQuad(palms, caster.index);
+        for (let arm = 0; arm < 2; arm++) {
+          assert.ok(segmentQuadGap(palms.shoulders[arm], palms.elbows[arm], quad) > 2.75 * caster.scale, `${kind}/${mirrored}/${frameDelta}/${elapsed}: the full upper-arm thickness stays outside the painted head`);
+          assert.ok(segmentQuadGap(palms.elbows[arm], palms.hands[arm], quad) > 2.45 * caster.scale, `${kind}/${mirrored}/${frameDelta}/${elapsed}: the full forearm thickness stays outside the painted head`);
+        }
+      }
+      if (previousCaster && (finishing || previousFinishing)) {
+        const limit = 8 + frameDelta * .9;
+        const gap = Math.max(...paintedPoints(palms).map((point, index) => distance(point, paintedPoints(previousCaster)[index])));
+        assert.ok(gap < limit, `${kind}/${mirrored}/${frameDelta}/${elapsed}: the low loading stroke and hand opening keep continuous caster joints (${gap.toFixed(2)}px)`);
+      }
       previous = structuredClone(rig);
+      previousCaster = structuredClone(palms);
+      previousFinishing = finishing;
     }
     assert.ok(landed && releaseAt != null && gripFrames >= 1000 / frameDelta - 2, `${kind}/${mirrored}/${frameDelta}: natural full finishing action completes`);
     assert.ok(tangentFrames > 0);
+    assert.ok(followFrames >= 650 / frameDelta - 2, 'the low release keeps its complete arm follow-through');
     assert.ok(actualEnd >= releaseAt + 1100, 'the declared actual end includes the throw flight and ranking reveal');
   }
 });
@@ -153,17 +237,17 @@ test('all four dragged finishes share the same throw and hand-release clock in a
   const frameDelta = 50;
   for (const kind of Object.keys(seeds)) {
     const scene = game(kind, { controlled: false, frameDelta, matchDuration: 62000 });
-    let raisedAt, releaseAt, followFrames = 0;
+    let heldAt, releaseAt, followFrames = 0;
     for (let elapsed = 0; elapsed < 35000; elapsed += frameDelta) {
       const actors = scene.step(elapsed), round = scene.sim.contacts.get(scene.planned.id)?.round;
       const caster = actors.get(scene.planned.aggressor), victim = actors.get(scene.planned.victim), exit = scene.sim.exits.get(scene.planned.victim);
-      if (caster?.pose === 'overhead' && victim?.spinSuspension && releaseAt === undefined) raisedAt ??= elapsed;
+      if (victim?.spinSuspension && !victim.spinSuspension.planar && releaseAt === undefined) heldAt ??= elapsed;
       if (exit?.spinFlight && exit.launchedAt !== undefined) {
         if (releaseAt === undefined) {
           releaseAt = exit.launchedAt;
           const throwAt = round.wrestlingMove?.dragEndAt ?? round.floorFinish?.throwAt;
-          assert.ok(raisedAt !== undefined && throwAt !== undefined, `${kind}: the actual supported throw is visible`);
-          assert.ok(releaseAt - throwAt >= 1000 && releaseAt - throwAt < 1000 + frameDelta, `${kind}: the same full 1000ms raise/heave precedes opening the palms`);
+          assert.ok(heldAt !== undefined && throwAt !== undefined, `${kind}: the actual supported throw is visible`);
+          assert.ok(releaseAt - throwAt >= 1000 && releaseAt - throwAt < 1000 + frameDelta, `${kind}: the same full 1000ms low stroke precedes opening the palms`);
         }
         const age = elapsed - releaseAt;
         if (age > 0 && age <= 650) {

@@ -92,7 +92,7 @@ export function arenaWrestlingMoveOutcome(roll: number): boolean {
   return roll < 40;
 }
 
-/** Both ankles stay held while the planted caster lifts and heaves over its back. */
+/** The rim finish lifts the ankles to the chest and sends the feet out first. */
 export function arenaAnkleRimThrowTargets(age: number, origins: {
   driver: ArenaPoint; ankles: [ArenaPoint, ArenaPoint]; orbit?: number; facing: 1 | -1; direction: 1 | -1;
 }) {
@@ -102,13 +102,13 @@ export function arenaAnkleRimThrowTargets(age: number, origins: {
   const heave = heaveClock >= 1 ? 1 : heaveClock * heaveClock * (2 - heaveClock);
   const motionHeave = heaveClock <= 1 ? heave : heaveClock;
   const originalOrbit = origins.orbit ?? (origins.direction === 1 ? Math.PI : 0);
-  const downOrbit = originalOrbit + Math.atan2(Math.sin(Math.PI / 2 - originalOrbit), Math.cos(Math.PI / 2 - originalOrbit));
-  const exitOrbit = origins.direction === 1 ? 0 : Math.PI;
-  const lastTurn = Math.atan2(Math.sin(exitOrbit - downOrbit), Math.cos(exitOrbit - downOrbit));
-  const orbit = originalOrbit + (downOrbit - originalOrbit) * raise + lastTurn * motionHeave;
+  // Keep the head on the same side as the dragged body. Passing through a
+  // vertical hang turned this small rim toss into an overhead somersault.
+  const lastTurn = -origins.facing * Math.PI * .13;
+  const orbit = originalOrbit + lastTurn * motionHeave;
   const midpoint = blend(origins.ankles[0], origins.ankles[1], .5);
-  const raised = { x: origins.driver.x + origins.facing * 8, y: origins.driver.y - 145 };
-  const backstroke = { x: origins.driver.x + origins.direction * 12, y: origins.driver.y - 115 };
+  const raised = { x: origins.driver.x + origins.facing * 34, y: origins.driver.y - 52 };
+  const backstroke = { x: origins.driver.x + origins.facing * 10 + origins.direction * 6, y: origins.driver.y - 54 };
   const held = blend(midpoint, raised, raise);
   const support = { x: held.x + (backstroke.x - held.x) * motionHeave, y: held.y + (backstroke.y - held.y) * motionHeave };
   const angleAt = (phase: number) => Math.atan2(Math.cos(phase), -.45 * Math.sin(phase));
@@ -120,7 +120,7 @@ export function arenaAnkleRimThrowTargets(age: number, origins: {
   // heave derivative when that frame samples just beyond the planned end.
   const angularVelocity = age >= timing.raise ? lastTurn * (heaveClock <= 1 ? heaveClock * (4 - 3 * heaveClock) : 1) / (timing.heave / 1000) : 0;
   return {
-    raise, heave, overheadRaise: raise, gripTargets, angularVelocity,
+    raise, heave, overheadRaise: 0, gripTargets, angularVelocity,
     ankleSpin: { orbit, flatness: 1, weight: raise, gripLimb: 'feet' as const, gripBoth: true as const, planar: false },
     releaseReady: age >= timing.raise + timing.heave,
   };
@@ -300,7 +300,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const displacement = gripped ? { x: drag.point.x - clotheslineHolder.x, y: drag.point.y - clotheslineHolder.y } : zero();
     frame.victim = { x: clotheslineFloor.x + displacement.x, y: clotheslineFloor.y + displacement.y };
     frame.driver = gripped ? drag.point : approach.point; frame.driverVelocity = gripped ? drag.velocity : approach.velocity;
-    frame.driverPose = gripped && elapsed >= dragEndAt ? 'overhead' : 'drag';
+    frame.driverPose = released && elapsed - releaseAt! >= 650 ? 'guard' : gripped && elapsed >= dragEndAt ? 'throw' : 'drag';
     frame.driverFacing = kind === 'spinebuster' ? -side as 1 | -1 : side; frame.driverAngle = 0; frame.driverSlam = undefined;
     frame.victimSlam = { tuck: 0, slump: 1 }; frame.victimPose = 'stunned';
     frame.gripTargets = ankles.map(point => ({ x: point.x + displacement.x, y: point.y + displacement.y })) as [ArenaPoint, ArenaPoint];
@@ -311,13 +311,13 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     frame.driverPhase = gripped && elapsed >= dragEndAt ? clamp((elapsed - dragEndAt) / dragThrowDuration) : frame.ankleApproach;
     frame.stage = released ? 'release' : !gripped ? 'ankle-approach' : elapsed < dragStartAt ? 'ankle-grip' : elapsed < dragEndAt ? 'drag' : 'toss';
     frame.canRelease = gripped && elapsed >= requiredReleaseAt && !released;
-    if (gripped && elapsed >= dragEndAt) {
+    if (gripped && elapsed >= dragEndAt && (!released || elapsed - releaseAt! <= 650)) {
       const throwFrame = arenaAnkleRimThrowTargets(elapsed - dragEndAt, { driver: frame.driver, ankles: frame.gripTargets!, orbit: initial.ankleOrbit, facing: frame.driverFacing, direction: dragSide });
       frame.gripTargets = throwFrame.gripTargets; frame.ankleSpin = throwFrame.ankleSpin;
       frame.ankleAngularVelocity = throwFrame.angularVelocity;
       frame.overheadRaise = throwFrame.overheadRaise;
       frame.ankleThrowProgress = frame.driverPhase;
-      frame.victimHeight = 92 * throwFrame.raise + 24 * throwFrame.heave;
+      frame.victimHeight = 34 * throwFrame.raise;
       frame.victimSuspension = throwFrame.raise; frame.victimCarryStretch = throwFrame.raise; frame.victimPose = 'carried';
       frame.victimSlam = { tuck: 0, slump: 1 - throwFrame.raise };
     }
