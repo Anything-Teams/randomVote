@@ -68,7 +68,8 @@ test('an elbow knockout announces foot approach, grounded dragging, rim throw an
     const holdAt = at(timing.dragUntil + 50 * unit), held = arenaAction(round, holdAt);
     assert.equal(held.actors[0].pose, 'overhead');
     assert.equal(held.actors[0].gripId, 'v');
-    assert.match(arenaStoryState(round, holdAt).action, /머리 위/);
+    assert.match(arenaStoryState(round, holdAt).action, /몸의 힘을 실어 위쪽으로 던집/);
+    assert.match(arenaStoryState(round, holdAt).action, /두 손은 발끝을 놓지 않고.*포물선/);
     assert.deepEqual(arenaActionWords(round, holdAt), [{ id: 'a', word: '던지기!' }]);
     const tossAt = at(timing.throwUntil + 50 * unit);
     assert.equal(arenaAction(round, tossAt).actors[0].pose, 'throw');

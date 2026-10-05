@@ -58,7 +58,7 @@ function context() {
   return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 }
 
-const seeds = { suplex: 42, elbow: 12, clothesline: 19, spinebuster: 11 };
+const seeds = { suplex: 42, elbow: 12 };
 const inside = point => Math.hypot((point.x - 500) / 303, (point.y - 416) / 112) < 1;
 const points = rig => [rig.origin, rig.head, rig.waist, ...rig.hands, ...rig.feet];
 // `origin` changes from a nominal ground marker to the projected pivot when a
@@ -140,6 +140,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
     const scene = game(kind, { mirrored, controlled: false, frameDelta });
     let releasedVelocity, tangentFrames = 0, heldAt, releaseAt, gripFrames = 0, landed = false, previous, previousCaster, actualEnd;
     let heldHeading, freeHeading, heldTurn = 0, freeTurn = 0, followFrames = 0, previousFinishing = false;
+    let releaseWaistY, minFlightWaistY = Infinity, previousFlightWaistY, rising = false, falling = false;
     for (let elapsed = 0; elapsed < 20000; elapsed += frameDelta) {
       const actors = scene.step(elapsed), round = scene.sim.contacts.get(scene.planned.id)?.round, exit = scene.sim.exits.get(scene.planned.victim);
       const caster = actors.get(scene.planned.aggressor), victim = actors.get(scene.planned.victim);
@@ -180,10 +181,18 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           assert.ok(exit.spinFlight.velocity.x * exit.side > 5, 'the actual backward stroke sends the body toward its own outside rim');
           assert.ok(!inside(exit.landing), 'its continuous free path reaches outside the sand');
           releasedVelocity = exit.spinFlight.velocity;
+          assert.ok(releasedVelocity.y <= -300 && exit.spinFlight.gravity > 0, 'the low hand stroke throws upward with a real falling acceleration');
+          releaseWaistY = rig.waist.y;
           assert.ok(Math.abs(exit.spinFlight.angularVelocity) * exit.spinFlight.duration / 2000 < .65, 'the released body cannot tumble through another large rotation');
           assert.ok(previous && paintedPoints(rig).every((p, i) => distance(p, paintedPoints(previous)[i]) < 10 + frameDelta * .9), 'the release preserves the actually held skeleton');
         }
         if (elapsed - releaseAt <= exit.spinFlight.duration) {
+          minFlightWaistY = Math.min(minFlightWaistY, rig.waist.y);
+          if (previousFlightWaistY !== undefined) {
+            rising ||= rig.waist.y < previousFlightWaistY - .2;
+            falling ||= rig.waist.y > previousFlightWaistY + .2;
+          }
+          previousFlightWaistY = rig.waist.y;
           const heading = bodyHeading(rig);
           if (freeHeading !== undefined) freeTurn += Math.abs(angleGap(heading, freeHeading));
           freeHeading = heading;
@@ -228,12 +237,13 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
     }
     assert.ok(landed && releaseAt != null && gripFrames >= 1000 / frameDelta - 2, `${kind}/${mirrored}/${frameDelta}: natural full finishing action completes`);
     assert.ok(tangentFrames > 0);
+    assert.ok(rising && falling && releaseWaistY - minFlightWaistY >= 35, 'the actual released waist visibly rises at least 35px before falling beyond the rim');
     assert.ok(followFrames >= 650 / frameDelta - 2, 'the low release keeps its complete arm follow-through');
     assert.ok(actualEnd >= releaseAt + 1100, 'the declared actual end includes the throw flight and ranking reveal');
   }
 });
 
-test('all four dragged finishes share the same throw and hand-release clock in a longer match', () => {
+test('both dragged finishes share the same throw and hand-release clock in a longer match', () => {
   const frameDelta = 50;
   for (const kind of Object.keys(seeds)) {
     const scene = game(kind, { controlled: false, frameDelta, matchDuration: 62000 });

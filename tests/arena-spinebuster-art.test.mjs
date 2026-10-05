@@ -5,7 +5,7 @@ import { build } from 'esbuild';
 const bundled = await build({ entryPoints: ['src/game/ArenaFighter.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
 const { createArenaFighterAnimation, drawArenaFighter, sampleArenaFighterContacts } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
 const motionBundle = await build({ entryPoints: ['src/arenaWrestlingMoves.ts'], bundle: true, format: 'esm', platform: 'node', write: false });
-const { ARENA_SPINEBUSTER_TIMING: timing, ARENA_CLOTHESLINE_FINISH_TIMING: dragTiming, arenaWrestlingMoveTargets } = await import(`data:text/javascript;base64,${Buffer.from(motionBundle.outputFiles[0].text).toString('base64')}`);
+const { ARENA_SPINEBUSTER_TIMING: timing, ARENA_SCOOP_FINISH_TIMING: finishTiming, arenaWrestlingMoveTargets } = await import(`data:text/javascript;base64,${Buffer.from(motionBundle.outputFiles[0].text).toString('base64')}`);
 const fighter = values => ({ candidate: { id: 'a', name: 'a', color: '#ffad72' }, index: 0, x: 500, y: 416, depthY: 416, scale: 2.04, facing: 1, pose: 'guard', angle: 0, alpha: 1, velocityX: 0, velocityY: 0, gaitDistance: 0, phase: 0, motionImmediate: false, animation: createArenaFighterAnimation(), ...values });
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const smooth = value => { const p = Math.max(0, Math.min(1, value)); return p * p * (3 - 2 * p); };
@@ -70,7 +70,7 @@ test('a waist-supported spine victim keeps complete softly folded limbs through 
  }
 });
 
-test('the spine contact clock reserves load, lift, fall, actual two-ankle pickup and the inside-rim drag before release',()=>{
+test('the spine contact clock overlaps lift and backward fall, then finishes the actual ankle pickup with a full turn',()=>{
  for(const side of [-1,1]) {
   const center={x:500,y:416}, origins={driver:{x:500+side*25,y:416},victim:{x:500-side*200,y:416}};
   const pending={kind:'spinebuster',start:0,end:12000,launchAt:160,contactAt:null,ankleGripAt:null,releaseAt:null,kickAt:null};
@@ -79,21 +79,22 @@ test('the spine contact clock reserves load, lift, fall, actual two-ankle pickup
   const contactAt=approach.plannedContactAt, actual={...pending,contactAt};
   const at=arenaWrestlingMoveTargets(actual,contactAt,center,origins,side);
   origins.contactDriver=at.driver;origins.contactVictim=at.victim;
-  const loaded=arenaWrestlingMoveTargets(actual,contactAt+timing.load-1,center,origins,side);
-  assert.equal(loaded.stage,'contact');assert.equal(loaded.victimHeight,0);assert.ok(loaded.spineLoad>.99);
+  const loaded=arenaWrestlingMoveTargets(actual,contactAt+timing.load*.7-1,center,origins,side);
+  assert.equal(loaded.stage,'contact');assert.equal(loaded.victimHeight,0);assert.ok(loaded.spineLoad>.7);
   const lifted=arenaWrestlingMoveTargets(actual,contactAt+timing.load+timing.lift,center,origins,side);
-  assert.equal(lifted.victimHeight,72);assert.equal(lifted.spineLift,1);assert.equal(lifted.spineDown,0);assert.equal(lifted.victimPose,'carried');
+  assert.ok(lifted.victimHeight>60);assert.equal(lifted.spineLift,1);assert.ok(lifted.spineDown>0);assert.equal(lifted.victimPose,'carried');
   const floor=arenaWrestlingMoveTargets(actual,lifted.floorAt,center,origins,side);
   assert.equal(floor.victimHeight,0);assert.equal(floor.canRelease,false);assert.equal(floor.canKick,false);assert.equal(floor.frontKick,undefined);
   const ankleGripAt=floor.pickupReadyAt+240, grip=arenaWrestlingMoveTargets({...actual,ankleGripAt},ankleGripAt,center,origins,side);
-  origins.floorVictim=grip.victim;origins.ankleDriver=grip.driver;origins.pickupDriver=grip.driver;origins.ankles=grip.gripTargets;
+  origins.floorVictim=grip.victim;origins.ankleDriver=grip.driver;origins.pickupDriver=grip.driver;origins.ankles=grip.gripTargets;origins.ankleFacing=-grip.side;
   const held={...actual,ankleGripAt}; const start=arenaWrestlingMoveTargets(held,ankleGripAt,center,origins,side);
-  const middle=arenaWrestlingMoveTargets(held,ankleGripAt+dragTiming.gripLoad+900,center,origins,side);
-  assert.equal(middle.stage,'drag');assert.equal(middle.victimHeight,0);assert.ok(distance(middle.victim,start.victim)>65,'the real held body moves along the sand before the final throw');
-  assert.ok(Math.hypot(middle.driverVelocity.x,middle.driverVelocity.y)<=105.001); assert.equal(middle.canRelease,false);
+  const middle=arenaWrestlingMoveTargets(held,ankleGripAt+finishTiming.ankleLoad+finishTiming.ankleSpin/2,center,origins,side);
+  assert.equal(middle.stage,'spin');assert.equal(middle.victimHeight,0);assert.deepEqual(middle.driver,origins.ankleDriver);
+  assert.equal(middle.ankleSpin.planar,true);assert.equal(middle.ankleSpin.gripBoth,true);assert.equal(middle.canRelease,false);
   const before=arenaWrestlingMoveTargets(held,start.requiredReleaseAt-1,center,origins,side); assert.equal(before.canRelease,false);
   const release=arenaWrestlingMoveTargets(held,start.requiredReleaseAt,center,origins,side);assert.equal(release.canRelease,true);assert.equal(release.ankleThrowProgress,1);
-  assert.equal(release.requiredReleaseAt-release.dragEndAt,timing.throw);assert.ok(Math.hypot((release.driver.x-500)/303,(release.driver.y-416)/112)<1,'only the held opponent exits after an inside-rim throw');
+  assert.ok(Math.abs(release.requiredReleaseAt-ankleGripAt-finishTiming.ankleLoad-finishTiming.ankleSpin)<1e-8);
+  assert.ok(Math.abs(Math.abs(release.pivotTurn)-Math.PI*2)<1e-8);assert.ok(Math.hypot((release.driver.x-500)/303,(release.driver.y-416)/112)<1);
  }
 });
 
@@ -120,7 +121,7 @@ test('the received spine victim keeps both eyes open until the accelerated floor
   }
   const early = arenaWrestlingMoveTargets(window, contactAt + fallAt + timing.slam * .25, center, origins, side);
   const late = arenaWrestlingMoveTargets(window, contactAt + fallAt + timing.slam * .75, center, origins, side);
-  assert.ok(early.spineDown < .1 && late.spineDown > .7, 'the first receiving beat holds the weight before the faster final downward stroke');
+  assert.ok(early.spineDown < .25 && late.spineDown > .7, 'the receiving lift flows into a downward stroke that accelerates toward the impact');
   assert.ok(floorSeen && impactSeen);
  }
 });

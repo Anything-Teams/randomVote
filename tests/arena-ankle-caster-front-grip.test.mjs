@@ -48,7 +48,7 @@ function context() {
 }
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const midpoint = points => ({ x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 });
-const fixtures = [['backbodydrop', 16], ['scoopslam', 40], ['powerbomb', 4]];
+const fixtures = [['backbodydrop', 16], ['scoopslam', 40], ['powerbomb', 4], ['clothesline', 19], ['spinebuster', 11]];
 
 
 const ease = value => { const p = Math.max(0, Math.min(1, value)); return p * p * (3 - 2 * p); };
@@ -108,7 +108,7 @@ for (const [kind, seed] of fixtures) for (const mirrored of [false, true]) for (
         const shoulder = { x: rig.shoulders[1].x - rig.shoulders[0].x, y: rig.shoulders[1].y - rig.shoulders[0].y };
         const wrist = { x: palms[1].x - palms[0].x, y: palms[1].y - palms[0].y };
         const alignment = (shoulder.x * wrist.x + shoulder.y * wrist.y) / (Math.hypot(shoulder.x, shoulder.y) * Math.hypot(wrist.x, wrist.y));
-        assert.ok(alignment > .5, 'both shoulder slots turn with the two held ankles instead of crossing the arms behind the head');
+        assert.ok(alignment > .5, `${elapsed}: both shoulder slots turn with the two held ankles instead of crossing the arms behind the head (alignment ${alignment.toFixed(3)})`);
         minDepth = Math.min(minDepth, shoulder.y); maxDepth = Math.max(maxDepth, shoulder.y);
         const expectedAlpha = ease((Math.sin(suspension.orbit) + .25) / .5), alphas = ctx.eyeAlphas.get(planned.aggressor) ?? [];
         if (expectedAlpha > 0) {

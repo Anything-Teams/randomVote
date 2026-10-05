@@ -216,7 +216,7 @@ export function arenaAction(round: ArenaRound, elapsed: number): ArenaAction {
   const phase = p >= .52 ? beat.liftProgress : clamp((p - .30) / .22);
   if (round.wrestlingMove && elapsed >= round.wrestlingMove.start && elapsed < round.resolve) {
     const frame = arenaWrestlingMoveTargets(round.wrestlingMove, elapsed, { x: 500, y: 416 }, undefined, round.contactSide);
-    const reverse = ['backbodydrop', 'spinebuster', 'scoopslam'].includes(round.wrestlingMove.kind);
+    const reverse = arenaWrestlingMoveIsCounter(round.wrestlingMove.kind);
     action.stage = frame.stage === 'approach' ? 'approach' : frame.gripStrength > 0 ? 'counter' : frame.stage === 'release' ? 'throw' : 'joint-attack';
     action.lift = frame.victimHeight; action.liftedId = frame.victimHeight > 0 ? v : undefined;
     action.attackers = [reverse && frame.contactAt == null ? v : a];
@@ -496,11 +496,11 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
   const reverse = arenaWrestlingMoveIsCounter(window.kind);
   const a = names?.aggressor ?? (reverse ? '받아낸 선수' : '공격한 선수'), v = names?.victim ?? (reverse ? '달려온 선수' : '상대');
   const labels: Record<ArenaWrestlingMoveKind, string> = { clothesline: '넘어뜨리기', dropkick: '드롭킥', powerbomb: '들어 내려찍기', backbodydrop: '돌진 카운터', spinebuster: '돌진 받아내기', scoopslam: '안아 메치기' };
-  const steps = window.kind === 'clothesline' ? ['달려들기', '한 팔로 넘어뜨리기', '함께 모래에 넘어짐', '자세 회복', '발목으로 접근', '양발목 잡기', '모래 끝까지 끌기', '장내에서 던지기', '상대만 장외']
+  const steps = window.kind === 'clothesline' ? ['달려들기', '목에 팔을 감아 지나치기', '머리를 맞대며 함께 넘어짐', '자세 회복', '발목으로 접근', '양발목 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
     : window.kind === 'dropkick' ? ['달려들기', '발 딛고 도약', '두 발 뻗기', '가슴에 실제 접촉', '공격자 착지', '공격자 자세 회복', '상대만 장외']
-    : window.kind === 'spinebuster' ? ['상대 돌진', '허리 받아내기', '무게 받아 들기', '뒤로 누우며 메치기', '기절', '발목으로 접근', '두 발목 잡기', '모래 끝까지 끌기', '장내에서 던지기', '상대만 장외']
+    : window.kind === 'spinebuster' ? ['상대 돌진', '허리 받아내기', '무게 받아 들기', '뒤로 누우며 메치기', '기절', '발목으로 접근', '두 발목 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
     : window.kind === 'powerbomb' ? ['상대 돌진', '달려온 허리 받아 잡기', '어깨 위로 들어 올리기', '무게를 받쳐 버티기', '등부터 모래에 내려찍기', '자세 회복', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
-    : window.kind === 'scoopslam' ? ['상대 돌진', '발 딛고 준비', '상체와 허벅지 받치기', '몸에 붙여 안아 들기', '발을 딛고 몸 돌리기', '함께 낮아지며 등부터 메치기', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
+    : window.kind === 'scoopslam' ? ['상대 돌진', '발 딛고 준비', '상체와 허벅지 받치기', '머리 위까지 안아 들기', '높이 받쳐 몸 돌리기', '힘을 실어 등부터 내려찍기', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외']
     : ['거리 좁히기', '발 딛고 준비', labels[window.kind], '머리 위로 들어 넘기기', '모래 위에 넘어졌다', '기절', '발목으로 접근', '두 발끝 잡기', '발끝 잡고 한 바퀴', '회전하며 손 놓기', '상대만 장외'];
   const stage = frame.stage as string;
   let step = Math.max(0, ['approach', 'load', 'attack', 'contact', 'fall', 'groggy', 'ankle-approach', 'ankle-grip', 'toss', 'release'].indexOf(stage));
@@ -531,14 +531,14 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
     word = '돌진 카운터!'; title = '머리 위로 들어 넘기기!';
     detail = `${a}가 달려온 ${v}를 머리 위로 들어 올립니다. 잡은 몸을 등 뒤로 넘길 때까지 두 발로 버팁니다.`;
   } else if (window.kind === 'scoopslam' && (stage === 'lift' || stage === 'turn')) {
-    word = '안아 메치기!'; title = stage === 'lift' ? '몸에 붙여 안아 들어 올리기' : '발을 고쳐 딛으며 몸을 돌린다';
-    detail = stage === 'lift' ? `${a}가 ${v}의 상체와 허벅지를 받쳐 가슴 옆으로 안아 올립니다.` : `${a}가 두 발로 무게를 받으며 골반과 상체를 함께 돌립니다. 안긴 ${v}의 몸도 잡은 팔을 따라 돌아갑니다.`;
+    word = '안아 메치기!'; title = stage === 'lift' ? '머리 위까지 안아 들어 올리기' : '머리 위에서 몸을 돌린다';
+    detail = stage === 'lift' ? `${a}가 ${v}의 상체와 허벅지를 받쳐 자기 머리 위까지 안아 올립니다.` : `${a}가 두 발로 무게를 받으며 골반과 상체를 함께 돌립니다. 안긴 ${v}의 몸도 잡은 팔을 따라 돌아갑니다.`;
   } else if (window.kind === 'powerbomb' && (stage === 'lift' || stage === 'turn')) {
     word = '들어올리기!'; title = stage === 'lift' ? '어깨 위로 들어 올리기!' : '어깨 위에서 무게를 받친다';
     detail = `${a}가 두 손으로 ${v}의 허리를 받쳐 어깨 위까지 들어 올립니다. ${v}는 아직 눈을 뜬 채 균형을 잡으려 합니다.`;
   } else if (stage === 'attack' || stage === 'contact' || stage === 'fall') {
     const contact = window.contactAt != null && elapsed >= window.contactAt;
-    if (window.kind === 'clothesline') detail = contact ? `${a}의 팔꿈치 안쪽이 ${v}의 목에 걸렸습니다. 돌진하던 힘에 두 선수가 함께 모래 위로 넘어집니다.` : `${a}가 달려들며 한 팔을 ${v}의 목과 윗가슴 앞으로 뻗습니다.`;
+    if (window.kind === 'clothesline') detail = contact ? `${a}의 팔꿈치 안쪽이 ${v}의 목에 감겼습니다. 상대를 지나쳐 부딪친 두 선수가 머리를 맞대며 모래 위로 넘어집니다.` : `${a}가 달려들며 한 팔을 ${v}의 목과 윗가슴 앞으로 뻗습니다.`;
     else if (window.kind === 'dropkick') detail = contact ? `${a}의 두 발바닥이 ${v}의 가슴에 닿았습니다. ${a}는 다리를 거두며 모래판 안에 착지할 준비를 합니다.` : `${a}가 도약해 두 발바닥을 ${v}의 가슴 앞으로 뻗습니다.`;
     else if (window.kind === 'powerbomb') {
       word = stage === 'fall' ? '내려찍기!' : '잡기!'; title = stage === 'fall' ? '등부터 모래에 내려찍기!' : '허리를 두 손으로 감싸 잡는다';
@@ -563,7 +563,7 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
     detail = `${a}가 ${v}의 두 발끝을 놓지 않고 발을 바꿔 디디며 한 바퀴 돕니다. ${v}의 몸은 잡힌 발끝을 따라 바깥으로 돌아갑니다.`;
   } else if (stage === 'toss' || stage === 'release') {
     word = '던지기!'; title = stage === 'release' ? '손을 놓아 장외로!' : '다리를 잡고 던지기!';
-    const spinningFinish = window.kind === 'backbodydrop' || window.kind === 'scoopslam' || window.kind === 'powerbomb';
+    const spinningFinish = window.kind !== 'dropkick';
     if (spinningFinish) title = stage === 'release' ? '회전 끝에서 바로 장외로!' : '돌던 힘으로 던지기!';
     detail = spinningFinish ? stage === 'release' ? `${a}가 한 바퀴를 마치는 순간 손을 놓았습니다. ${v}는 돌던 힘 그대로 모래판 밖으로 날아갑니다.` : `${a}가 두 발끝을 잡은 채 계속 돕니다. 한 바퀴를 마치는 순간 손을 놓아 ${v}를 날립니다.` : stage === 'release' ? `${a}가 잡은 손을 놓았습니다. ${v}만 모래판 밖으로 날아갑니다.` : `${a}가 잡은 두 발목을 들어 올리고 몸의 힘을 실어 옆으로 넘깁니다. 손은 아직 붙어 있습니다.`;
   } else {
@@ -571,8 +571,8 @@ export function arenaWrestlingPresentation(round: ArenaRound, elapsed: number, n
   }
   if (reverse && window.contactAt == null && frame.counterPreparation === 0) { wordId = round.victim; word = '돌진!'; title = '상대가 달려온다'; }
   if (window.kind === 'dropkick') step = stage === 'approach' ? 0 : stage === 'load' ? 1 : stage === 'attack' ? 2 : stage === 'contact' ? 3 : stage === 'land' ? 4 : stage === 'recover' ? 5 : 6;
-  if (window.kind === 'clothesline') step = stage === 'approach' || stage === 'load' ? 0 : stage === 'attack' ? 1 : stage === 'contact' || stage === 'fall' ? 2 : stage === 'recover' || stage === 'groggy' ? 3 : stage === 'ankle-approach' ? 4 : stage === 'ankle-grip' ? 5 : stage === 'drag' ? 6 : stage === 'toss' ? 7 : 8;
-  if (window.kind === 'spinebuster') step = stage === 'approach' ? 0 : stage === 'load' || stage === 'attack' || stage === 'contact' ? 1 : stage === 'lift' ? 2 : stage === 'fall' ? 3 : stage === 'groggy' || stage === 'recover' ? 4 : stage === 'ankle-approach' ? 5 : stage === 'ankle-grip' ? 6 : stage === 'drag' ? 7 : stage === 'toss' ? 8 : 9;
+  if (window.kind === 'clothesline') step = stage === 'approach' || stage === 'load' ? 0 : stage === 'attack' ? 1 : stage === 'contact' || stage === 'fall' ? 2 : stage === 'recover' || stage === 'groggy' ? 3 : stage === 'ankle-approach' ? 4 : stage === 'ankle-grip' ? 5 : stage === 'spin' ? 6 : stage === 'toss' ? 7 : 8;
+  if (window.kind === 'spinebuster') step = stage === 'approach' ? 0 : stage === 'load' || stage === 'attack' || stage === 'contact' ? 1 : stage === 'lift' ? 2 : stage === 'fall' ? 3 : stage === 'groggy' || stage === 'recover' ? 4 : stage === 'ankle-approach' ? 5 : stage === 'ankle-grip' ? 6 : stage === 'spin' ? 7 : stage === 'toss' ? 8 : 9;
   if (window.kind === 'powerbomb') step = stage === 'approach' || stage === 'load' ? 0 : stage === 'attack' || stage === 'contact' ? 1 : stage === 'lift' ? 2 : stage === 'turn' ? 3 : stage === 'fall' ? 4 : stage === 'recover' ? 5 : stage === 'groggy' ? 6 : stage === 'ankle-approach' ? 7 : stage === 'ankle-grip' ? 8 : stage === 'spin' ? 9 : stage === 'toss' ? 10 : 11;
   if (window.kind === 'scoopslam') step = stage === 'approach' ? 0 : stage === 'load' ? 1 : stage === 'attack' || stage === 'contact' ? 2 : stage === 'lift' ? 3 : stage === 'turn' ? 4 : stage === 'fall' ? 5 : stage === 'groggy' || stage === 'recover' ? 6 : stage === 'ankle-approach' ? 7 : stage === 'ankle-grip' ? 8 : stage === 'spin' ? 9 : stage === 'toss' ? 10 : 11;
   if (window.kind === 'backbodydrop') step = stage === 'lift' ? 3 : stage === 'spin' ? 8 : stage === 'toss' ? 9 : stage === 'release' ? 10 : step;
@@ -1140,7 +1140,7 @@ export function arenaNarration(round: ArenaRound | undefined, candidates: Candid
     const age = elapsed - round.impact, timing = arenaFloorExitTiming(round);
     if (round.elbowGripAt !== null && elapsed >= round.impact && age < timing.recoverUntil) return age < timing.stunnedUntil ? { title: '쓰러진 상대의 발끝을 붙잡는다', detail: `${a}가 누운 ${v}의 발끝에 다가갑니다. 모래 위에 누운 몸의 두 발끝을 양손으로 붙잡습니다.` }
       : age < timing.dragUntil ? { title: '발끝 잡아 끌기 · 경계가 가까워진다', detail: `${a}가 발을 바꿔 디디며 ${v}를 모래 위로 끕니다. 쓰러진 몸은 경계 쪽으로 따라 움직입니다.` }
-      : age < timing.throwUntil || round.floorFinish && round.floorFinish.releaseAt == null ? round.floorFinish && round.floorFinish.throwAt == null ? { title: '모래판 안에 발을 딛고 발끝을 잡는다', detail: `${a}가 경계 안쪽에 멈춰 ${v}의 두 발끝을 단단히 붙잡습니다. 아직 손을 놓지 않았습니다.` } : { title: '끝에서 들어 올려 던지기!', detail: `${a}가 모래판 안에 발을 딛고 두 발끝을 머리 위로 들어 올립니다. 잡은 몸을 경계 쪽으로 넘길 때까지 손은 붙어 있습니다.` }
+      : age < timing.throwUntil || round.floorFinish && round.floorFinish.releaseAt == null ? round.floorFinish && round.floorFinish.throwAt == null ? { title: '모래판 안에 발을 딛고 발끝을 잡는다', detail: `${a}가 경계 안쪽에 멈춰 ${v}의 두 발끝을 단단히 붙잡습니다. 아직 손을 놓지 않았습니다.` } : { title: '끝에서 들어 올려 던지기!', detail: `${a}가 모래판 안에 발을 딛고 두 발끝을 단단히 잡고 몸의 힘을 실어 위쪽으로 던집니다. 몸을 들어 올리는 동안 손은 붙어 있습니다. 손을 놓으면 상대가 포물선을 그리며 경계 밖으로 날아갑니다.` }
       : age < timing.tossUntil ? { title: '끝에서 던졌다! 상대만 장외로', detail: `${a}가 모래판 안에 발을 딛고 잡은 발끝을 놓아 넘깁니다. ${v}만 경계 밖으로 날아갑니다.` }
       : age < timing.landUntil ? { title: '모래판 밖에 착지했다', detail: `${v}가 경계 아래로 떨어졌습니다. ${a}는 모래판 안에서 자세를 고칩니다.` }
       : { title: '넘어진 선수가 다시 몸을 일으킨다', detail: `${v}가 장외에서 몸을 일으킵니다. 자세를 회복한 뒤 시상 자리로 이동합니다.` };

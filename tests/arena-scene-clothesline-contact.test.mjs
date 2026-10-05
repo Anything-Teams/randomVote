@@ -34,15 +34,15 @@ const props = { candidates: ['1', '2', '3', '4', '5'].map(id => ({ id, name: id,
 const planned = arenaRounds(order, props.duration, props.arenaRushRoll, props.arenaEscapeSeed).find(round => round.wrestlingMove?.kind === 'clothesline');
 assert.ok(planned);
 
-for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natural clothesline reaches the live neck and completes its knockout and drag throw (${mirrored ? 'mirrored' : 'ordinary'}, ${step}ms)`, () => {
+for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natural clothesline reaches the live neck and completes its knockout and full ankle swing (${mirrored ? 'mirrored' : 'ordinary'}, ${step}ms)`, () => {
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() };
   // Mirror only the real initial layout; keep every earlier fight and contact.
   setInitialize((current, reset) => {
     if (current !== sim || !reset || !mirrored) return;
     for (const body of sim.bodies.values()) { body.x = 1000 - body.x; body.facing *= -1; }
   });
-  let ran = false, contactSeen = false, knockoutSeen = false, dragged = false, released = false, finished = false, stoppedAt;
-  let dragOrigin, dragDistance = 0;
+  let ran = false, contactSeen = false, knockoutSeen = false, released = false, finished = false, stoppedAt;
+  let ankleFrames = 0, spinFrames = 0, previousTurn;
   for (let elapsed = 0; elapsed <= 70000; elapsed += step) {
     render(ctx, props, elapsed, elapsed, sim, step, false);
     const actual = sim.contacts.get(planned.id), round = actual?.round, window = round?.wrestlingMove;
@@ -67,15 +67,37 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       assert.ok(distance(liveNeck, driverRig.hands[1]) > 12, 'the fist extends beyond the neck instead of punching it');
     }
     if (window.contactAt != null && elapsed >= frame.floorAt && !sim.exits.has(round.victim)) knockoutSeen ||= victim.pose === 'stunned' && frame.victimSlam?.slump === 1;
-    if (frame.stage === 'drag') {
-      dragOrigin ??= { x: driver.x, y: driver.y };
-      dragDistance = Math.max(dragDistance, distance(dragOrigin, driver));
-      dragged ||= dragDistance > 35 && driver.gripMode === 'ankle' && driver.gripStrength > .95;
+    if (window.ankleGripAt != null && !sim.exits.has(round.victim)) {
+      ankleFrames++;
+      assert.ok(knockoutSeen, 'the opponent becomes unconscious on the floor before the real ankle pickup');
+      assert.equal(driver.gripMode, 'ankle');
+      assert.equal(victim.spinSuspension?.planar, true, 'the selected finish swings the body through the horizontal plane');
+      const driverRig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
+      for (let limb = 0; limb < 2; limb++) {
+        assert.ok(distance(driverRig.hands[limb], victimRig.feet[limb]) < 1, `${elapsed}: each actual palm supports its own material toe through the complete turn`);
+        assert.ok(Math.abs(distance(driverRig.shoulders[limb], driverRig.elbows[limb]) - 11 * driver.scale) < .001);
+        assert.ok(Math.abs(distance(driverRig.elbows[limb], driverRig.hands[limb]) - 10.5 * driver.scale) < .001);
+        const skeleton = victim.animation.skeleton;
+        assert.ok(Math.abs(distance(skeleton.hips[limb], skeleton.knees[limb]) - 11) < .02);
+        assert.ok(Math.abs(distance(skeleton.knees[limb], skeleton.feet[limb]) - 11) < .02);
+      }
+      assert.equal(driver.pivotTurn, frame.pivotTurn, 'the painted caster follows the actual full-turn clock');
+      if (previousTurn !== undefined) assert.ok(Math.abs(driver.pivotTurn) >= previousTurn, 'the held rotation does not reverse or reset');
+      previousTurn = Math.abs(driver.pivotTurn);
+      if (frame.stage === 'spin') spinFrames++;
     }
-    if (sim.exits.has(round.victim)) released = true;
-    else assert.equal(capturedRanks()[round.victim], undefined, 'the drawn rank cannot eliminate the victim before the actual held throw');
+    if (sim.exits.has(round.victim) && !released) {
+      assert.ok(ankleFrames >= (step === 16 ? 8 : 4) && spinFrames >= (step === 16 ? 55 : 17), 'the live foot pickup and complete revolution precede the hand opening');
+      assert.ok(Math.abs(driver.pivotTurn) >= Math.PI * 2 - 1e-8, 'the real caster completes one whole circle before releasing');
+      assert.equal(frame.requiredReleaseAt, window.ankleGripAt + 1920);
+      assert.ok(elapsed - frame.requiredReleaseAt >= 0 && elapsed - frame.requiredReleaseAt < step, 'the palms open on the first completed-turn frame');
+      const flight = sim.exits.get(round.victim).spinFlight;
+      assert.ok(flight && Math.abs(flight.velocity.x) > 50 && Math.abs(flight.velocity.x) > Math.abs(flight.velocity.y) * 3, 'the actual release continues the lateral swing momentum');
+      released = true;
+    }
+    else if (!released) assert.equal(capturedRanks()[round.victim], undefined, 'the drawn rank cannot eliminate the victim before the actual held throw');
     if (Object.keys(capturedRanks()).length === order.length) { finished = true; break; }
   }
-  assert.ok(contactSeen && knockoutSeen && dragged && released && finished, 'the same running strike must proceed through knockout, actual dragging, release and all drawn ranks');
+  assert.ok(contactSeen && knockoutSeen && released && finished, 'the same running strike must proceed through knockout, actual two-toe support, one full revolution, release and all drawn ranks');
   assert.deepEqual(capturedRanks(), { '1': 5, '2': 4, '3': 3, '4': 2, '5': 1 });
 });

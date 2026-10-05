@@ -335,7 +335,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   const speed = Math.hypot(actor.velocityX, actor.velocityY), air = !!slam || carrying || superman || dropkick || bulldog && ((actor.suspension ?? 0) > .001 || Math.abs(actor.angle) > .2) || pose === 'elbow' && (actor.suspension ?? 0) > 0 || ['airborne', 'held', 'roll', 'land', 'sidekick', 'stunned'].includes(pose) || pose === 'recover' && !slideRise;
   const state = actor.animation ?? createArenaFighterAnimation();
   const plantedGrip = actor.grappleEffort !== undefined && !!actor.gripTarget;
-  const moving = speed > (state.moving ? 3 : 8) && !air && !plantedGrip && !pairLift && !actor.carrierRelease?.stance && actor.ankleThrowProgress === undefined && !sliding, backward = actor.velocityX * facing < -5;
+  const scoopStance = pose === 'scoopslam' && actor.gripMode === 'cradle';
+  const moving = speed > (state.moving ? 3 : 8) && !air && !plantedGrip && !pairLift && !scoopStance && !actor.carrierRelease?.stance && actor.ankleThrowProgress === undefined && !sliding, backward = actor.velocityX * facing < -5;
   const signature = candidate.id + ':' + index + ':' + candidate.color;
   const reset = !state.motion || !Number.isFinite(state.motion.clapTurn) || !Number.isFinite(state.motion.cheerTurn) || !Number.isFinite(state.motion.applause) || state.signature !== signature || state.epoch !== actor.motionEpoch || actor.motionImmediate || clock < (state.clock ?? clock) || actor.gaitDistance < state.distance - 1;
   const delta = reset ? 0 : Math.max(0, Math.min(50, clock - (state.clock ?? clock)));
@@ -360,7 +361,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   if (actor.ankleApproach !== undefined && !state.ankleReach && !reset && state.contactPoints) {
     const source = state.contactPoints;
     state.ankleReach = { at: clock - delta, root: { ...source.origin }, shoulders: source.shoulders.map(point => ({ ...point })), elbows: source.elbows.map(point => ({ ...point })), hands: source.hands.map(point => ({ ...point })), angles: source.hands.map((hand, arm) => [Math.atan2(source.elbows[arm].y - source.shoulders[arm].y, source.elbows[arm].x - source.shoulders[arm].x), Math.atan2(hand.y - source.elbows[arm].y, hand.x - source.elbows[arm].x)]) };
-    if ((state.pose === 'scoopslam' || (actor.scoopRecover ?? 0) > 0 || state.pose === 'backbodydrop' || state.pose === 'spinebuster' || state.pose === 'powerbomb' || state.pose === 'guard' && (actor.powerbombLift ?? 0) > 0 || state.pose === 'recover' && ((actor.spinebusterProgress ?? 0) > 0 || (actor.powerbombLift ?? 0) > 0)) && state.motion) {
+    if ((state.pose === 'scoopslam' || (actor.scoopRecover ?? 0) > 0 || state.pose === 'backbodydrop' || state.pose === 'spinebuster' || state.pose === 'powerbomb' || state.pose === 'guard' && (actor.powerbombLift ?? 0) > 0 || state.pose === 'recover' && ((actor.spinebusterProgress ?? 0) > 0 || (actor.powerbombLift ?? 0) > 0 || (actor.bulldogProgress ?? 0) > 0)) && state.motion) {
       // The new resting direction can put the ankles behind the caster.
       // Turn the loaded trunk from its actual world lean before bending down.
       const motion = { ...state.motion }, reversed = state.facing !== undefined && state.facing !== facing;
@@ -525,14 +526,14 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
   }
   if (pose === 'scoopslam') {
     const progress = clamp(actor.scoopSlamProgress ?? phase), gather = actor.scoopLoad ?? ease(progress / .13), rise = actor.scoopLift ?? ease((progress - .08) / .37), turn = actor.scoopTurn ?? ease((progress - .35) / .28), down = actor.scoopDown ?? ease((progress - .55) / .45);
-    // Receive the runner across the chest, pivot over the supporting hip,
-    // then lower one side with the opponent's back onto the sand.
+    // Receive the runner across the chest, stand below the complete body,
+    // then drive both overhead support arms down through the back-first slam.
     target.crouch = mix(mix(1.2 + personality * .25, 5.2, gather), .9, rise) + down * 7.6;
     target.hipX = mix(breath * .12, -1.8, gather) * (1 - rise) + turn * .8 + down * 2.4;
     target.lean = mix(mix(2 + personality * .4, 17, gather), -2, rise) - Math.sin(turn * Math.PI) * 4 + turn * 4 + down * 27;
-    target.backX = mix(mix(-5, 4, gather), 8, down); target.frontX = mix(mix(15, 14, gather), 18, down);
-    target.backY = mix(mix(-12, -16, gather), -6, down); target.frontY = mix(mix(-15, -10, gather), -4, down);
-    target.head = -target.lean * .2 + clamp(actor.slamImpact ?? 0); target.mouth = 2.1; target.shoulderLift = rise * 1.1 * (1 - down); target.clapTurn = 0; target.cheerTurn = 0; target.applause = 0;
+    target.backX = mix(mix(mix(-5, 4, gather), -10, rise), 8, down); target.frontX = mix(mix(mix(15, 14, gather), 10, rise), 18, down);
+    target.backY = mix(mix(mix(-12, -16, gather), -49, rise), -6, down); target.frontY = mix(mix(mix(-15, -10, gather), -49, rise), -4, down);
+    target.head = mix(-target.lean * .2, 9, rise) * (1 - down) + clamp(actor.slamImpact ?? 0); target.mouth = 2.1; target.shoulderLift = rise * 14.4 * (1 - down); target.clapTurn = 0; target.cheerTurn = 0; target.applause = 0;
     const recover = clamp(actor.scoopRecover ?? 0);
     const standing: Partial<Motion> = { crouch: 1.2 + personality * .25, hipX: breath * .12, lean: 2 + personality * .4, head: -(2 + personality * .4) * .3, backX: -5, frontX: 15, backY: -12, frontY: -15, shoulderLift: 0 };
     for (const key of Object.keys(standing) as (keyof Motion)[]) target[key] = mix(target[key], standing[key]!, recover);
@@ -846,21 +847,32 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
       if (leg === targetedLeg) return foot;
       const memory = state.feet![leg];
       const reach = Math.hypot(foot.x - hip.x - hipOffsets[leg].x, foot.y - hip.y - hipOffsets[leg].y);
-      const sharedStance = pairLift || actor.carrierRelease?.stance !== undefined;
+      const sharedStance = pairLift || actor.carrierRelease?.stance !== undefined || scoopStance;
       const loadedStance = sharedStance || pose === 'drag' && actor.gripMode === 'ankle' || actor.ankleThrowProgress !== undefined;
       const otherSupport = state.feet![1 - leg], canStep = !loadedStance || !otherSupport.replant && !otherSupport.swinging && otherSupport.lift < .05;
       // A reversal in any direction can leave the material heel behind its
       // support hip. Take a replacement step before the expired stance
       // pulls the pelvis sideways and down into a seated silhouette.
-      const replacementTime = sharedStance ? 100 : 135;
-      const stepTime = pose === 'run' ? Math.min(.135, 11 * scale / Math.max(1, speed)) : replacementTime / 1000;
+      const replacementBase = sharedStance ? 100 : 135;
+      const stepTime = pose === 'run' ? Math.min(.135, 11 * scale / Math.max(1, speed)) : replacementBase / 1000;
       const depthReplacement = sharedStance && Math.abs(foot.y) > 2;
-      if (!reset && canStep && actor.pivotTurn === undefined && !memory.replant && !memory.swinging && (reach > 20.7 || depthReplacement)) {
+      // A cradled overhead body can move the receiving root into depth.
+      // Replant the older heel first; repeatedly servicing leg zero leaves
+      // the other supporting foot behind the shadow for the whole turn.
+      const scoopPriority = !scoopStance || Math.abs(foot.x - hip.x - hipOffsets[leg].x) > 20.7
+        || Math.abs(memory.ground.y - y) >= Math.abs(otherSupport.ground.y - y) - .01;
+      if (!reset && canStep && scoopPriority && actor.pivotTurn === undefined && !memory.replant && !memory.swinging && (reach > 20.7 || depthReplacement)) {
         memory.replant = { at: clock, from: { ...memory.ground }, to: { x: x + facing * (leg ? 4 : -4) * scale + actor.velocityX * stepTime, y: y + actor.velocityY * stepTime } };
         memory.settleAt = -Infinity;
         memory.to = { ...memory.replant.to };
       }
       if (!memory.replant) return foot;
+      // The shared fall can leave a heel on the far side of the new ankle
+      // stance. Give that longer real step its own fixed duration; a 135 ms
+      // replacement cannot move a normal sole sixty pixels smoothly.
+      const clotheslineStep = (actor.bulldogProgress ?? 0) > 0 && actor.gripMode === 'ankle';
+      const replacementTime = clotheslineStep ? Math.max(replacementBase,
+        1.5 * Math.hypot(memory.replant.to.x - memory.replant.from.x, memory.replant.to.y - memory.replant.from.y) / 450 * 1000) : replacementBase;
       const p = clamp((clock - memory.replant.at) / replacementTime);
       memory.ground = pointMix(memory.replant.from, memory.replant.to, ease(p));
       memory.lift = Math.sin(p * Math.PI) * (sharedStance ? 2 : 3.2); memory.swinging = true;
@@ -1098,6 +1110,24 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
         : knee(shoulder, followHand, 11, 10.5, arm ? -1 : 1);
       const restShoulder = { x: shoulder.x, y: -20 }, restHand = { x: arm ? 15 : -5, y: arm ? -15 : -12 };
       const restElbow = knee(restShoulder, restHand, 11, 10.5, -1);
+      const sharedRelease = actor.pairLift !== undefined && (actor.gripMode === 'shoulder' || actor.gripMode === 'ankle') && !source.followThrough;
+      if (sharedRelease) {
+        // A shared heave opens the supported elbow, then brings that same
+        // palm back to guard. Interpolating the two bones independently
+        // folded the forearm all the way through the upper arm on return.
+        const startHand = { x: upper.x + lower.x, y: upper.y + lower.y };
+        const follow = { x: followHand.x - shoulder.x, y: followHand.y - shoulder.y };
+        const rest = { x: restHand.x - restShoulder.x, y: restHand.y - restShoulder.y };
+        const startAngle = Math.atan2(startHand.y, startHand.x), followAngle = unwrap(startAngle, Math.atan2(follow.y, follow.x));
+        const restAngle = unwrap(followAngle, Math.atan2(rest.y, rest.x));
+        const angle = mix(mix(startAngle, followAngle, release), restAngle, retract);
+        const radius = mix(mix(Math.hypot(startHand.x, startHand.y), Math.hypot(follow.x, follow.y), release), Math.hypot(rest.x, rest.y), retract);
+        const palm = { x: shoulder.x + Math.cos(angle) * radius, y: shoulder.y + Math.sin(angle) * radius };
+        const startSolutions = [1, -1].map(bend => ({ bend, point: knee({ x: 0, y: 0 }, startHand, upperArm, lowerArm, bend) }));
+        const bend = startSolutions.reduce((nearest, candidate) => Math.hypot(candidate.point.x - upper.x, candidate.point.y - upper.y) < Math.hypot(nearest.point.x - upper.x, nearest.point.y - upper.y) ? candidate : nearest).bend;
+        elbows[arm] = knee(shoulder, palm, upperArm, lowerArm, bend);
+        return palm;
+      }
       const startUpper = Math.atan2(upper.y, upper.x), startLower = Math.atan2(lower.y, lower.x);
       const arcs = source.followThrough ? state.carrierReleaseArcs?.[arm] : undefined;
       const followUpper = unwrap(arcs?.follow[0] ?? startUpper, Math.atan2(followElbow.y - shoulder.y, followElbow.x - shoulder.x));
@@ -1360,6 +1390,24 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     hands = hands.map((hand, arm) => {
       const targetShoulder = worldPoint(bodyPoint(shoulders[arm])), targetElbow = worldPoint(bodyPoint(elbows[arm])), targetHand = worldPoint(bodyPoint(hand));
       const startUpper = Math.atan2(source.elbows[arm].y - source.shoulders[arm].y, source.elbows[arm].x - source.shoulders[arm].x), startLower = Math.atan2(source.hands[arm].y - source.elbows[arm].y, source.hands[arm].x - source.elbows[arm].x);
+      if (state.pairReach) {
+        // Reach with one connected palm path. Separate upper/forearm angle
+        // blends could close the elbow completely while picking up the body.
+        const from = { x: source.hands[arm].x - source.shoulders[arm].x, y: source.hands[arm].y - source.shoulders[arm].y };
+        const to = { x: targetHand.x - targetShoulder.x, y: targetHand.y - targetShoulder.y };
+        const fromElbow = { x: source.elbows[arm].x - source.shoulders[arm].x, y: source.elbows[arm].y - source.shoulders[arm].y };
+        const toElbow = { x: targetElbow.x - targetShoulder.x, y: targetElbow.y - targetShoulder.y };
+        const branch = (palm: Point, elbow: Point) => -Math.sign(palm.x * elbow.y - palm.y * elbow.x) || -facing;
+        const fromBend = branch(from, fromElbow), toBend = branch(to, toElbow);
+        const startAngle = Math.atan2(from.y, from.x), angle = startAngle + Math.atan2(Math.sin(Math.atan2(to.y, to.x) - startAngle), Math.cos(Math.atan2(to.y, to.x) - startAngle)) * progress;
+        const reach = mix(Math.hypot(from.x, from.y), Math.hypot(to.x, to.y), progress);
+        const radius = fromBend === toBend ? reach : mix(reach, (upperArm + lowerArm - .02) * scale, Math.sin(progress * Math.PI) ** 2);
+        const shoulder = pointMix({ x: source.shoulders[arm].x + x - source.root.x, y: source.shoulders[arm].y + y - source.root.y }, targetShoulder, progress);
+        const palm = { x: shoulder.x + Math.cos(angle) * radius, y: shoulder.y + Math.sin(angle) * radius };
+        const elbow = knee(shoulder, palm, upperArm * scale, lowerArm * scale, progress < .5 ? fromBend : toBend);
+        Object.assign(shoulders[arm], bodyLocal(shoulder)); Object.assign(elbows[arm], bodyLocal(elbow));
+        return bodyLocal(palm);
+      }
       const targetAngles = [Math.atan2(targetElbow.y - targetShoulder.y, targetElbow.x - targetShoulder.x), Math.atan2(targetHand.y - targetElbow.y, targetHand.x - targetElbow.x)];
       targetAngles.forEach((angle, bone) => {
         const previous = source.angles[arm][bone], turn = Math.atan2(Math.sin(angle - previous), Math.cos(angle - previous));

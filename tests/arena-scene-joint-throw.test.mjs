@@ -75,6 +75,17 @@ function snapshot(actor, body) {
   return { x: actor.x, y: actor.y, depthY: actor.depthY, height: actor.depthY - actor.y, heldHeight: body.y - actor.animation.contactPoints.origin.y, angle: actor.angle, facing: actor.facing, pose: actor.pose, contacts: structuredClone(actor.animation.contactPoints) };
 }
 const points = contacts => [contacts.origin, contacts.head, contacts.waist, ...contacts.shoulders, ...contacts.elbows, ...contacts.hands, ...contacts.feet];
+function assertSupportedArmShape(actor, detail) {
+  if (actor.pose !== 'pairlift') return;
+  const rig = actor.animation.contactPoints;
+  for (let arm = 0; arm < 2; arm++) {
+    const upper = { x: rig.shoulders[arm].x - rig.elbows[arm].x, y: rig.shoulders[arm].y - rig.elbows[arm].y };
+    const lower = { x: rig.hands[arm].x - rig.elbows[arm].x, y: rig.hands[arm].y - rig.elbows[arm].y };
+    const angle = Math.acos(Math.max(-1, Math.min(1, (upper.x * lower.x + upper.y * lower.y) / (Math.hypot(upper.x, upper.y) * Math.hypot(lower.x, lower.y))))) * 180 / Math.PI;
+    assert.ok(angle > 38, `the real support elbow cannot close through its upper arm while picking up or releasing the body: ${detail}/${arm}/${angle}`);
+    assert.ok(Math.abs(Math.hypot(upper.x, upper.y) - 11 * actor.scale) < .001 && Math.abs(Math.hypot(lower.x, lower.y) - 10.5 * actor.scale) < .001, `both connected support bones keep their ordinary lengths: ${detail}/${arm}`);
+  }
+}
 const intersectsViewport = values => Math.max(...values.map(point => point.x)) > 0 && Math.min(...values.map(point => point.x)) < 1000 && Math.max(...values.map(point => point.y)) > 0 && Math.min(...values.map(point => point.y)) < 620;
 const observedSides = new Set();
 
@@ -203,6 +214,7 @@ for (const reversed of [false, true]) for (const delta of [16, 50]) test(`the ac
       firstRelease ??= age;
       for (const id of casters) {
         const { actor, contacts } = now.get(id), detail = `${reversed}/${delta}/${age}/${id}`;
+        assertSupportedArmShape(actor, detail);
         releaseFacings.set(id, releaseFacings.get(id) ?? actor.facing);
         assert.equal(actor.facing, releaseFacings.get(id), `a caster cannot instantly turn back through its own release arms: ${detail}`);
         assert.ok(actor.carrierRelease, `the support hands keep one continuous release clock: ${detail}`);
@@ -232,13 +244,14 @@ for (const reversed of [false, true]) for (const delta of [16, 50]) test(`the ac
   assert.ok(firstRelease !== undefined && recovered && complete, 'the natural live encounter exercises release, arm retraction and the complete outside landing');
 });
 
-for (const delta of [16, 50]) test(`shared pickup cannot move the fallen body before all four real hands meet it (${delta}ms)`, () => {
-  const scene = game(false, delta);
+for (const reversed of [false, true]) for (const delta of [16, 50]) test(`shared pickup cannot move the fallen body before all four real hands meet it (${reversed ? 'reversed' : 'normal'}/${delta}ms)`, () => {
+  const scene = game(reversed, delta);
   let previous, waiting = false, pickup = false, released = false;
   for (let elapsed = 0; elapsed <= planned.resolve + 700; elapsed += delta) {
     const actors = scene.step(elapsed), contact = scene.sim.contacts.get(planned.id);
     if (!contact?.pairCarryOrigins?.pickup) continue;
     const round = contact.round, frame = arenaPairRushTargets(round, elapsed, contact.center, contact.chargerOrigin, contact.pairCarryOrigins);
+    for (const id of frame.pairIds) assertSupportedArmShape(actors.get(id), `${reversed}/${delta}/${elapsed}/${frame.stage}/${id}`);
     const victim = actors.get(planned.victim);
     if (!victim || scene.sim.exits.has(planned.victim)) { released = true; continue; }
     const joints = victim.animation.contactPoints;

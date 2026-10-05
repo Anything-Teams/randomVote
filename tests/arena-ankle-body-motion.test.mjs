@@ -42,6 +42,7 @@ for (const [kind, seed] of fixtures) for (const mirrored of [false, true]) for (
       for (const body of sim.bodies.values()) { body.x = 1000 - body.x; body.facing *= -1; body.vx = 0; body.vy = 0; body.motorX = 0; body.motorY = 0; body.animation = undefined; }
     });
     let previous, release, floorLength, heldFrames = 0, freeFrames = 0, complete = false;
+    const fullSpin = !['suplex', 'elbow'].includes(kind);
     for (let elapsed = 0; elapsed < 30000; elapsed += delta) {
       capture().stages.clear(); render(ctx, props, elapsed, elapsed, sim, delta, false);
       const { actors, ranks: actualRanks, stages } = capture(), actual = sim.contacts.get(planned.id)?.round;
@@ -54,13 +55,14 @@ for (const [kind, seed] of fixtures) for (const mirrored of [false, true]) for (
       const feet = midpoint(rig.feet), waist = rig.waist;
       const released = exit?.spinFlight && exit.launchedAt !== undefined;
       if (suspension && !released) {
+        assert.equal(!!suspension.planar, fullSpin, 'only the two grounded drag finishes use a short rim throw');
         floorLength ??= distance(rig.head, feet);
         const sandPlane = Math.max(caster.depthY ?? caster.y, victim.depthY ?? caster.y);
         assert.ok(rig.head.y <= sandPlane + 3, `the supported crown cannot pass through the sand during a lift or swing: ${elapsed}`);
         if (suspension.weight === 1) {
           heldFrames++;
           assert.ok(inside(sim.bodies.get(planned.aggressor)), 'the loaded feet remain inside the sand');
-          if (suspension.planar) assert.ok(distance(rig.head, feet) >= floorLength * .5, 'the horizontal swing keeps a recognizable whole body through its depth turn');
+          if (suspension.planar) assert.ok(distance(rig.head, feet) >= floorLength * .5, `${elapsed}: the horizontal swing keeps a recognizable whole body through its depth turn (${distance(rig.head, feet).toFixed(2)} / ${floorLength.toFixed(2)}px)`);
           for (let arm = 0; arm < 2; arm++) {
             assert.ok(distance(palms.hands[arm], rig.feet[arm]) < 8, 'both actual ankles stay in their supporting palms');
             assert.ok(Math.abs(distance(palms.shoulders[arm], palms.elbows[arm]) - 11 * caster.scale) < .001);
@@ -71,6 +73,7 @@ for (const [kind, seed] of fixtures) for (const mirrored of [false, true]) for (
       if (released) {
         if (!release) {
           assert.ok(previous?.held, 'the hands open directly from the supported body');
+          if (fullSpin) assert.ok(Math.abs(caster.pivotTurn) >= Math.PI * 2 - 1e-8, 'the ankle hold completes its real full revolution before the palms open');
           release = { at: exit.launchedAt, waist: { ...waist }, velocity: { ...exit.spinFlight.velocity } };
           const measured = (waist.x - previous.waist.x) * 1000 / (elapsed - previous.at), ratio = measured / release.velocity.x;
           assert.ok(Math.abs(release.velocity.x) > 20 && ratio > .72 && ratio < 1.35, `the final held step cannot stop before the actual release (${measured.toFixed(2)} vs ${release.velocity.x.toFixed(2)}px/s)`);

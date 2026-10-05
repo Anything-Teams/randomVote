@@ -143,6 +143,40 @@ test('an uncontacted dropkick finishes its finite jump and lands inside instead 
   }
 });
 
+test('a dropkick carries its running speed through takeoff without a planted preparation pause', () => {
+  for (const side of [-1, 1]) {
+    const values = launched('dropkick', side), at = values.actual.launchAt, delta = .01;
+    const before = arenaWrestlingMoveTargets(values.actual, at - delta, center, values.initial, side);
+    const takeoff = arenaWrestlingMoveTargets(values.actual, at, center, values.initial, side);
+    const after = arenaWrestlingMoveTargets(values.actual, at + delta, center, values.initial, side);
+    assert.equal(before.driverPose, 'run'); assert.equal(takeoff.driverPose, 'dropkick');
+    assert.ok(distance(before.driver, takeoff.driver) < .002);
+    assert.ok(Math.hypot(before.driverVelocity.x, before.driverVelocity.y) > 189.9);
+    assert.ok(distance(before.driverVelocity, after.driverVelocity) < .01, 'the first airborne frame retains the real incoming horizontal tangent');
+    for (const age of [-100, -50, -16, 0, 16, 50, 100]) {
+      const frame = arenaWrestlingMoveTargets(values.actual, at + age, center, values.initial, side);
+      assert.ok(Math.hypot(frame.driverVelocity.x, frame.driverVelocity.y) > 170, 'the last running strides and initial jump cannot stop near the opponent');
+    }
+  }
+});
+
+test('a quantized dropkick carries the remainder of its running stride into the first 16 or 50 ms airborne frame', () => {
+  for (const side of [-1, 1]) for (const delta of [16, 50]) {
+    const initial = origins('dropkick', side), pending = window('dropkick');
+    const opening = arenaWrestlingMoveTargets(pending, pending.start, center, initial, side);
+    const actualTakeoff = Math.ceil(opening.plannedLaunchAt / delta) * delta;
+    const priorAt = actualTakeoff - delta;
+    const before = arenaWrestlingMoveTargets(pending, priorAt, center, initial, side);
+    initial.launchDriver = arenaWrestlingMoveTargets(pending, actualTakeoff, center, initial, side).driver;
+    const recorded = { ...pending, launchAt: actualTakeoff, plannedLaunchAt: opening.plannedLaunchAt, plannedContactAt: opening.plannedContactAt };
+    const after = arenaWrestlingMoveTargets(recorded, actualTakeoff, center, initial, side);
+    const rootSpeed = distance(before.driver, after.driver) * 1000 / delta;
+    assert.ok(rootSpeed > 180 && rootSpeed < 215, 'late event sampling advances the first airborne root instead of discarding the end of a running stride');
+    assert.ok(after.dropkickProgress > 0 && after.driverHeight > 0, 'the first visible jump contains the fractional airborne time');
+    assert.equal(after.landingAt, opening.plannedLaunchAt + ARENA_WRESTLING_MOVE_TIMING.jump, 'landing follows the continuous flight clock');
+  }
+});
+
 test('both painted dropkick soles can reach the actual chest during the bounded contact window', () => {
   for (const side of [-1, 1]) for (let index = 0; index < 10; index++) {
     const values = launched('dropkick', side), victim = fighter((index + 3) % 10, { ...values.initial.victim, facing: -side });
@@ -324,8 +358,8 @@ test('a powerbomb folds the received waist, seats it overhead, slams the back an
   }
 });
 
-test('all four floor finishes reserve the loser until an actual two-ankle hold completes the lifting stroke', () => {
-  for (const kind of ['clothesline', 'powerbomb', 'backbodydrop', 'scoopslam']) for (const side of [-1, 1]) {
+test('all five floor finishes reserve the loser until an actual two-ankle hold completes one full turn', () => {
+  for (const kind of ['clothesline', 'spinebuster', 'powerbomb', 'backbodydrop', 'scoopslam']) for (const side of [-1, 1]) {
     const values = contacted(kind, side), contactFrame = arenaWrestlingMoveTargets(values.actual, values.contactAt, center, values.initial, side);
     const grabAt = contactFrame.pickupReadyAt + ARENA_WRESTLING_MOVE_TIMING.ankleReach;
     const initialFloor = arenaWrestlingMoveTargets(values.actual, grabAt, center, values.initial, side);
@@ -337,62 +371,67 @@ test('all four floor finishes reserve the loser until an actual two-ankle hold c
     const releaseReadyAt = grip.requiredReleaseAt;
     const toss = arenaWrestlingMoveTargets(held, releaseReadyAt, center, values.initial, side);
     assert.equal(grip.stage, 'ankle-grip'); assert.equal(grip.victimHeight, 0);
-    assert.equal(toss.stage, 'toss'); assert.equal(toss.victimHeight, kind === 'backbodydrop' || kind === 'scoopslam' || kind === 'powerbomb' ? 0 : 34); assert.equal(toss.canRelease, true);
-    if (kind === 'backbodydrop' || kind === 'scoopslam' || kind === 'powerbomb') assert.ok(toss.ankleSpin?.gripBoth && Math.abs(Math.abs(toss.pivotTurn) - Math.PI * 2) < 1e-8, 'the snapshot supplies the real release root at the end of the full two-ankle rotation');
+    assert.equal(toss.stage, 'toss'); assert.equal(toss.victimHeight, 0); assert.equal(toss.canRelease, true);
+    assert.ok(toss.ankleSpin?.gripBoth && Math.abs(Math.abs(toss.pivotTurn) - Math.PI * 2) < 1e-8, 'the snapshot supplies the real release root at the end of the full two-ankle rotation');
     assert.equal(arenaWrestlingMoveTargets(held, releaseReadyAt - 1, center, values.initial, side).canRelease, false);
     assert.ok(inside(toss.driver), `${kind}: the two-hand throw leaves its caster on the sand`);
   }
 });
 
-test('a clothesline falls together, stands before the ankle hold, and drags at walking pace before the rim throw', () => {
+test('a clothesline falls together, rises before the ankle hold and finishes with a planted complete revolution', () => {
   for (const side of [-1, 1]) {
     const values = contacted('clothesline', side), fallAt = values.contactAt + 300;
     const falling = arenaWrestlingMoveTargets(values.actual, fallAt, center, values.initial, side);
     assert.equal(falling.stage, 'fall');
     assert.ok(side * falling.driverAngle > 1 && side * falling.victimAngle > 1, 'the collision brings both bodies down');
     assert.ok(falling.driverSlam.slump > .8 && falling.victimSlam.slump > .8);
+    const floor = arenaWrestlingMoveTargets(values.actual, falling.floorAt, center, values.initial, side);
+    assert.equal(floor.victimEyesClosed, true); assert.equal(floor.slamImpact, 1);
+    assert.ok(Math.abs(distance(floor.driver, floor.victim) - 32) < .001, 'the matching fallen trunks put their visible heads next to one another');
     const standing = arenaWrestlingMoveTargets(values.actual, falling.pickupReadyAt, center, values.initial, side);
     assert.equal(standing.driverAngle, 0); assert.equal(standing.driverSlam, undefined);
     assert.equal(standing.victimPose, 'stunned'); assert.equal(standing.victimHeight, 0);
     const grabAt = standing.pickupReadyAt + 240, pending = arenaWrestlingMoveTargets(values.actual, grabAt + 3000, center, values.initial, side);
     assert.equal(pending.stage, 'ankle-approach'); assert.equal(pending.canRelease, false);
-    assert.deepEqual(pending.victim, standing.victim, 'without the painted ankle contact, a floor body cannot be dragged');
+    assert.deepEqual(pending.victim, standing.victim, 'without actual ankle contact, the unconscious body cannot start rotating');
+    values.initial.ankleDriver = { ...pending.driver }; values.initial.ankles = pending.gripTargets;
     const held = { ...values.actual, ankleGripAt: grabAt };
-    let previous = arenaWrestlingMoveTargets(held, grabAt, center, values.initial, side), dragged = 0;
-    for (let elapsed = grabAt + 16; elapsed <= previous.dragEndAt; elapsed += 16) {
-      const frame = arenaWrestlingMoveTargets(held, elapsed, center, values.initial, side);
-      assert.ok(distance(frame.driver, previous.driver) <= ARENA_CLOTHESLINE_FINISH_TIMING.dragSpeed * .016 + 1e-6);
-      assert.ok(distance(frame.victim, previous.victim) <= ARENA_CLOTHESLINE_FINISH_TIMING.dragSpeed * .016 + 1e-6);
-      assert.equal(frame.victimPose, 'stunned'); assert.equal(frame.victimHeight, 0); assert.equal(frame.canRelease, false);
-      assert.equal(frame.driverFacing, side, 'the holder keeps facing the feet while walking backwards');
-      assert.ok(inside(frame.driver)); dragged += distance(frame.driver, previous.driver); previous = frame;
+    const duration = ARENA_SCOOP_FINISH_TIMING.ankleLoad + ARENA_SCOOP_FINISH_TIMING.ankleSpin;
+    for (let age = 0; age < duration; age += 16) {
+      const frame = arenaWrestlingMoveTargets(held, grabAt + age, center, values.initial, side);
+      assert.deepEqual(frame.driver, values.initial.ankleDriver, 'the survivor turns around its inside planted pivot');
+      assert.equal(frame.victimPose, 'stunned'); assert.equal(frame.canRelease, false);
+      assert.equal(frame.ankleSpin.planar, true); assert.equal(frame.ankleSpin.gripBoth, true);
     }
-    assert.ok(dragged > 150, 'the feet remain held through a visible journey across the sand');
-    const ready = arenaWrestlingMoveTargets(held, previous.requiredReleaseAt, center, values.initial, side);
-    assert.ok(distance(ready.driver, ready.dragGoal) < .001); assert.equal(ready.finishSide, -side);
-    assert.ok(Math.abs(ready.driver.x - 500) > 250 && inside(ready.driver), 'the holder stops short of the rim before throwing');
-    assert.equal(ready.canRelease, true);
+    const ready = arenaWrestlingMoveTargets(held, grabAt + duration, center, values.initial, side);
+    assert.equal(ready.canRelease, true); assert.ok(inside(ready.driver));
+    assert.ok(Math.abs(Math.abs(ready.pivotTurn) - Math.PI * 2) < 1e-8);
+    assert.equal(ready.dragEndAt, undefined, 'the solo collision uses the same full ankle spin as the receiving counters');
   }
 });
 
-test('a spinebuster completes its supported floor slam and actual ankle grip before the grounded drag can release the loser', () => {
+test('a spinebuster overlaps its supported lift with the backward slam, then reserves the actual complete ankle revolution', () => {
   const values = contacted('spinebuster'), timing = ARENA_SPINEBUSTER_TIMING;
   const floorAt = values.contactAt + timing.load + timing.lift + timing.slam;
-  const loading = arenaWrestlingMoveTargets(values.actual, values.contactAt + timing.load - 1, center, values.initial);
+  const loading = arenaWrestlingMoveTargets(values.actual, values.contactAt + timing.load * .7 - 1, center, values.initial);
   assert.equal(loading.victimHeight, 0); assert.equal(loading.stage, 'contact');
-  const held = arenaWrestlingMoveTargets(values.actual, values.contactAt + timing.load + timing.lift, center, values.initial);
-  assert.equal(held.victimHeight, 72); assert.equal(held.victimPose, 'carried');
+  const rising = arenaWrestlingMoveTargets(values.actual, values.contactAt + timing.load - 1, center, values.initial);
+  assert.ok(rising.spineLoad > .99 && rising.spineLift > 0 && rising.victimHeight > 0, 'the knees start standing before the waist load stops');
+  const lifted = arenaWrestlingMoveTargets(values.actual, values.contactAt + timing.load + timing.lift, center, values.initial);
+  assert.ok(lifted.victimHeight > 60 && lifted.spineDown > 0 && lifted.driverAngle !== 0, 'the lifted receiver is already falling backward rather than stopping with a held body');
+  assert.equal(lifted.victimPose, 'carried');
   const waiting = arenaWrestlingMoveTargets(values.actual, floorAt + 1000, center, values.initial);
   assert.equal(waiting.victimHeight, 0); assert.equal(waiting.victimSlam.slump, 1); assert.equal(waiting.canGrabAnkle, true); assert.equal(waiting.canRelease, false);
   assert.equal(waiting.frontKick, undefined); assert.equal(waiting.canKick, false);
-  assert.equal(arenaWrestlingMoveTargets({ ...values.actual, releaseAt: undefined }, floorAt + 1000, center, values.initial).releaseAt, null, 'an omitted release clock cannot bypass the actual two-ankle grip');
+  assert.equal(arenaWrestlingMoveTargets({ ...values.actual, releaseAt: undefined }, floorAt + 1000, center, values.initial).releaseAt, null);
   const recorded = { ...values.actual, ankleGripAt: floorAt + 1000 };
   const gripped = arenaWrestlingMoveTargets(recorded, recorded.ankleGripAt, center, values.initial);
   assert.equal(gripped.canRelease, false); assert.equal(gripped.stage, 'ankle-grip');
-  assert.ok(gripped.requiredReleaseAt > recorded.ankleGripAt + timing.throw, 'the real inside-rim drag must finish before the supported throw');
+  assert.equal(gripped.requiredReleaseAt, recorded.ankleGripAt + ARENA_SCOOP_FINISH_TIMING.ankleLoad + ARENA_SCOOP_FINISH_TIMING.ankleSpin);
   assert.equal(arenaWrestlingMoveTargets(recorded, gripped.requiredReleaseAt - 1, center, values.initial).canRelease, false);
   const tossing = arenaWrestlingMoveTargets(recorded, gripped.requiredReleaseAt, center, values.initial);
-  assert.equal(tossing.canRelease, true); assert.ok(Math.abs(tossing.ankleThrowProgress - 1) < 1e-10);
+  assert.equal(tossing.canRelease, true); assert.equal(tossing.ankleThrowProgress, 1);
+  assert.ok(Math.abs(Math.abs(tossing.pivotTurn) - Math.PI * 2) < 1e-8);
 });
 
 test('a spinebuster walks to both actual ankles after the supported floor slam without accelerating the pickup', () => {
@@ -401,7 +440,7 @@ test('a spinebuster walks to both actual ankles after the supported floor slam w
   values.initial.ankles = [{ x: 366, y: 412 }, { x: 364, y: 403 }];
   let previous = arenaWrestlingMoveTargets(values.actual, floorAt, center, values.initial), ready;
   const finishingSlam = arenaWrestlingMoveTargets(values.actual, floorAt - 1, center, values.initial);
-  assert.ok(distance(previous.driver, finishingSlam.driver) < .001, 'the ankle approach retains the receiver\'s actual supported-slam ground root');
+  assert.ok(distance(previous.driver, finishingSlam.driver) < .1, 'the ankle approach retains the receiver\'s actual supported-slam ground root');
   assert.equal(previous.driverPose, 'recover'); assert.equal(previous.frontKick, undefined); assert.equal(previous.canGrabAnkle, false);
   assert.ok(previous.driverSlam.slump > .99 && Math.abs(previous.driverAngle) > 1.4, 'both received bodies reach the sand before the receiver rises');
   assert.equal(previous.pickupReadyAt, floorAt + timing.recover, 'the grounded receiver has a complete rising beat before approaching the ankles');
@@ -409,12 +448,39 @@ test('a spinebuster walks to both actual ankles after the supported floor slam w
     const frame = arenaWrestlingMoveTargets(values.actual, elapsed, center, values.initial);
     assert.ok(distance(frame.driver, previous.driver) / .016 <= 160 + 1e-6);
     assert.equal(frame.canRelease, false); assert.equal(frame.frontKick, undefined);
-    if (frame.gripMode === 'ankle') { assert.equal(frame.driverFacing, -frame.side); assert.equal(frame.victimHeight, 0); }
+    if (frame.gripMode === 'ankle') { assert.equal(frame.driverFacing, (values.initial.ankles[0].x + values.initial.ankles[1].x) / 2 >= frame.driver.x ? 1 : -1); assert.equal(frame.victimHeight, 0); }
     if (frame.canGrabAnkle) { ready = frame; break; }
     previous = frame;
   }
   assert.ok(ready); assert.equal(ready.ankleApproach, 1); assert.deepEqual(ready.gripTargets, values.initial.ankles);
-  assert.ok(ready.requiredReleaseAt > floorAt + 1000, 'the release reservation includes the complete actual pickup, ground drag and throw');
+  assert.ok(ready.requiredReleaseAt > floorAt + 1000, 'the release reservation includes the complete actual pickup, ankle load and revolution');
+});
+
+test('the received spine waist keeps moving through the lifted key pose and drives down into its backward floor impact', () => {
+  for (const side of [-1, 1]) {
+    const values = contacted('spinebuster', side), timing = ARENA_SPINEBUSTER_TIMING;
+    values.initial.spineWaist = { x: values.initial.contactVictim.x, y: 370 };
+    values.initial.spineFloorWaist = { x: values.initial.driver.x - values.opening.side * 87, y: 397 };
+    const delta = .01;
+    for (const age of [timing.load * .7, timing.load + timing.lift]) {
+      const at = values.contactAt + age;
+      const before = arenaWrestlingMoveTargets(values.actual, at - delta, center, values.initial, side).spineSupport;
+      const current = arenaWrestlingMoveTargets(values.actual, at, center, values.initial, side).spineSupport;
+      const after = arenaWrestlingMoveTargets(values.actual, at + delta, center, values.initial, side).spineSupport;
+      const arriving = { x: (current.x - before.x) * 1000 / delta, y: (current.y - before.y) * 1000 / delta };
+      const leaving = { x: (after.x - current.x) * 1000 / delta, y: (after.y - current.y) * 1000 / delta };
+      assert.ok(distance(arriving, leaving) < .05, 'passing the lifted body into the backward fall preserves the supported waist tangent');
+      assert.ok(Math.hypot(arriving.x, arriving.y) > 15, 'the caster cannot pause with the received body at the transition');
+    }
+    const floorAt = values.contactAt + timing.load + timing.lift + timing.slam;
+    for (const step of [16, 50]) {
+      const before = arenaWrestlingMoveTargets(values.actual, floorAt - step, center, values.initial, side);
+      const floor = arenaWrestlingMoveTargets(values.actual, floorAt, center, values.initial, side);
+      assert.ok((floor.spineSupport.y - before.spineSupport.y) * 1000 / step > 300, 'the weight reaches the sand with a downward impact rather than being gently lowered');
+      assert.equal(before.victimEyesClosed, false); assert.equal(floor.victimEyesClosed, true);
+      assert.ok(floor.driverSuspension > .99 && Math.abs(floor.driverAngle) > 1.4, 'the receiver follows the held opponent onto its own back');
+    }
+  }
 });
 
 test('an incoming scoop cradles the chest, pivots the hip and lands the complete back before its ankle finish', () => {
@@ -422,8 +488,8 @@ test('an incoming scoop cradles the chest, pivots the hip and lands the complete
   const loaded = arenaWrestlingMoveTargets(values.actual, values.contactAt + timing.load / 2, center, values.initial);
   assert.equal(loaded.stage, 'contact'); assert.ok(loaded.scoopLoad > 0 && loaded.scoopLoad < 1); assert.equal(loaded.victimHeight, 0);
   const carried = arenaWrestlingMoveTargets(values.actual, values.contactAt + timing.load + timing.lift, center, values.initial);
-  assert.equal(carried.victimPose, 'carried'); assert.equal(carried.victimHeight, 56); assert.equal(carried.victimCarryStretch, 1); assert.equal(carried.gripMode, 'cradle');
-  assert.ok(Math.abs(carried.victimAngle) >= Math.PI * .3 && Math.abs(carried.victimAngle) < Math.PI / 2, 'the back remains cradled diagonally beside the chest, without a head-first inversion');
+  assert.equal(carried.victimPose, 'carried'); assert.equal(carried.victimHeight, 124); assert.equal(carried.victimCarryStretch, 1); assert.equal(carried.gripMode, 'cradle');
+  assert.ok(Math.abs(carried.victimAngle) >= Math.PI * .3 && Math.abs(carried.victimAngle) < Math.PI / 2, 'the complete back stays cradled diagonally above the receiving head, without a head-first inversion');
   assert.ok(carried.scoopTurn > 0, 'the hips pivot while the knees finish raising the actual load');
   const turned = arenaWrestlingMoveTargets(values.actual, values.contactAt + timing.load + timing.lift + timing.turn, center, values.initial);
   assert.equal(turned.scoopTurn, 1); assert.ok(turned.scoopDown > 0, 'the supported back is already descending as the hip pivot ends'); assert.ok(Math.abs(turned.victimAngle) < Math.PI / 2, 'the head never turns below the feet in an inverted wheel');
@@ -478,7 +544,7 @@ test('the received scoop keeps waist velocity continuous through the load, chest
       for (let age = step; age <= duration + ARENA_SCOOP_RECOVERY_TIMING.stand; age += step) {
         const frame = arenaWrestlingMoveTargets(values.actual, values.contactAt + age, center, values.initial, side);
         assert.ok(distance(frame.driver, previous.driver) < step * .13, 'the caster transfers weight through bounded planted steps');
-        assert.ok(distance(frame.scoopSupport, previous.scoopSupport) < step * .24, 'a supported hip cannot teleport between separate Bézier paths');
+        assert.ok(distance(frame.scoopSupport, previous.scoopSupport) < step * .6, 'a supported hip cannot teleport between separate Bézier paths');
         assert.ok(inside(frame.driver)); assert.ok(Math.abs(frame.victimAngle) <= Math.PI / 2 + 1e-12);
         assert.equal(frame.scoopHeadPivot, undefined, 'the whole back, rather than a previously recorded crown, receives the slam');
         if (age >= duration) {

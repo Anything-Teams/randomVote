@@ -145,7 +145,8 @@ test('floor drag finishes call the held throw before announcing an actual releas
     assert.ok(arenaActionWords(round, 5900).some(call => call.id === 'a' && call.word === '던지기!'));
     assert.match(arenaNarration(round, candidates, ['a', 'v'], 5900).detail, /손은 붙어/);
     assert.doesNotMatch(arenaNarration(round, candidates, ['a', 'v'], 5900).title, /던졌다|장외/);
-    assert.match(arenaStoryState(round, 5900).action, /머리 위/);
+    assert.match(arenaStoryState(round, 5900).action, /두 발끝.*힘을 실어 위쪽/);
+    assert.match(arenaStoryState(round, 5900).action, /포물선/);
     assert.match(arenaNarration(round, candidates, ['a', 'v'], 6700).title, /던졌다/);
     const waiting = { ...round, floorFinish: { dragUntil: 1600, throwAt: null, releaseAt: null } };
     assert.ok(!arenaActionWords(waiting, 8000).some(call => call.word === '던지기!'));

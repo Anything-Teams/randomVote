@@ -231,7 +231,7 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
       const holding = age >= timing.dragUntil && (age < timing.throwUntil || !!round.floorFinish && round.floorFinish.releaseAt == null);
       state.step = round.elbowGripAt !== null && elapsed >= round.impact ? age < timing.stunnedUntil ? 6 : age < timing.dragUntil ? 7 : holding || age < timing.tossUntil ? 8 : age < timing.landUntil ? 9 : 10 : Math.max(0, stages.indexOf(technique.stage));
       state.action = ['서로 거리를 좁히며 몸통을 맞잡을 틈을 봅니다.', '상대가 허리를 잡아 들어 올립니다. 들린 선수가 팔꿈치를 접어 반격을 준비합니다.', '공중에서 팔꿈치를 내리찍습니다! 상대의 머리에 정확히 닿습니다.', '머리에 충격을 받은 상대가 손을 놓고 쓰러집니다. 들렸던 선수는 착지합니다.', '상대가 기절 상태로 누웠습니다. 별이 맴돌고 팔과 다리에 힘이 풀립니다.', '착지한 선수가 옆으로 돌아 누운 상대의 발끝에 접근합니다.', '두 발끝을 양손으로 잡았습니다. 몸은 모래 위에 누운 채 끌기를 준비합니다.', '발끝을 놓지 않고 한 발씩 뒤로 디딥니다. 상대가 모래 위를 따라 경계까지 끌려갑니다.', '모래판 안에 발을 딛고 두 발끝을 놓아 넘깁니다! 쓰러진 상대만 장외로 날아갑니다.', '던져진 상대가 모래판 밖에 떨어졌습니다. 공격한 선수는 안에서 자세를 고칩니다.', '장외에 누운 선수가 몸을 일으킵니다. 자세를 회복한 뒤 시상 자리로 이동합니다.'][state.step];
-      if (holding) state.action = round.floorFinish && round.floorFinish.throwAt == null ? '경계 안쪽에 두 발을 딛고 상대의 발끝을 단단히 붙잡습니다. 아직 손을 놓지 않았습니다.' : '두 발끝을 머리 위로 들어 올리고 몸을 뒤로 젖혀 경계 쪽으로 넘깁니다. 던질 힘을 싣는 동안 두 손은 발끝을 놓지 않습니다.';
+      if (holding) state.action = round.floorFinish && round.floorFinish.throwAt == null ? '경계 안쪽에 두 발을 딛고 상대의 발끝을 단단히 붙잡습니다. 아직 손을 놓지 않았습니다.' : '두 발끝에 몸의 힘을 실어 위쪽으로 던집니다. 던질 힘을 싣는 동안 두 손은 발끝을 놓지 않고, 손을 놓으면 상대가 포물선을 그리며 경계 밖으로 날아갑니다.';
       if (elapsed >= round.impact && (round.elbowGripAt === null || holding || age < timing.recoverUntil)) return state;
       break;
     }
@@ -277,7 +277,7 @@ export function arenaStoryState(round: ArenaRound, elapsed: number): ArenaStoryS
           state.relationLabel = '허리 맞잡고 힘겨루기';
           state.action = '허리를 맞잡고 서로 버팁니다. 무릎을 굽혀 체중을 실은 뒤 들어 올릴 틈을 만듭니다.';
         }
-        if (holding) state.action = round.floorFinish && round.floorFinish.throwAt == null ? '모래판 끝 안쪽에 멈춰 두 발끝을 양손으로 단단히 붙잡습니다. 상대는 아직 손에서 풀리지 않았습니다.' : '잡은 두 발끝을 머리 위로 들어 올립니다. 안에 딛고 있는 두 발로 버티며 경계 쪽으로 넘길 힘을 싣고, 던지는 마지막 순간에 손을 놓습니다.';
+        if (holding) state.action = round.floorFinish && round.floorFinish.throwAt == null ? '모래판 끝 안쪽에 멈춰 두 발끝을 양손으로 단단히 붙잡습니다. 상대는 아직 손에서 풀리지 않았습니다.' : '잡은 두 발끝에 몸의 힘을 실어 위쪽으로 던집니다. 안에 딛고 있는 두 발로 버티며 경계 쪽으로 넘길 힘을 싣고, 마지막 순간 손을 놓으면 상대가 포물선을 그리며 날아갑니다.';
         if (elapsed >= round.impact && (holding || age < timing.recoverUntil)) return state;
       } else {
         state.steps = ['견제 · 준비', '한 번 도약', '공중 옆차기', '발끝 충돌 · 장외'];

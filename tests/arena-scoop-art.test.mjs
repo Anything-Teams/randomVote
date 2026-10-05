@@ -29,7 +29,7 @@ function humanBones(actor, frame) {
   }
 }
 
-test('a scoop cradles the runner through a planted hip pivot and lowers beside the opponent back', () => {
+test('a scoop drives a genuine received body above the planted caster before its back-first slam', () => {
   for (const facing of [-1, 1]) for (const step of [16, 50]) {
     const actor = fighter({ facing });
     paint(actor, 0);
@@ -37,7 +37,7 @@ test('a scoop cradles the runner through a planted hip pivot and lowers beside t
     let previous;
     const turnAt = timing.load + timing.lift, downAt = turnAt + timing.turn;
     for (let clock = 0; clock <= downAt + timing.slam; clock += step) {
-      const model = arenaWrestlingMoveTargets({ kind: 'scoopslam', start: 0, end: 9000, launchAt: 0, contactAt: 0, ankleGripAt: null }, clock, { x: 500, y: 416 }, { driver: { x: 470, y: 416 }, victim: { x: 530, y: 416 } });
+      const model = arenaWrestlingMoveTargets({ kind: 'scoopslam', start: 0, end: 9000, launchAt: 0, contactAt: 0, ankleGripAt: null }, clock, { x: 500, y: 416 }, { driver: { x: 500, y: 416 }, victim: { x: 500 + facing * 200, y: 416 }, contactDriver: { x: 500, y: 416 }, contactVictim: { x: 500 + facing * 42, y: 416 } });
       Object.assign(actor, { scoopLoad: model.scoopLoad, scoopLift: model.scoopLift, scoopTurn: model.scoopTurn, scoopDown: model.scoopDown, scoopRecover: model.scoopRecover, yaw: model.driverYaw });
       const frame = paint(actor, clock);
       humanBones(actor, frame);
@@ -105,7 +105,8 @@ test('a complete scoop carries across the chest, pivots and lands the supported 
       assert.ok(Math.abs(frame.victimAngle) <= Math.PI / 2 + 1e-8, 'the cradle rotates into a back-first quarter turn without an inverted head-first wheel');
       if (age > previousAge) for (const point of ['head', 'waist', 'back']) assert.ok(distance(painted.contacts[point], previous.contacts[point]) < 5 + (age - previousAge) * 1.5, 'the supported trunk follows its continuous hip pivot');
       if (age === timing.load + timing.lift) {
-        assert.ok(frame.victimHeight > 40 && Math.abs(frame.victimAngle) > Math.PI * .25);
+        assert.ok(painted.contacts.waist.y < driverRoot.y - 135, 'the complete held waist clears the receiving head rather than stopping at chest height');
+        assert.ok(frame.victimHeight > 120 && Math.abs(frame.victimAngle) > Math.PI * .25);
         assert.equal(frame.gripStrength, 1); liftedSeen = true;
       }
       if (age === downAt) {

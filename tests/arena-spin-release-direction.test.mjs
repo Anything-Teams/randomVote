@@ -25,7 +25,7 @@ const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const midpoint = points => ({ x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 });
 const armPoints = rig => [...rig.shoulders, ...rig.elbows, ...rig.hands];
 
-for (const [kind, seed] of [['backbodydrop', 16], ['scoopslam', 40], ['powerbomb', 4]]) for (const mirrored of [false, true]) for (const delta of [16, 50]) {
+for (const [kind, seed] of [['backbodydrop', 16], ['scoopslam', 40], ['powerbomb', 4], ['clothesline', 19], ['spinebuster', 11]]) for (const mirrored of [false, true]) for (const delta of [16, 50]) {
   test(`${kind} ${mirrored ? 'mirrored' : 'ordinary'} ${delta}ms: released arms follow the actual flight direction with connected normal bones`, () => {
     const order = ['2', '1'], duration = 44000;
     const planned = arenaRounds(order, duration, 7, seed)[0];
@@ -34,8 +34,8 @@ for (const [kind, seed] of [['backbodydrop', 16], ['scoopslam', 40], ['powerbomb
     const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() }, ctx = context();
     setInitialize((current, reset) => {
       if (current !== sim || !reset) return;
-      const receiver = { x: 525, y: 416 };
-      const runner = { x: 300, y: 416 };
+      const receiver = kind === 'clothesline' ? { x: 320, y: 416 } : { x: 525, y: 416 };
+      const runner = kind === 'clothesline' ? { x: 520, y: 416 } : { x: 300, y: 416 };
       Object.assign(sim.bodies.get(planned.aggressor), receiver); Object.assign(sim.bodies.get(planned.victim), runner);
       for (const body of sim.bodies.values()) {
         if (mirrored) { body.x = 1000 - body.x; body.facing *= -1; }

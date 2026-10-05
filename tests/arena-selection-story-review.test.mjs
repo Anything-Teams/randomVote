@@ -224,7 +224,7 @@ test('a charging third fighter keeps its 돌진 word while both opponents jump o
   }
 });
 
-test('spinebuster describes the incoming runner, weight catch, slam, ankle grip, drag and inside throw in that order', () => {
+test('spinebuster describes the incoming runner, weight catch, slam, ankle grip and full spin release in that order', () => {
   const center = { x: 500, y: 416 };
   const window = { kind: 'spinebuster', start: 0, end: 18000, plannedLaunchAt: 1000, plannedContactAt: 2200, counterReadyAt: 1600, launchAt: 1000, contactAt: 2200, ankleGripAt: null, releaseAt: null, kickAt: null };
   const floor = arenaWrestlingMoveTargets(window, 5000, center), gripAt = floor.pickupReadyAt + ARENA_WRESTLING_MOVE_TIMING.ankleReach + 64;
@@ -240,8 +240,8 @@ test('spinebuster describes the incoming runner, weight catch, slam, ankle grip,
     ['recover', (floor.floorAt + floor.pickupReadyAt) / 2, 4, 'v', '기절!', /누워/],
     ['ankle-approach', floor.pickupReadyAt + ARENA_WRESTLING_MOVE_TIMING.ankleReach / 2, 5, 'a', '다리 잡기!', /아직 잡은 손은 없습니다/],
     ['ankle-grip', gripAt + 80, 6, 'a', '다리 잡기!', /양손.*두 발목에 닿/],
-    ['drag', (gripAt + 160 + ready.dragEndAt) / 2, 7, 'a', '끌기!', /모래판 끝까지 끕니다/],
-    ['toss', (ready.dragEndAt + ready.requiredReleaseAt) / 2, 8, 'a', '던지기!', /손은 아직 붙어/],
+    ['spin', gripAt + ARENA_SCOOP_FINISH_TIMING.ankleLoad + ARENA_SCOOP_FINISH_TIMING.ankleSpin / 2, 7, 'a', '회전!', /두 발끝.*한 바퀴/],
+    ['toss', ready.requiredReleaseAt - 16, 8, 'a', '던지기!', /잡은 채 계속 돕니다.*마치는 순간 손을 놓아/],
     ['release', ready.requiredReleaseAt, 9, 'v', '장외로!', /손을 놓았/],
   ];
   let previousClock = -1;
@@ -275,17 +275,14 @@ test('six move descriptions follow actual fall, ankle pickup and finishing conta
     const holding = { ...round.wrestlingMove, ankleGripAt: gripAt };
     const ready = arenaWrestlingMoveTargets(holding, gripAt, { x: 500, y: 416 });
     const gripped = { ...round, wrestlingMove: { ...holding, releaseAt: ready.requiredReleaseAt } };
-    const spinningFinish = kind === 'backbodydrop' || kind === 'scoopslam' || kind === 'powerbomb';
-    const tossAt = spinningFinish ? ready.requiredReleaseAt - 16 : (ready.requiredReleaseAt + (ready.dragEndAt ?? gripAt)) / 2;
-    if (spinningFinish) {
-      const timing = kind === 'backbodydrop' ? ARENA_BACK_BODY_DROP_TIMING : kind === 'powerbomb' ? ARENA_POWERBOMB_TIMING : ARENA_SCOOP_FINISH_TIMING;
-      const spinAt = gripAt + timing.ankleLoad + timing.ankleSpin / 2;
-      assert.equal(arenaActionWords(gripped, spinAt)[0].word, '회전!');
-      assert.match(arenaStoryState(gripped, spinAt).action, /두 발끝.*한 바퀴/);
-    }
+    const tossAt = ready.requiredReleaseAt - 16;
+    const timing = kind === 'backbodydrop' ? ARENA_BACK_BODY_DROP_TIMING : kind === 'powerbomb' ? ARENA_POWERBOMB_TIMING : ARENA_SCOOP_FINISH_TIMING;
+    const spinAt = gripAt + timing.ankleLoad + timing.ankleSpin / 2;
+    assert.equal(arenaActionWords(gripped, spinAt)[0].word, '회전!');
+    assert.match(arenaStoryState(gripped, spinAt).action, /두 발끝.*한 바퀴/);
     assert.equal(arenaActionWords(gripped, gripAt + 10)[0].word, '다리 잡기!');
     assert.equal(arenaActionWords(gripped, tossAt)[0].word, '던지기!');
-    assert.match(arenaStoryState(gripped, tossAt).action, spinningFinish ? /잡은 채 계속 돕니다.*마치는 순간 손을 놓아/ : /손은 아직 붙어/);
+    assert.match(arenaStoryState(gripped, tossAt).action, /잡은 채 계속 돕니다.*마치는 순간 손을 놓아/);
     assert.equal(arenaActionWords(gripped, ready.requiredReleaseAt).at(-1).word, '장외로!');
   }
 });
