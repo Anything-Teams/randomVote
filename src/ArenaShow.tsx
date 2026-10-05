@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Candidate } from './election';
 import type { SportsStageProps } from './sports';
 import { arenaAction, arenaActionWords, arenaApproachSpeed, arenaCatchTargets, arenaChargeFall, arenaChargeTargets, arenaContactRound, arenaDoubleShoveTargets, arenaEliminatedIds, arenaFaceOpponent, arenaInsidePoint, arenaLocalContact, arenaEdgeFall, arenaEdgeTargets, arenaExitDirection, arenaGuardTarget, arenaMiniExchanges, arenaMove as move, arenaNarration, arenaNearbyResponse, arenaPodium, arenaRamTargets, arenaReleaseTarget, arenaRoamingTarget, arenaRounds, arenaShoveTargets, arenaSpinTargets, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
-import { arenaCarryHolderPoint, arenaDrawOrder, arenaReleaseSnapshot, arenaSpinGripPair, arenaSpinSnapshot, arenaWristGripPoint, createArenaFighterAnimation, drawArenaCradleSupport, drawArenaFighter as paintArenaFighter, drawArenaName, sampleArenaFighterContacts, type ArenaActor, type ArenaFighterAnimation, type ArenaPose, type ArenaSpinSnapshot } from './game/ArenaFighter';
+import { arenaCarryHolderPoint, arenaDrawOrder, arenaReleaseSnapshot, arenaSpinGripPair, arenaSpinSnapshot, arenaWristGripPoint, createArenaFighterAnimation, drawArenaCradleSupport, drawArenaPowerbombRearLeg, drawArenaFighter as paintArenaFighter, drawArenaName, sampleArenaFighterContacts, type ArenaActor, type ArenaFighterAnimation, type ArenaPose, type ArenaSpinSnapshot } from './game/ArenaFighter';
 import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
 import { arenaTechniqueTargets, arenaTechniqueExit, arenaTechniqueReactionAt, arenaSidekickWindow, arenaFloorExitTiming, isArenaFloorDrag, isArenaFinalTechnique } from './arenaTechniques';
@@ -21,6 +21,7 @@ import { ARENA_KICK_CATCH_TIMING, arenaKickCatchTargets, type ArenaKickCatchOrig
 import { arenaAnkleRimThrowTargets, arenaWrestlingMoveTargets, type ArenaWrestlingMoveOrigins } from './arenaWrestlingMoves';
 import { arenaAnkleSwingBasis, arenaAnkleSwingProjection } from './arenaAnkleSwing';
 import { arenaAnkleRimFlightSnapshot } from './arenaAnkleRimFlight';
+import { arenaAnkleFlightSnapshot } from './arenaAnkleFlight';
 import { createArenaCamera, sampleArenaCamera, type ArenaCamera } from './arenaCamera';
 import { presentArenaCanvasFrame } from './arenaCanvasFrame';
 import { arenaDelayRound } from './arenaTimeline';
@@ -30,7 +31,7 @@ type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number;
 type Contact = { center: ArenaPoint; side: number; round: ArenaRound; plannedDelay?: number; started?: boolean; metAt?: number; committed?: boolean; chargerOrigin?: ArenaPoint; pairDodgeOrigins?: ArenaPairDodgeOrigins; supermanPunchOrigins?: ArenaSupermanPunchOrigins; kickCatchOrigins?: ArenaKickCatchOrigins; wrestlingMoveOrigins?: ArenaWrestlingMoveOrigins; wrestlingHeadOffset?: ArenaPoint; wrestlingCradleOffset?: ArenaPoint; wrestlingSpinSample?: { at: number; waist: ArenaPoint }; slideTripOrigins?: ArenaSlideTripOrigins; linkedRushOrigins?: ArenaLinkedRushOrigins; pairCarryOrigins?: ArenaPairCarryOrigins; linkedRelease?: { at: number; hands: [ArenaPoint, ArenaPoint]; roots: [ArenaPoint, ArenaPoint]; arms: [0 | 1, 0 | 1]; facings: [number, number] }; pairReachAt?: Map<string, number>; pairGripMap?: Map<string, [number, number]>; pairArmRelease?: Map<string, { hands: [ArenaPoint, ArenaPoint]; elbows: [ArenaPoint, ArenaPoint]; shoulders: [ArenaPoint, ArenaPoint]; root: ArenaPoint; facing: number; stance?: NonNullable<ArenaActor['carrierRelease']>['stance'] }>; pairDodgeFinished?: boolean; passingTripOrigins?: ArenaPassingTripOrigins; passingTripDeclined?: boolean; escapeFinished?: boolean; recoveryFinished?: boolean; recoveryRelease?: { thrower: ArenaPoint; receiver: ArenaPoint; height: number; snapshot?: ArenaSpinSnapshot }; rimFinished?: boolean; rimOrigins?: { aggressor: ArenaPoint; victim: ArenaPoint }; rimChargeOrigins?: ArenaRimChargeOrigins; rimChargeFinished?: boolean; sidekickLaunched?: boolean; elbowFall?: ArenaPoint; elbowApproachOrigin?: ArenaPoint; releases?: Map<string, ArenaPoint> };
 type Exit = { floorThrow?: { driver: ArenaPoint; ankles: [ArenaPoint, ArenaPoint]; orbit: number; facing: 1 | -1 }; floorArms?: { hands: [ArenaPoint, ArenaPoint]; elbows: [ArenaPoint, ArenaPoint]; shoulders: [ArenaPoint, ArenaPoint]; root: ArenaPoint; stance?: NonNullable<ArenaActor['carrierRelease']>['stance'] }; round: ArenaRound; origin: ArenaPoint; landing: ArenaPoint; side: number; bench: ArenaPoint; lift: number; angle: number; velocity: number; heldFacing?: number; launchedAt?: number; dodgeFall?: { center: ArenaPoint; origins: ArenaPairDodgeOrigins }; dragOffset?: ArenaPoint; driverStop?: ArenaPoint; pushRelease?: { hands: [ArenaPoint, ArenaPoint]; elbows: [ArenaPoint, ArenaPoint]; shoulders: [ArenaPoint, ArenaPoint]; root: ArenaPoint; angle: number; lean: number }; spinSnapshot?: ArenaSpinSnapshot; spinFlight?: { velocity: ArenaPoint; angularVelocity: number; center: ArenaPoint; planarOrbit?: number; duration: number; rotationDuration?: number; gravity: number } };
 type Simulation = { key: string; elapsed: number; epoch: number; rounds?: ArenaRound[]; camera: ArenaCamera; bodies: Map<string, Body>; contacts: Map<string, Contact>; exits: Map<string, Exit>; minis: Map<string, ArenaRound> };
-type ChoreographedActor = ArenaActor & { rearExitCutoff?: number; paintDepth?: number; paintLayer?: number; scoopSupportActor?: ArenaActor };
+type ChoreographedActor = ArenaActor & { rearExitCutoff?: number; paintDepth?: number; paintLayer?: number; scoopSupportActor?: ArenaActor; powerbombRearActor?: ArenaActor };
 const W = 1000, H = 620;
 const clamp = (p: number, low = 0, high = 1) => Math.max(low, Math.min(high, p));
 const ease = (p: number) => { const n = clamp(p); return n * n * (3 - 2 * n); };
@@ -44,6 +45,7 @@ function clotheslineNeck(rig: ReturnType<typeof sampleArenaFighterContacts>): Ar
 /** A rear rim fall disappears behind the sand ledge, rather than falling onto it. */
 function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ChoreographedActor, clock: number) {
   if (actor.rearExitCutoff === undefined) {
+    if (actor.powerbombRearActor) drawArenaPowerbombRearLeg(ctx, actor.powerbombRearActor, clock);
     paintArenaFighter(ctx, actor, clock);
     if (actor.scoopSupportActor) drawArenaCradleSupport(ctx, actor.scoopSupportActor);
     return;
@@ -2233,9 +2235,10 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       if (exit.spinFlight && (flight.stage === 'flight' || flight.stage === 'land')) {
         const rimToss = !!exit.floorThrow;
         if (rimToss) snapshot = arenaAnkleRimFlightSnapshot(snapshot, Math.min(age, exit.spinFlight.duration));
+        else snapshot = arenaAnkleFlightSnapshot(snapshot, Math.min(age, exit.spinFlight.duration), actor.scale);
         const source = snapshot.matrix, center = exit.spinFlight.center;
-        // Airborne rotation preserves the release silhouette and turns about
-        // the same measured waist; depth foreshortening cannot resize it midair.
+        // Airborne rotation keeps the measured waist while the free body
+        // restores ordinary proportions after leaving the ground projection.
         const finalTurn = exit.spinFlight.angularVelocity * (exit.spinFlight.rotationDuration ?? exit.spinFlight.duration) / 2000;
         const turn = flight.stage === 'land' ? finalTurn : flight.angle - exit.angle, c = Math.cos(turn), s = Math.sin(turn);
         snapshot = { ...snapshot, matrix: [c * source[0] - s * source[1], s * source[0] + c * source[1], c * source[2] - s * source[3], s * source[2] + c * source[3], center.x + c * (source[4] - center.x) - s * (source[5] - center.y), center.y + s * (source[4] - center.x) + c * (source[5] - center.y)] };
@@ -2407,6 +2410,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     caster.paintDepth = carried.paintDepth = carried.depthY ?? carried.y;
     caster.paintLayer = -1; carried.paintLayer = 1;
     carried.scoopSupportActor = caster;
+    if (window.kind === 'powerbomb') { carried.powerbombSplit = true; caster.powerbombRearActor = carried; }
   }
   arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
   overlays.forEach(draw => draw());
