@@ -17,11 +17,12 @@ source = source.replaceAll('drawArenaScenery(ctx, clock,', 'wrestlingTestScenery
 const initAnchor = 'const ambient = won ? [] : active.filter';
 assert.ok(source.includes(initAnchor));
 source = source.replace(initAnchor, 'wrestlingTestInitialize(sim, props, elapsed, reset); ' + initAnchor);
-source += '\nlet wrestlingTestActors, wrestlingTestRanks; const wrestlingTestScenery = () => {}; let wrestlingTestInitialize = () => {}; export const setInitialize = fn => { wrestlingTestInitialize = fn; }; export const capturedActors = () => wrestlingTestActors; export const capturedRanks = () => wrestlingTestRanks; export { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets };';
+source += '\nlet wrestlingTestActors, wrestlingTestRanks; const wrestlingTestScenery = () => {}; let wrestlingTestInitialize = () => {}; export const setInitialize = fn => { wrestlingTestInitialize = fn; }; export const capturedActors = () => wrestlingTestActors; export const capturedRanks = () => wrestlingTestRanks; export { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets }; export { ARENA_DRAGGED_ANKLE_THROW_TIMING, ARENA_DRAGGED_ANKLE_THROW_PACE } from "./arenaWrestlingMoves";';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets, capturedActors, capturedRanks, setInitialize } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets, capturedActors, capturedRanks, setInitialize, ARENA_DRAGGED_ANKLE_THROW_TIMING, ARENA_DRAGGED_ANKLE_THROW_PACE } = module.exports;
+const rimThrowDuration = ARENA_DRAGGED_ANKLE_THROW_TIMING.raise + ARENA_DRAGGED_ANKLE_THROW_TIMING.heave;
 const noop = () => {};
 const identity = () => [1, 0, 0, 1, 0, 0];
 const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
@@ -176,12 +177,19 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       if (exit?.launchedAt != null && (exit.spinFlight || round?.floorFinish?.releaseAt != null)) {
         if (releaseAt === undefined) {
           releaseAt = exit.launchedAt;
-          assert.ok(heldAt != null && releaseAt - heldAt >= 1000 - frameDelta, `${kind}: the complete low loading stroke must be visible`);
+          assert.ok(heldAt != null && releaseAt - heldAt >= rimThrowDuration - frameDelta, `${kind}: the complete low loading stroke must be visible`);
           assert.ok(Math.hypot(exit.spinFlight.velocity.x, exit.spinFlight.velocity.y) > 20, 'the actual hand release carries real momentum');
           assert.ok(exit.spinFlight.velocity.x * exit.side > 5, 'the actual backward stroke sends the body toward its own outside rim');
           assert.ok(!inside(exit.landing), 'its continuous free path reaches outside the sand');
           releasedVelocity = exit.spinFlight.velocity;
-          assert.ok(releasedVelocity.y <= -300 && exit.spinFlight.gravity > 0, 'the low hand stroke throws upward with a real falling acceleration');
+          assert.ok(releasedVelocity.y < 0 && exit.spinFlight.gravity > 0, 'the lower hand stroke still throws upward with a real falling acceleration');
+          const seconds = exit.spinFlight.duration / 1000, lift = exit.lift;
+          const referenceSeconds = seconds / ARENA_DRAGGED_ANKLE_THROW_PACE;
+          const referenceCurve = lift + exit.landing.y - exit.origin.y + 300 * referenceSeconds;
+          const referencePeak = (lift + referenceCurve) ** 2 / (4 * referenceCurve);
+          const curve = exit.spinFlight.gravity * seconds ** 2 / 2;
+          const peak = (lift + curve) ** 2 / (4 * curve);
+          assert.ok(Math.abs(peak - referencePeak / 2) < 1e-8, 'the actual ballistic maximum is exactly half the original paced rim-throw height');
           releaseWaistY = rig.waist.y;
           assert.ok(Math.abs(exit.spinFlight.angularVelocity) * (exit.spinFlight.rotationDuration ?? exit.spinFlight.duration) / 2000 < .65, 'the released body cannot tumble through another large rotation');
           assert.ok(previous && paintedPoints(rig).every((p, i) => distance(p, paintedPoints(previous)[i]) < 10 + frameDelta * .9), 'the release preserves the actually held skeleton');
@@ -235,7 +243,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       previousCaster = structuredClone(palms);
       previousFinishing = finishing;
     }
-    assert.ok(landed && releaseAt != null && gripFrames >= 1000 / frameDelta - 2, `${kind}/${mirrored}/${frameDelta}: natural full finishing action completes`);
+    assert.ok(landed && releaseAt != null && gripFrames >= rimThrowDuration / frameDelta - 2, `${kind}/${mirrored}/${frameDelta}: natural full finishing action completes`);
     assert.ok(tangentFrames > 0);
     assert.ok(rising && falling && releaseWaistY - minFlightWaistY >= 35, 'the actual released waist visibly rises at least 35px before falling beyond the rim');
     assert.ok(followFrames >= 650 / frameDelta - 2, 'the low release keeps its complete arm follow-through');
@@ -257,7 +265,7 @@ test('both dragged finishes share the same throw and hand-release clock in a lon
           releaseAt = exit.launchedAt;
           const throwAt = round.wrestlingMove?.dragEndAt ?? round.floorFinish?.throwAt;
           assert.ok(heldAt !== undefined && throwAt !== undefined, `${kind}: the actual supported throw is visible`);
-          assert.ok(releaseAt - throwAt >= 1000 && releaseAt - throwAt < 1000 + frameDelta, `${kind}: the same full 1000ms low stroke precedes opening the palms`);
+          assert.ok(releaseAt - throwAt >= rimThrowDuration && releaseAt - throwAt < rimThrowDuration + frameDelta, `${kind}: the same full ${rimThrowDuration}ms low stroke precedes opening the palms`);
         }
         const age = elapsed - releaseAt;
         if (age > 0 && age <= 650) {

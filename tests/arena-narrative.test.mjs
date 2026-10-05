@@ -8,6 +8,8 @@ async function source(path) {
 const { arenaAction, arenaActionWords, arenaChargeTargets, arenaDoubleShoveTargets, arenaEliminatedIds, arenaInsidePoint, arenaMove, arenaNarration, arenaRanks, arenaRounds, arenaTechniqueExit } = await source('src/arenaLogic.ts');
 const { arenaStoryState } = await source('src/arenaStoryLogic.ts');
 const { arenaFloorExitTiming } = await source('src/arenaTechniques.ts');
+const { ARENA_DRAGGED_ANKLE_THROW_TIMING } = await source('src/arenaWrestlingMoves.ts');
+const rimThrowDuration = ARENA_DRAGGED_ANKLE_THROW_TIMING.raise + ARENA_DRAGGED_ANKLE_THROW_TIMING.heave;
 const { arenaAnklePickup } = await source('src/arenaPickup.ts');
 const { createArenaFighterAnimation, sampleArenaFighterContacts } = await source('src/game/ArenaFighter.ts');
 const base = { id: 'alliance', index: 2, tactic: 'betrayal', aggressor: 'receiver', victim: 'loser', helper: 'other', start: 1000, impact: 6000, resolve: 7100, end: 7550, final: false };
@@ -148,8 +150,8 @@ test('short head words follow the actual wrist pivot, fall, floor roll and ankle
   const timing = arenaFloorExitTiming(suplex);
   assert.deepEqual(arenaActionWords(suplex, suplex.impact + 150), []);
   assert.deepEqual(arenaActionWords(suplex, suplex.impact + 1500), [{ id: final.aggressor, word: '끌기!' }]);
-  for (const intoHold of [1, 600, 999]) assert.deepEqual(arenaActionWords(suplex, suplex.impact + timing.dragUntil + intoHold), [{ id: final.aggressor, word: '던지기!' }], 'lifting and the backward heave remain visible through the full held throw');
-  assert.equal(timing.throwUntil - timing.dragUntil, 1000);
+  for (const intoHold of [1, 600, rimThrowDuration - 1]) assert.deepEqual(arenaActionWords(suplex, suplex.impact + timing.dragUntil + intoHold), [{ id: final.aggressor, word: '던지기!' }], 'lifting and the backward heave remain visible through the full held throw');
+  assert.equal(timing.throwUntil - timing.dragUntil, rimThrowDuration);
   const throwAt = suplex.impact + timing.dragUntil + 320;
   const actualReleaseAt = throwAt + 1250;
   const pending = { ...suplex, resolve: actualReleaseAt + 1580, end: Math.max(suplex.end, actualReleaseAt + 1580), floorFinish: { dragUntil: timing.dragUntil, throwAt, releaseAt: null } };
@@ -186,19 +188,20 @@ test('a suplex pull uses reachable live ground speed and the driver stops inside
     assert.ok(endGap < 1e-8, 'the shared drag path holds the actual toe contact without a second motor lag');
     const held = arenaTechniqueExit(actual, timing.dragUntil, origin, landing, side, unit, { lift: 0, angle });
     assert.equal(held.stage, 'hold'); assert.equal(held.height, 0);
-    assert.ok(Math.abs(timing.throwUntil - timing.dragUntil - 1000 * unit) < 1e-9);
-    for (const offset of [16, 600, 999]) {
+    assert.ok(Math.abs(timing.throwUntil - timing.dragUntil - rimThrowDuration * unit) < 1e-9);
+    for (const offset of [16, 600, rimThrowDuration - 1]) {
       const lifting = arenaTechniqueExit(actual, timing.dragUntil + offset * unit, origin, landing, side, unit, { lift: 0, angle });
       assert.equal(lifting.stage, 'hold'); assert.equal(lifting.height, 0);
       assert.ok(distance(lifting, held) < 1e-9, 'the generic ground marker stays at the rim while the actual palms support the overhead body');
     }
     const releaseAt = actual.impact + timing.throwUntil + 500 * unit;
     const pending = { ...actual, floorFinish: { dragUntil: timing.dragUntil, throwAt: actual.impact + timing.dragUntil, releaseAt: null } };
-    assert.equal(arenaTechniqueExit(pending, releaseAt - actual.impact, origin, landing, side, unit, { lift: 0, angle }).stage, 'hold', 'the nominal 1000ms deadline cannot open a grip before its recorded release');
+    assert.equal(arenaTechniqueExit(pending, releaseAt - actual.impact, origin, landing, side, unit, { lift: 0, angle }).stage, 'hold', 'the nominal throw deadline cannot open a grip before its recorded release');
     const released = { ...pending, floorFinish: { ...pending.floorFinish, releaseAt } };
     const release = arenaTechniqueExit(released, releaseAt - actual.impact, origin, landing, side, unit, { lift: 0, angle });
     const leaving = arenaTechniqueExit(released, releaseAt - actual.impact + 440 * unit, origin, landing, side, unit, { lift: 0, angle });
     assert.equal(release.stage, 'rim-toss'); assert.equal(release.height, 0);
-    assert.ok(leaving.height > 30 && side * (leaving.x - release.x) > 50, 'only the released victim continues outward');
+    assert.ok(Math.abs(leaving.height - 21) < 1e-9, 'the released rim arc reaches exactly half its original 42px height');
+    assert.ok(side * (leaving.x - release.x) > 50, 'only the released victim continues outward');
   }
 });

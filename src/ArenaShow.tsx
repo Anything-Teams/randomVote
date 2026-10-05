@@ -18,7 +18,7 @@ import { arenaSlideTripTargets, type ArenaSlideTripOrigins } from './arenaSlideT
 import { arenaLinkedRushTargets, type ArenaLinkedRushOrigins } from './arenaLinkedRush';
 import { arenaSupermanPunchTargets, type ArenaSupermanPunchOrigins } from './arenaSupermanPunch';
 import { ARENA_KICK_CATCH_TIMING, arenaKickCatchTargets, type ArenaKickCatchOrigins } from './arenaKickCatch';
-import { arenaAnkleRimThrowTargets, arenaWrestlingMoveTargets, type ArenaWrestlingMoveOrigins } from './arenaWrestlingMoves';
+import { ARENA_DRAGGED_ANKLE_THROW_HEIGHT, ARENA_DRAGGED_ANKLE_THROW_PACE, ARENA_DRAGGED_ANKLE_THROW_TIMING, arenaAnkleRimThrowTargets, arenaWrestlingMoveTargets, type ArenaWrestlingMoveOrigins } from './arenaWrestlingMoves';
 import { arenaAnkleSwingBasis, arenaAnkleSwingProjection } from './arenaAnkleSwing';
 import { arenaAnkleRimFlightSnapshot } from './arenaAnkleRimFlight';
 import { arenaAnkleFlightSnapshot } from './arenaAnkleFlight';
@@ -306,6 +306,17 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     const duration = Math.max(650, range / Math.max(1, Math.abs(velocity.x)) * 1000);
     const seconds = duration / 1000;
     exit.landing = { x: exit.origin.x + velocity.x * seconds, y: groundY };
+    if (exit.floorThrow) {
+      // Fit a lower parabola to the same release and outside landing. Restore
+      // the former stroke pace only to measure its reference peak; faster
+      // hands must not increase the requested height again.
+      const referenceSeconds = seconds / ARENA_DRAGGED_ANKLE_THROW_PACE;
+      const referenceCurve = exit.lift + groundY - exit.origin.y - Math.min(velocity.y * ARENA_DRAGGED_ANKLE_THROW_PACE, -300) * referenceSeconds;
+      const referencePeak = referenceCurve > exit.lift ? (exit.lift + referenceCurve) ** 2 / (4 * referenceCurve) : exit.lift;
+      const peak = Math.max(exit.lift, referencePeak * ARENA_DRAGGED_ANKLE_THROW_HEIGHT);
+      const curve = 2 * peak - exit.lift + 2 * Math.sqrt(peak * (peak - exit.lift));
+      velocity.y = (exit.lift + groundY - exit.origin.y - curve) / seconds;
+    }
     const gravity = 2 * (groundY - (exit.origin.y - exit.lift) - velocity.y * seconds) / (seconds * seconds);
     exit.spinFlight = { velocity, angularVelocity: angular, center: rig.waist, planarOrbit: planar ? orbit : undefined, duration, ...(exit.floorThrow ? { rotationDuration: Math.min(duration, 650) } : {}), gravity };
   };
@@ -2327,7 +2338,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
         if (exit.floorThrow) {
           const throwAge = elapsed - exit.round.floorFinish!.throwAt!;
           const held = arenaAnkleRimThrowTargets(throwAge, { ...exit.floorThrow, direction: exit.side < 0 ? -1 : 1 });
-          driver.pose = 'throw'; driver.ankleRimToss = true; driver.phase = clamp(throwAge / 1000); driver.ankleThrowProgress = driver.phase; driver.ankleSpinRaise = held.raise;
+          const throwDuration = ARENA_DRAGGED_ANKLE_THROW_TIMING.raise + ARENA_DRAGGED_ANKLE_THROW_TIMING.heave;
+          driver.pose = 'throw'; driver.ankleRimToss = true; driver.phase = clamp(throwAge / throwDuration); driver.ankleThrowProgress = driver.phase; driver.ankleSpinRaise = held.raise;
           driver.gripTarget = held.gripTargets[1]; driver.secondaryGripTarget = held.gripTargets[0]; prepareContactActor(driver);
           const palms = sampleArenaFighterContacts(driver, reduced ? 0 : clock).hands;
           actor.pose = 'stunned'; actor.angle = exit.angle; actor.suspension = 0; actor.carryStretch = undefined; actor.slamProgress = { tuck: 0, slump: 1 }; actor.eyesClosed = true;
@@ -2341,7 +2353,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             exit.floorArms = { hands: [rig.hands[0], rig.hands[1]], elbows: [rig.elbows[0], rig.elbows[1]], shoulders: [rig.shoulders[0], rig.shoulders[1]], root: { x: driver.x, y: driver.y }, stance: state?.motion ? { crouch: (state.supportHip?.y ?? state.motion.crouch - 20) + 20, hipX: state.supportHip?.x ?? state.motion.hipX, lean: state.motion.lean, head: state.motion.head, shoulderLift: state.motion.shoulderLift, contact: state.motion.contact } : undefined };
             exit.spinSnapshot = arenaReleaseSnapshot(actor, reduced ? 0 : clock);
             const prior = arenaAnkleRimThrowTargets(throwAge - 1, { ...exit.floorThrow, direction: exit.side < 0 ? -1 : 1 });
-            const priorPhase = clamp((throwAge - 1) / 1000);
+            const priorPhase = clamp((throwAge - 1) / throwDuration);
             const priorHands = sampleArenaFighterContacts({ ...driver, overheadRaise: prior.overheadRaise, ankleSpinRaise: prior.raise, phase: priorPhase, ankleThrowProgress: priorPhase, gripTarget: prior.gripTargets[1], secondaryGripTarget: prior.gripTargets[0] }, reduced ? 0 : clock).hands;
             exit.origin = { x: snapshot.origin.x, y: driver.y }; exit.lift = Math.max(0, driver.y - snapshot.origin.y); exit.heldFacing = actor.facing;
             releaseSpin(exit, actor, driver, held.ankleSpin.orbit, held.angularVelocity, false, priorHands);

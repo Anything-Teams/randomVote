@@ -16,11 +16,12 @@ source = source.replaceAll('drawArenaScenery(ctx, clock,', 'elbowTestScenery(ctx
   .replace(draw, `elbowTestActors = actors; ${draw}`)
   .replace(ranks, `${ranks} elbowTestRanks = ranks;`)
   .replace(grip, `${grip} elbowTestGrip = { id: exchange.id, at: elapsed, feet: structuredClone(feet), hands: structuredClone(hands) };`);
-source += '\nlet elbowTestActors, elbowTestRanks, elbowTestGrip; const elbowTestScenery = () => {}; export const capture = () => ({ actors: elbowTestActors, ranks: elbowTestRanks, grip: elbowTestGrip }); export { render, createArenaCamera, arenaRounds };';
+source += '\nlet elbowTestActors, elbowTestRanks, elbowTestGrip; const elbowTestScenery = () => {}; export const capture = () => ({ actors: elbowTestActors, ranks: elbowTestRanks, grip: elbowTestGrip }); export { render, createArenaCamera, arenaRounds }; export { ARENA_DRAGGED_ANKLE_THROW_TIMING } from "./arenaWrestlingMoves";';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, capture } = module.exports;
+const { render, createArenaCamera, arenaRounds, capture, ARENA_DRAGGED_ANKLE_THROW_TIMING } = module.exports;
+const rimThrowDuration = ARENA_DRAGGED_ANKLE_THROW_TIMING.raise + ARENA_DRAGGED_ANKLE_THROW_TIMING.heave;
 const noop = () => {};
 const context = () => new Proxy({ measureText: value => ({ width: String(value).length * 8 }), createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }) }, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
 const distance = (one, two) => Math.hypot(one.x - two.x, one.y - two.y);
@@ -75,7 +76,7 @@ for (const delta of [16, 50]) {
       }
       if (actual?.floorFinish?.releaseAt != null) {
         releaseAt ??= actual.floorFinish.releaseAt;
-        assert.ok(releaseAt - throwAt >= 1000 && releaseAt - throwAt < 1000 + delta);
+        assert.ok(releaseAt - throwAt >= rimThrowDuration && releaseAt - throwAt < rimThrowDuration + delta);
         assert.ok(exit?.spinFlight && exit.launchedAt === releaseAt, 'the full throw opens its palms into actual free flight');
         assert.ok(!inside(exit.landing), 'the thrown body lands beyond the sand');
       }
@@ -91,7 +92,7 @@ for (const delta of [16, 50]) {
       }
     }
     assert.ok(gripAt !== undefined && dragFrames >= 10 && dragDistance > 8, 'the actual held floor drag is visible');
-    assert.ok(throwAt !== undefined && releaseAt !== undefined && heldThrowFrames >= 1000 / delta - 2);
+    assert.ok(throwAt !== undefined && releaseAt !== undefined && heldThrowFrames >= rimThrowDuration / delta - 2);
     assert.ok(landed && finished, 'the formerly blocked elbow and the full natural match reach their unchanged drawn ranks');
   });
 }

@@ -600,6 +600,7 @@ test('the received scoop keeps waist velocity continuous through the load, chest
 
 test('a planted rim throw lifts both ankles below the head and sends the feet out first', () => {
   const duration = ARENA_DRAGGED_ANKLE_THROW_TIMING.raise + ARENA_DRAGGED_ANKLE_THROW_TIMING.heave;
+  assert.equal(duration, 850, 'the shared low throw is fifteen percent faster than its original 1000ms stroke');
   for (const facing of [-1, 1]) {
     const origins = { driver: { x: 500, y: 416 }, ankles: [{ x: 500 + facing * 32, y: 411 }, { x: 500 + facing * 30, y: 400 }], orbit: facing === 1 ? 0 : Math.PI, facing, direction: -facing };
     const saved = structuredClone(origins), first = arenaAnkleRimThrowTargets(0, origins);
@@ -611,7 +612,8 @@ test('a planted rim throw lifts both ankles below the head and sends the feet ou
     assert.equal(high.ankleSpin.planar, false); assert.equal(high.ankleSpin.gripBoth, true);
     const before = arenaAnkleRimThrowTargets(duration - .1, origins), released = arenaAnkleRimThrowTargets(duration, origins);
     assert.equal(before.releaseReady, false); assert.equal(released.releaseReady, true);
-    assert.ok(Math.abs(released.angularVelocity) > .5 && Math.abs(released.angularVelocity) < 1.1, 'a small tilt continues through release without an overhead flip');
+    const terminalAngularVelocity = Math.PI * .13 / (ARENA_DRAGGED_ANKLE_THROW_TIMING.heave / 1000);
+    assert.ok(Math.abs(Math.abs(released.angularVelocity) - terminalAngularVelocity) < 1e-10, 'the same small tilt continues at the shortened heave speed without an overhead flip');
     assert.ok(Math.abs(released.ankleSpin.orbit - origins.orbit) <= Math.PI * .13 + 1e-12);
     assert.ok(Math.cos(released.ankleSpin.orbit) * facing > .9, 'the victim leaves with its feet ahead of its head');
     assert.ok((midpoint(released).x - midpoint(before).x) * origins.direction > 0, 'the actual hand support moves towards the outside before the flight');
