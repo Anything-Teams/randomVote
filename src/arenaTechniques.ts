@@ -1,5 +1,5 @@
 import type { ArenaPoint, ArenaRound, ArenaThrowFrame } from './arenaLogic';
-import { ARENA_DRAGGED_ANKLE_THROW_HEIGHT, ARENA_DRAGGED_ANKLE_THROW_TIMING } from './arenaWrestlingMoves';
+import { ARENA_DRAGGED_ANKLE_THROW_FLIGHT, ARENA_DRAGGED_ANKLE_THROW_TIMING } from './arenaWrestlingMoves';
 import { arenaOverheadSlamMotion } from './arenaOverheadSlam';
 
 export const arenaFinalTechniques = ['armspin', 'trip', 'suplex', 'sidekick', 'elbow'] as const;
@@ -19,7 +19,8 @@ export function arenaFloorExitTiming(round: ArenaRound, unit = round.timeScale ?
   const throwAt = round.floorFinish?.throwAt ?? round.impact + dragUntil;
   const throwDuration = ARENA_DRAGGED_ANKLE_THROW_TIMING.raise + ARENA_DRAGGED_ANKLE_THROW_TIMING.heave;
   const throwUntil = (round.floorFinish?.releaseAt ?? throwAt + throwDuration * scale) - round.impact;
-  return { stunnedUntil: pickup * scale, dragUntil, throwUntil, tossUntil: throwUntil + 880 * scale, landUntil: throwUntil + 1080 * scale, recoverUntil: throwUntil + 1580 * scale };
+  const tossUntil = throwUntil + ARENA_DRAGGED_ANKLE_THROW_FLIGHT.duration * scale;
+  return { stunnedUntil: pickup * scale, dragUntil, throwUntil, tossUntil, landUntil: tossUntil + 200 * scale, recoverUntil: tossUntil + 700 * scale };
 }
 /** A single quick jump keeps the airborne kick independent of the bout's introduction. */
 export function arenaSidekickWindow(round: ArenaRound) {
@@ -248,7 +249,7 @@ export function arenaTechniqueExit(round: ArenaRound, age: number, origin: Arena
     }
     if (ms < tossEnd) {
       const phase = clamp((ms - throwEnd) / (tossEnd - throwEnd)), groundX = mix(rim.x, landing.x, ease(phase)), groundY = mix(rim.y, landing.y, ease(phase));
-      const height = Math.sin(phase * Math.PI) * 42 * ARENA_DRAGGED_ANKLE_THROW_HEIGHT;
+      const height = Math.sin(phase * Math.PI) * ARENA_DRAGGED_ANKLE_THROW_FLIGHT.rise;
       return { x: groundX, y: groundY - height, groundX, groundY, height, angle: preparation.angle + direction * Math.PI * .65 * ease(phase), phase, stage: 'rim-toss' };
     }
     const landedAngle = preparation.angle + direction * Math.PI * .65;

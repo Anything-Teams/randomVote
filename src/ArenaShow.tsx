@@ -18,7 +18,7 @@ import { arenaSlideTripTargets, type ArenaSlideTripOrigins } from './arenaSlideT
 import { arenaLinkedRushTargets, type ArenaLinkedRushOrigins } from './arenaLinkedRush';
 import { arenaSupermanPunchTargets, type ArenaSupermanPunchOrigins } from './arenaSupermanPunch';
 import { ARENA_KICK_CATCH_TIMING, arenaKickCatchTargets, type ArenaKickCatchOrigins } from './arenaKickCatch';
-import { ARENA_DRAGGED_ANKLE_THROW_HEIGHT, ARENA_DRAGGED_ANKLE_THROW_PACE, ARENA_DRAGGED_ANKLE_THROW_TIMING, arenaAnkleRimThrowTargets, arenaWrestlingMoveTargets, type ArenaWrestlingMoveOrigins } from './arenaWrestlingMoves';
+import { ARENA_DRAGGED_ANKLE_THROW_FLIGHT, ARENA_DRAGGED_ANKLE_THROW_TIMING, arenaAnkleRimThrowTargets, arenaWrestlingMoveTargets, type ArenaWrestlingMoveOrigins } from './arenaWrestlingMoves';
 import { arenaAnkleSwingBasis, arenaAnkleSwingProjection } from './arenaAnkleSwing';
 import { arenaAnkleRimFlightSnapshot } from './arenaAnkleRimFlight';
 import { arenaAnkleFlightSnapshot } from './arenaAnkleFlight';
@@ -307,35 +307,31 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
       velocity = { x: ((after[0] - before[0]) * local.x + (after[2] - before[2]) * local.y) / (2 * step) * orbital + centerVelocity.x,
         y: ((after[1] - before[1]) * local.x + (after[3] - before[3]) * local.y) / (2 * step) * orbital + centerVelocity.y };
     }
-    // The planted rim throw drives upward as the ankles leave the palms.
-    // Keep the sideways stroke and give the body a full ballistic arc.
-    if (exit.floorThrow) velocity.y = Math.min(velocity.y, -300);
     exit.angle = Math.atan2(exit.spinSnapshot!.matrix[1] * victim.facing, exit.spinSnapshot!.matrix[0] * victim.facing);
-    // Once the palms open, the mass keeps the measured horizontal momentum.
-    // Its landing clock follows that momentum rather than pulling it to a target.
+    // The hand stroke determines which rim receives the released body.
     const direction = Math.sign(velocity.x) || exit.side;
     const groundY = Math.max(436, exit.origin.y + 40);
     // Both the full ankle revolution and a dragged rim throw send the whole
     // silhouette well past the sand. A dragged opponent must also clear the
     // widest left/right edge, even when its landing depth narrows the ellipse.
-    // Extend the ballistic flight while preserving the actual release speed.
+    // Full revolutions keep their measured momentum. The planted rim stroke
+    // gives a dragged opponent a short outward impulse as the palms open.
     const clearance = planar || exit.floorThrow ? 200 : 65;
     const rimHalfWidth = exit.floorThrow ? 303 : 303 * Math.sqrt(Math.max(0, 1 - ((groundY - 416) / 112) ** 2));
     const rimX = 500 + direction * (rimHalfWidth + clearance);
     const range = Math.max(clearance, (rimX - exit.origin.x) * direction);
-    const duration = Math.max(650, range / Math.max(1, Math.abs(velocity.x)) * 1000);
+    const duration = exit.floorThrow ? ARENA_DRAGGED_ANKLE_THROW_FLIGHT.duration
+      : Math.max(650, range / Math.max(1, Math.abs(velocity.x)) * 1000);
     const seconds = duration / 1000;
+    if (exit.floorThrow) velocity.x = direction * range / seconds;
     exit.landing = { x: exit.origin.x + velocity.x * seconds, y: groundY };
     if (exit.floorThrow) {
-      // Fit a lower parabola to the same release and outside landing. Restore
-      // the former stroke pace only to measure its reference peak; faster
-      // hands must not increase the requested height again.
-      const referenceSeconds = seconds / ARENA_DRAGGED_ANKLE_THROW_PACE;
-      const referenceCurve = exit.lift + groundY - exit.origin.y - Math.min(velocity.y * ARENA_DRAGGED_ANKLE_THROW_PACE, -300) * referenceSeconds;
-      const referencePeak = referenceCurve > exit.lift ? (exit.lift + referenceCurve) ** 2 / (4 * referenceCurve) : exit.lift;
-      const peak = Math.max(exit.lift, referencePeak * ARENA_DRAGGED_ANKLE_THROW_HEIGHT);
-      const curve = 2 * peak - exit.lift + 2 * Math.sqrt(peak * (peak - exit.lift));
-      velocity.y = (exit.lift + groundY - exit.origin.y - curve) / seconds;
+      // Bound ascent from the actual release height. A long landing distance
+      // must not turn a low ankle toss into a tall, slow floating arc.
+      const drop = exit.lift + groundY - exit.origin.y;
+      const rise = ARENA_DRAGGED_ANKLE_THROW_FLIGHT.rise;
+      const curve = drop + 2 * rise + 2 * Math.sqrt(rise * (drop + rise));
+      velocity.y = (drop - curve) / seconds;
     }
     const gravity = 2 * (groundY - (exit.origin.y - exit.lift) - velocity.y * seconds) / (seconds * seconds);
     exit.spinFlight = { velocity, angularVelocity: angular, center: rig.waist, planarOrbit: planar ? orbit : undefined, duration, ...(exit.floorThrow ? { rotationDuration: Math.min(duration, 650) } : {}), gravity };

@@ -138,7 +138,8 @@ test('the elbow knockout reuses the suplex floor drag and throws only after reac
     assert.equal(airborne.stage, 'rim-toss');
     assert.equal(release.height, 0, 'the actual rim throw begins from the translated floor silhouette');
     assert.ok(distance(before, release) < .01, 'the shared drag cannot jump to another location for the throw');
-    assert.ok(Math.abs(arenaTechniqueExit(actual, (timing.throwUntil + timing.tossUntil) / 2, origin, landing, direction, unit, preparation).height - 21) < 1e-9, 'only the rim release launches the arc at half its original 42px peak');
+    assert.ok(arenaTechniqueExit(actual, (timing.throwUntil + timing.tossUntil) / 2, origin, landing, direction, unit, preparation).height <= 12, 'the rim release takes a shallow arc instead of lofting the dragged opponent');
+    assert.ok((timing.tossUntil - timing.throwUntil) / unit <= 600, 'the outside flight finishes within six tenths of a second');
     assert.equal(arenaTechniqueExit(actual, timing.recoverUntil, origin, landing, direction, unit, preparation).stage, 'walk');
   }
 });

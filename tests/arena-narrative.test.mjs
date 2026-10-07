@@ -199,9 +199,10 @@ test('a suplex pull uses reachable live ground speed and the driver stops inside
     assert.equal(arenaTechniqueExit(pending, releaseAt - actual.impact, origin, landing, side, unit, { lift: 0, angle }).stage, 'hold', 'the nominal throw deadline cannot open a grip before its recorded release');
     const released = { ...pending, floorFinish: { ...pending.floorFinish, releaseAt } };
     const release = arenaTechniqueExit(released, releaseAt - actual.impact, origin, landing, side, unit, { lift: 0, angle });
-    const leaving = arenaTechniqueExit(released, releaseAt - actual.impact + 440 * unit, origin, landing, side, unit, { lift: 0, angle });
+    const releasedTiming = arenaFloorExitTiming(released, unit);
+    const leaving = arenaTechniqueExit(released, releaseAt - actual.impact + (releasedTiming.tossUntil - releasedTiming.throwUntil) / 2, origin, landing, side, unit, { lift: 0, angle });
     assert.equal(release.stage, 'rim-toss'); assert.equal(release.height, 0);
-    assert.ok(Math.abs(leaving.height - 21) < 1e-9, 'the released rim arc reaches exactly half its original 42px height');
+    assert.ok(leaving.height > 0 && leaving.height <= 12, 'the released body follows a shallow outward arc');
     assert.ok(side * (leaving.x - release.x) > 50, 'only the released victim continues outward');
   }
 });

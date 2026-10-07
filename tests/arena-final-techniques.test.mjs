@@ -280,7 +280,8 @@ test('an overhead waist lift reads its raised hold before accelerating into a sl
     assert.equal(heldFloor.stage, 'hold');
     const toss = arenaTechniqueExit(round, timing.throwUntil + 350, origin, landing, stunned.side, 1, preparation);
     assert.equal(toss.stage, 'rim-toss');
-    assert.ok(Math.abs(toss.height - 21 * Math.sin(350 / 880 * Math.PI)) < 1e-9, 'the last stroke throws only the opponent over the rim at half the original arc height');
+    assert.ok(toss.height > 0 && toss.height <= 12, 'the last stroke sends only the opponent over the rim on a shallow arc');
+    assert.ok(timing.tossUntil - timing.throwUntil <= 600, 'the outside toss completes promptly instead of floating');
     const resolved = arenaTechniqueExit(round, timing.landUntil, origin, landing, stunned.side, 1, preparation);
     assert.ok(distance(resolved, landing) < 1e-8, 'the drawn loser reaches the outside landing by the ranking reveal');
   }

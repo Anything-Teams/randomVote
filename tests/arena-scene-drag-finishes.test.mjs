@@ -17,11 +17,11 @@ source = source.replaceAll('drawArenaScenery(ctx, clock,', 'wrestlingTestScenery
 const initAnchor = 'const ambient = won ? [] : active.filter';
 assert.ok(source.includes(initAnchor));
 source = source.replace(initAnchor, 'wrestlingTestInitialize(sim, props, elapsed, reset); ' + initAnchor);
-source += '\nlet wrestlingTestActors, wrestlingTestRanks; const wrestlingTestScenery = () => {}; let wrestlingTestInitialize = () => {}; export const setInitialize = fn => { wrestlingTestInitialize = fn; }; export const capturedActors = () => wrestlingTestActors; export const capturedRanks = () => wrestlingTestRanks; export { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets }; export { ARENA_DRAGGED_ANKLE_THROW_TIMING, ARENA_DRAGGED_ANKLE_THROW_PACE } from "./arenaWrestlingMoves";';
+source += '\nlet wrestlingTestActors, wrestlingTestRanks; const wrestlingTestScenery = () => {}; let wrestlingTestInitialize = () => {}; export const setInitialize = fn => { wrestlingTestInitialize = fn; }; export const capturedActors = () => wrestlingTestActors; export const capturedRanks = () => wrestlingTestRanks; export { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets }; export { ARENA_DRAGGED_ANKLE_THROW_TIMING } from "./arenaWrestlingMoves";';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets, capturedActors, capturedRanks, setInitialize, ARENA_DRAGGED_ANKLE_THROW_TIMING, ARENA_DRAGGED_ANKLE_THROW_PACE } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets, capturedActors, capturedRanks, setInitialize, ARENA_DRAGGED_ANKLE_THROW_TIMING } = module.exports;
 const rimThrowDuration = ARENA_DRAGGED_ANKLE_THROW_TIMING.raise + ARENA_DRAGGED_ANKLE_THROW_TIMING.heave;
 const noop = () => {};
 const identity = () => [1, 0, 0, 1, 0, 0];
@@ -183,13 +183,10 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
           assert.ok(!inside(exit.landing), 'its continuous free path reaches outside the sand');
           releasedVelocity = exit.spinFlight.velocity;
           assert.ok(releasedVelocity.y < 0 && exit.spinFlight.gravity > 0, 'the lower hand stroke still throws upward with a real falling acceleration');
-          const seconds = exit.spinFlight.duration / 1000, lift = exit.lift;
-          const referenceSeconds = seconds / ARENA_DRAGGED_ANKLE_THROW_PACE;
-          const referenceCurve = lift + exit.landing.y - exit.origin.y + 300 * referenceSeconds;
-          const referencePeak = (lift + referenceCurve) ** 2 / (4 * referenceCurve);
-          const curve = exit.spinFlight.gravity * seconds ** 2 / 2;
-          const peak = (lift + curve) ** 2 / (4 * curve);
-          assert.ok(Math.abs(peak - referencePeak / 2) < 1e-8, 'the actual ballistic maximum is exactly half the original paced rim-throw height');
+          assert.ok(exit.spinFlight.duration <= 600, 'the free throw reaches its outside landing within six tenths of a second');
+          const ascent = releasedVelocity.y ** 2 / (2 * exit.spinFlight.gravity);
+          assert.ok(ascent <= 12.01, 'the actual release gains no more than 12px before falling');
+          assert.ok(Math.abs(releasedVelocity.y / releasedVelocity.x) < .6, 'the launch drives outward on a shallow angle');
           releaseWaistY = rig.waist.y;
           assert.ok(Math.abs(exit.spinFlight.angularVelocity) * (exit.spinFlight.rotationDuration ?? exit.spinFlight.duration) / 2000 < .65, 'the released body cannot tumble through another large rotation');
           assert.ok(previous && paintedPoints(rig).every((p, i) => distance(p, paintedPoints(previous)[i]) < 10 + frameDelta * .9), 'the release preserves the actually held skeleton');
@@ -245,7 +242,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
     }
     assert.ok(landed && releaseAt != null && gripFrames >= rimThrowDuration / frameDelta - 2, `${kind}/${mirrored}/${frameDelta}: natural full finishing action completes`);
     assert.ok(tangentFrames > 0);
-    assert.ok(rising && falling && releaseWaistY - minFlightWaistY >= 35, 'the actual released waist visibly rises at least 35px before falling beyond the rim');
+    assert.ok(rising && falling && releaseWaistY - minFlightWaistY > 0 && releaseWaistY - minFlightWaistY <= 15, 'the painted waist follows a small visible arc without floating high above the thrower');
     assert.ok(followFrames >= 650 / frameDelta - 2, 'the low release keeps its complete arm follow-through');
     assert.ok(actualEnd >= releaseAt + 1100, 'the declared actual end includes the throw flight and ranking reveal');
   }
@@ -292,11 +289,12 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) for
       const outward = Math.sign(exit.spinFlight.velocity.x);
       assert.equal(outward, exit.side, 'the free body travels toward the chosen left or right exit');
       release ??= { at: exit.launchedAt, velocity: { ...exit.spinFlight.velocity } };
-      assert.deepEqual(exit.spinFlight.velocity, release.velocity, 'the free path keeps the measured hand-release momentum');
+      assert.deepEqual(exit.spinFlight.velocity, release.velocity, 'the released outward impulse stays fixed throughout free flight');
       assert.ok(inside(scene.sim.bodies.get(scene.planned.aggressor)), 'the thrower remains planted inside the arena');
       const age = elapsed - release.at;
       if (age < exit.spinFlight.duration) continue;
       assert.ok(age < exit.spinFlight.duration + frameDelta, 'inspect the first actual landing frame, before recovery changes the pose');
+      assert.equal(victim.pose, 'land', 'the actual drawn body lands on the short flight clock');
       const rig = victim.animation.contactPoints, record = scene.ctx.records.get(scene.planned.victim);
       const jointClearance = Math.min(...paintedPoints(rig).map(point => (point.x - 500) * outward - 303));
       assert.ok(jointClearance > 24, `the full head, trunk, arms and feet clear the widest left/right rim by 24px (${jointClearance.toFixed(2)}px)`);
