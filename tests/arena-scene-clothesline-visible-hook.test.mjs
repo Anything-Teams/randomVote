@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { build } from 'esbuild';
 
 // Run the real Scene from a running start. Contact, jump time, carried
-// momentum and the subsequent floor impact all come from production.
+// momentum, floor impact and planted-hand recovery all come from production.
 const require = createRequire(import.meta.url);
 let source = await readFile('src/ArenaShow.tsx', 'utf8');
 const draw = 'arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));';
@@ -116,7 +116,7 @@ function neck(rig) {
   const shoulders = { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 };
   return { x: head.x + (shoulders.x - head.x) * .65, y: head.y + (shoulders.y - head.y) * .65 };
 }
-for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const rearStriker of [false, true]) test(`the upright runner stays behind the opponent while its perpendicular arm visibly strikes the neck (${mirrored ? 'mirrored' : 'ordinary'}/${delta}ms/${rearStriker ? 'rear input order' : 'front input order'})`, () => {
+for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const rearStriker of [false, true]) test(`the upright runner visibly strikes the neck, folds its arm and rises with a planted palm (${mirrored ? 'mirrored' : 'ordinary'}/${delta}ms/${rearStriker ? 'rear input order' : 'front input order'})`, () => {
   // At a shared ground depth, participant input order decides which full body
   // would ordinarily be painted last. The attacking body must remain behind
   // the opponent in both cases, with only its striking arm above the neckline.
@@ -131,8 +131,9 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const r
       body.vx = 0; body.vy = 0; body.motorX = 0; body.motorY = 0; body.animation = undefined;
     }
   });
-  let contactSeen = false, leadingMomentum = false, firstMomentum = false, floorSeen = false, previous, runningMs = 0;
-  let contactWaist, contactRoot, incomingSpeed, strikingArm;
+  let contactSeen = false, leadingMomentum = false, firstMomentum = false, floorSeen = false, recoverySeen = false, recovered = false, sandSupportSeen = false, previous, runningMs = 0, foldedMs = 0;
+  let contactWaist, contactRoot, incomingSpeed, strikingArm, strikeReach;
+  const supports = [undefined, undefined];
   for (let elapsed = 0; elapsed <= 9000; elapsed += delta) {
     ctx.rectangles.length = 0;
     render(ctx, runProps, elapsed, elapsed, sim, delta, false);
@@ -165,9 +166,10 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const r
       assert.ok(previous && frame.side * (previous.waist.x - target.x) < 0, 'the incoming trunk is still before the neckline immediately before contact');
       assert.ok(frame.side * (rig.waist.x - target.x) <= 1, 'the extended arm hits before the trunk passes the neckline instead of hooking it from behind');
       contactWaist = { ...rig.waist }; contactRoot = { x: driver.x, y: driver.depthY }; incomingSpeed = frame.side * frame.driverVelocity.x;
+      strikeReach = distance(shoulder, hand);
       contactSeen = true;
     }
-    if (window.contactAt != null && elapsed <= frame.floorAt) {
+    if (window.contactAt != null && elapsed < frame.pickupReadyAt) {
       for (const arm of [0, 1]) {
         assert.ok(Math.abs(distance(rig.shoulders[arm], rig.elbows[arm]) - 11 * driver.scale) < .001, 'the moving strike has an attached normal upper arm');
         assert.ok(Math.abs(distance(rig.elbows[arm], rig.hands[arm]) - 10.5 * driver.scale) < .001, 'the extended forearm keeps its normal length');
@@ -189,13 +191,48 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const r
       // hip beyond the opponent as the same collision develops into the fall.
       if (age >= 160 && elapsed < frame.floorAt && frame.side * (rig.waist.x - defended.waist.x) >= 20) leadingMomentum = true;
     }
-    if (window.contactAt != null && elapsed >= frame.floorAt) {
+    if (window.contactAt != null && elapsed >= frame.floorAt && !floorSeen) {
       assert.ok(frame.side * (driver.x - victim.x) >= 67.9, 'the attacker completes the forward pass before both bodies land');
       assert.ok(driver.angle * victim.angle < -1, 'the two real bodies land in opposite orientations');
       assert.equal(victim.pose, 'stunned'); assert.equal(victim.eyesClosed, true);
-      floorSeen = true; break;
+      floorSeen = true;
+    }
+    if (floorSeen && elapsed < frame.pickupReadyAt && driver.pose === 'recover') {
+      recoverySeen = true;
+      const shoulder = rig.shoulders[strikingArm], elbow = rig.elbows[strikingArm], hand = rig.hands[strikingArm];
+      const upper = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y }, lower = { x: hand.x - elbow.x, y: hand.y - elbow.y };
+      const bend = Math.abs(Math.atan2(upper.x * lower.y - upper.y * lower.x, upper.x * lower.x + upper.y * lower.y));
+      if (driver.phase >= .65 && driver.phase <= .95) {
+        assert.ok(bend >= .45, 'before fully standing the striking elbow stays bent instead of restoring the captured straight clothesline arm');
+        assert.ok(distance(shoulder, hand) < strikeReach - .5, 'the rising attacker really retracts its painted palm toward the shoulder instead of keeping the impact reach');
+        foldedMs += delta;
+      }
+      for (let arm = 0; arm < 2; arm++) {
+        const palm = rig.hands[arm], ground = driver.depthY;
+        if (Math.abs(palm.y - ground) > 5) { supports[arm] = undefined; continue; }
+        let support = supports[arm];
+        if (!support || distance(palm, support.palm) > 5) supports[arm] = support = { at: elapsed, palm: { ...palm }, waistY: rig.waist.y, headY: rig.head.y };
+        // A landing body settles before pushing up, and its upper body can
+        // rise before its pelvis. Follow both painted points while this same
+        // palm stays planted, measuring the lift from their lowest positions.
+        support.waistY = Math.max(support.waistY, rig.waist.y);
+        support.headY = Math.max(support.headY, rig.head.y);
+        if (elapsed - support.at >= 60 && (support.waistY - rig.waist.y >= 6 || support.headY - rig.head.y >= 6)) {
+          const world = inverse(capturedSceneMatrix());
+          const paintedPalm = ctx.rectangles.find(rect => rect.owner === driver.candidate.id && rect.width === 5 && rect.height === 4 && inside(palm, rect.corners.map(point => project(world, point))));
+          assert.ok(paintedPalm, 'the supporting hand is an actual painted palm rather than a detached contact marker');
+          const ys = paintedPalm.corners.map(point => project(world, point).y);
+          assert.ok(Math.min(...ys) <= ground + 5 && Math.max(...ys) >= ground - 5, 'the painted palm touches the same sand plane beneath the attacker');
+          sandSupportSeen = true;
+        }
+      }
+    }
+    if (floorSeen && elapsed >= frame.pickupReadyAt) {
+      assert.ok(recoverySeen && foldedMs >= 48, 'both directional strikes visibly recover with a retracted arm before the ankle approach');
+      assert.ok(sandSupportSeen, 'a real palm remains planted on the sand for at least 60ms while the painted head or waist rises at least 6px');
+      recovered = true; break;
     }
     previous = structuredClone(rig);
   }
-  assert.ok(contactSeen && firstMomentum && leadingMomentum && floorSeen, 'the same upright running strike reaches the neck, preserves its incoming motion, drives through the body and completes the floor knockout');
+  assert.ok(contactSeen && firstMomentum && leadingMomentum && floorSeen && recovered, 'the same upright running strike reaches the neck, preserves its motion, completes the knockout and rises using a planted palm with its striking arm retracted');
 });

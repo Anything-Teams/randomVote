@@ -339,7 +339,9 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     frame.dropkickProgress = contacted ? caughtFlight : flight;
     frame.clotheslineTarget = { ...target }; frame.clotheslineInner = true;
     frame.clotheslineArm = side < 0 ? 0 : 1;
-    frame.clotheslineStrength = launched ? contacted ? 1 - ease((age - 160) / 180) : ease((flight - .08) / .24) * (1 - ease((flight - .8) / .2)) : 0;
+    // Release the striking arm as the bodies tip, well before the floor and
+    // the push back to standing. The neck contact has already been recorded.
+    frame.clotheslineStrength = launched ? contacted ? 1 - ease((age - 60) / 180) : ease((flight - .08) / .24) * (1 - ease((flight - .8) / .2)) : 0;
     frame.canContact = frame.canContact && flightAge >= jump.contact && flight < .86;
     if (window.duck && !contacted) {
       const duck = ARENA_CLOTHESLINE_DUCK_TIMING;
