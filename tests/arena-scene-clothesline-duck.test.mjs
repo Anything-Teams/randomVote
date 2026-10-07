@@ -54,7 +54,7 @@ function checkDuck({ mirrored, delta, natural = false }) {
     }
   });
   let running = false, launched = false, duckSeen = false, clearMs = 0, passed = false, landed = false, recovered = false, resumed = false, finished = false, pausedChecked = false;
-  let standingTarget, previous, previousWindow, recoveryAt, resumedAt;
+  let standingTarget, previous, previousWindow, recoveryAt, resumedAt, strikingArm;
   let maxLowering = 0;
   const detail = elapsed => `${natural ? 'natural' : 'controlled'}/${mirrored}/${delta}/${elapsed}`;
   for (let elapsed = 0; elapsed <= 80000; elapsed += delta) {
@@ -83,6 +83,13 @@ function checkDuck({ mirrored, delta, natural = false }) {
     assert.equal(window.kind, 'clothesline'); assert.equal(window.duck, true);
     const frame = arenaWrestlingMoveTargets(window, elapsed, actual.center, actual.wrestlingMoveOrigins, round.contactSide);
     const rig = driver.animation.contactPoints, defended = victim.animation.contactPoints;
+    if (driver.clotheslineStrength > .001) {
+      const expectedArm = natural ? frame.side < 0 ? 0 : 1 : mirrored ? 0 : 1;
+      assert.equal(driver.clotheslineArm, expectedArm, 'the missed strike still uses the left arm running left and the right arm running right');
+      strikingArm ??= driver.clotheslineArm;
+      assert.equal(driver.clotheslineArm, strikingArm, 'ducking cannot exchange the incoming arm or reset its follow-through');
+      if (Math.abs(driver.velocityX) > 80) assert.equal(Math.sign(driver.velocityX), frame.side, 'the selected arm follows the real incoming travel direction');
+    }
     assert.ok(painted(rig).concat(painted(defended)).every(point => Number.isFinite(point.x) && Number.isFinite(point.y)), 'all real painted joints stay finite');
     assert.equal(window.contactAt, null, `the lowered neckline must avoid the actual physical arm gate: ${detail(elapsed)}`);
     assert.equal(window.ankleGripAt, null); assert.equal(window.releaseAt, null);
@@ -99,10 +106,10 @@ function checkDuck({ mirrored, delta, natural = false }) {
       assert.ok(Math.abs(duck - frame.victimDuck) < 1e-8, 'the real actor receives the helper duck progress');
       duckSeen ||= duck > .9;
       if (standingTarget) maxLowering = Math.max(maxLowering, liveNeck.y - standingTarget.y);
-      if (duck > .9 && driver.clotheslineStrength > .75 && Math.abs(rig.elbows[1].x - liveNeck.x) < 40) {
-        const gap = Math.min(segmentGap(liveNeck, rig.shoulders[1], rig.elbows[1]), segmentGap(liveNeck, rig.elbows[1], rig.hands[1]));
+      if (duck > .9 && driver.clotheslineStrength > .75 && Math.abs(rig.elbows[strikingArm].x - liveNeck.x) < 40) {
+        const gap = Math.min(segmentGap(liveNeck, rig.shoulders[strikingArm], rig.elbows[strikingArm]), segmentGap(liveNeck, rig.elbows[strikingArm], rig.hands[strikingArm]));
         assert.ok(gap > 8, `the actual lowered neck clears the complete painted striking arm: ${detail(elapsed)}/${gap.toFixed(3)}`);
-        assert.ok(liveNeck.y > rig.elbows[1].y + 8, 'the actual head passes underneath the arm rather than sideways through it');
+        assert.ok(liveNeck.y > rig.elbows[strikingArm].y + 8, 'the actual head passes underneath the selected arm rather than sideways through it');
         clearMs += delta;
       }
       passed ||= frame.side * (driver.x - victim.x) > 35;
@@ -117,13 +124,14 @@ function checkDuck({ mirrored, delta, natural = false }) {
         }
       }
       if (!pausedChecked && !natural && !mirrored && delta === 16 && duck > .99) {
-        const before = { driver: structuredClone(painted(rig)), victim: structuredClone(painted(defended)), duck, launchAt: window.launchAt };
+        const before = { driver: structuredClone(painted(rig)), victim: structuredClone(painted(defended)), duck, launchAt: window.launchAt, strikingArm: driver.clotheslineArm };
         for (let repeat = 0; repeat < 3; repeat++) render(ctx, { ...props, paused: true }, elapsed, elapsed, sim, 0, false);
         for (const who of ['driver', 'victim']) {
           const actor = capturedActors().get(who === 'driver' ? planned.aggressor : planned.victim);
           painted(actor.animation.contactPoints).forEach((point, index) => assert.ok(distance(point, before[who][index]) < 1e-7, 'paused repeated drawing cannot advance or flip the held duck or flying strike'));
         }
         assert.equal(capturedActors().get(planned.victim).duckProgress, before.duck);
+        assert.equal(capturedActors().get(planned.aggressor).clotheslineArm, before.strikingArm, 'paused drawing preserves the chosen material arm');
         assert.equal(sim.contacts.get(planned.id).round.wrestlingMove.launchAt, before.launchAt);
         pausedChecked = true;
       }

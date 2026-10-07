@@ -43,7 +43,7 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the ex
       body.vx = 0; body.vy = 0; body.motorX = 0; body.motorY = 0; body.animation = undefined;
     }
   });
-  let contactRoot, contactWaist, caughtHeight, caughtFlight, caughtNeck, contactAt, previousRig;
+  let contactRoot, contactWaist, caughtHeight, caughtFlight, caughtNeck, contactAt, previousRig, strikingArm;
   let continuedDescent = false, fartherPass = false, impact = false, fixedTargetDuringFall = false;
   for (let elapsed = 0; elapsed <= 9000; elapsed += delta) {
     render(ctx, props, elapsed, elapsed, sim, delta, false);
@@ -53,18 +53,24 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the ex
     const frame = arenaWrestlingMoveTargets(window, elapsed, contact.center, contact.wrestlingMoveOrigins, round.contactSide);
     const driver = capturedActors().get(round.aggressor), victim = capturedActors().get(round.victim);
     const rig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
+    if (driver.clotheslineStrength > .001) {
+      assert.equal(driver.clotheslineArm, mirrored ? 0 : 1, 'leftward and rightward flying strikes use their respective left and right arms');
+      strikingArm ??= driver.clotheslineArm;
+      assert.equal(driver.clotheslineArm, strikingArm, 'the incoming arm keeps its identity through contact and the descending follow-through');
+    }
     if (window.contactAt === elapsed) {
       contactAt = elapsed; contactRoot = { x: driver.x, y: driver.depthY }; contactWaist = { ...rig.waist };
       caughtHeight = frame.driverHeight; caughtFlight = frame.dropkickProgress;
       caughtNeck = { ...contact.wrestlingMoveOrigins.target };
-      const shoulder = rig.shoulders[1], elbow = rig.elbows[1], hand = rig.hands[1];
+      assert.equal(driver.clotheslineArm, strikingArm);
+      const shoulder = rig.shoulders[strikingArm], elbow = rig.elbows[strikingArm], hand = rig.hands[strikingArm];
       const upperInside = { x: shoulder.x + (elbow.x - shoulder.x) * .5, y: shoulder.y + (elbow.y - shoulder.y) * .5 };
       const lowerInside = { x: elbow.x + (hand.x - elbow.x) * .45, y: elbow.y + (hand.y - elbow.y) * .45 };
       const upperAngle = Math.atan2(elbow.y - shoulder.y, elbow.x - shoulder.x), forearmAngle = Math.atan2(hand.y - elbow.y, hand.x - elbow.x);
       const bend = Math.abs(Math.atan2(Math.sin(forearmAngle - upperAngle), Math.cos(forearmAngle - upperAngle)));
       assert.ok(bend <= .3, 'the real contact is an extended arm instead of a folded neck hook');
       assert.ok(Math.min(segmentGap(caughtNeck, upperInside, elbow), segmentGap(caughtNeck, elbow, lowerInside)) < 8, 'the actual middle upper arm, elbow or beginning of the forearm meets the live neck');
-      assert.ok(distance(contact.wrestlingMoveOrigins.target, rig.hands[1]) > 12, 'the hand continues beyond the neck instead of making a fist strike');
+      assert.ok(distance(contact.wrestlingMoveOrigins.target, hand) > 12, 'the selected hand continues beyond the neck instead of making a fist strike');
       assert.ok(frame.side * (rig.waist.x - caughtNeck.x) <= 1, 'the neck collision precedes the attacking trunk passing its contact point');
       assert.ok(distance(contactRoot, contact.wrestlingMoveOrigins.launchDriver) > 100, 'the airborne wrestler crosses a visible runway before the neck strike');
     }
@@ -96,7 +102,7 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the ex
       assert.ok(frame.side * (driver.x - victim.x) >= 65, 'the actual attacker lands farther through the opponent rather than stopping at the neck');
       assert.equal(victim.pose, 'stunned'); assert.equal(victim.eyesClosed, true);
       assert.ok(driver.angle * victim.angle < -1, 'the two painted bodies land in opposite orientations');
-      assert.ok(victimRig.head.y > rig.elbows[1].y - 30, 'the struck upper body reaches the sand under the striking arm');
+      assert.ok(victimRig.head.y > rig.elbows[strikingArm].y - 30, 'the struck upper body reaches the sand under the selected striking arm');
       impact = true; break;
     }
     previousRig = structuredClone(rig);

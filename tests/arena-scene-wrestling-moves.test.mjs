@@ -124,7 +124,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
   for (const frameDelta of [16, 50]) {
     const scene = game(kind, { mirrored, frameDelta });
     let contactSeen = false, releaseSeen = false, finalSeen = false, fallbackSeen = false, attackerJumped = false, attackerLanded = false, distantLandingSeen = false;
-    let actualContactAt, anklesSeen = false, ankleFrames = 0, previousRig, previousDriverRig, previousDriverFacing, previousSpinMatrix, previousSpinWeight, previousTurn, spinFrames = 0, fullTurnSeen = false, runSeen = false, floorSeen = false;
+    let actualContactAt, anklesSeen = false, ankleFrames = 0, previousRig, previousDriverRig, previousDriverFacing, previousDriverLeftArms, previousSpinMatrix, previousSpinWeight, previousTurn, spinFrames = 0, fullTurnSeen = false, runSeen = false, floorSeen = false;
     const scoopStages = new Set();
     const clotheslineStages = new Set();
     let sharedFallSeen = false, standingBeforeGrip = false, oppositeHeadDirectionMs = 0, casterPassedVictim = false;
@@ -155,7 +155,15 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         // Before the spin plane begins, turning toward the ankles relabels
         // both ordinary hip/heel pairs. Compare the same physical soles.
         const relabeled = driver.facing !== previousDriverFacing && driver.gripMode === 'ankle' && driver.pivotTurn === undefined;
-        const priorDriver = relabeled ? { ...previousDriverRig, feet: [...previousDriverRig.feet].reverse() } : previousDriverRig;
+        // The left strike's near arm 0 returns to the ordinary near slot 1.
+        // Compare that same physical arm through the handoff, too.
+        const armsRelabeled = driver.animation.clotheslineLeftArms !== previousDriverLeftArms;
+        const priorDriver = { ...previousDriverRig,
+          feet: relabeled ? [...previousDriverRig.feet].reverse() : previousDriverRig.feet,
+          shoulders: armsRelabeled ? [...previousDriverRig.shoulders].reverse() : previousDriverRig.shoulders,
+          elbows: armsRelabeled ? [...previousDriverRig.elbows].reverse() : previousDriverRig.elbows,
+          hands: armsRelabeled ? [...previousDriverRig.hands].reverse() : previousDriverRig.hands,
+        };
         for (const [point, prior] of paintedPoints(paintedDriver).map((point, index) => [point, paintedPoints(priorDriver)[index]])) assert.ok(distance(point, prior) < cap, `receiving the back or reaching for the ankles cannot reverse a caster joint by ${distance(point, prior).toFixed(2)}px in one frame: ${detail(elapsed, frame)}/joint${paintedPoints(paintedDriver).indexOf(point)}`);
       }
       if (kind !== 'dropkick' && window.contactAt != null && !exit && previousRig) {
@@ -219,9 +227,11 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         if (kind === 'clothesline') {
           assert.ok(runSeen && elapsed - window.launchAt >= 320, 'the solo clothesline accelerates in a real run before striking');
           assert.ok(distance(frame.driver, contact.wrestlingMoveOrigins.launchDriver) > 70);
-          const insideForearm = { x: paintedDriver.elbows[1].x + (paintedDriver.hands[1].x - paintedDriver.elbows[1].x) * .25, y: paintedDriver.elbows[1].y + (paintedDriver.hands[1].y - paintedDriver.elbows[1].y) * .25 };
-          assert.ok(segmentGap(contact.wrestlingMoveOrigins.target, paintedDriver.elbows[1], insideForearm) < 8, `the actual inside elbow, rather than the fist, reaches the neck: ${detail(elapsed, frame)}`);
-          assert.ok(distance(contact.wrestlingMoveOrigins.target, paintedDriver.hands[1]) > 12, 'the striking fist extends beyond the hooked neck');
+          const arm = frame.side < 0 ? 0 : 1;
+          assert.equal(driver.clotheslineArm, arm, 'the actual directional strike uses its matching left or right arm');
+          const insideForearm = { x: paintedDriver.elbows[arm].x + (paintedDriver.hands[arm].x - paintedDriver.elbows[arm].x) * .25, y: paintedDriver.elbows[arm].y + (paintedDriver.hands[arm].y - paintedDriver.elbows[arm].y) * .25 };
+          assert.ok(segmentGap(contact.wrestlingMoveOrigins.target, paintedDriver.elbows[arm], insideForearm) < 8, `the actual inside elbow, rather than the fist, reaches the neck: ${detail(elapsed, frame)}`);
+          assert.ok(distance(contact.wrestlingMoveOrigins.target, paintedDriver.hands[arm]) > 12, 'the striking fist extends beyond the neck');
           assert.equal(driver.clotheslineInner, true);
         }
         else if (kind === 'dropkick') {
@@ -404,6 +414,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
         distantLandingSeen = true;
       }
       previousRig = structuredClone(paintedVictim); previousDriverRig = structuredClone(paintedDriver); previousDriverFacing = driver.facing;
+      previousDriverLeftArms = driver.animation.clotheslineLeftArms;
       previousSpinMatrix = victim.animation.spinSnapshot?.matrix ? [...victim.animation.spinSnapshot.matrix] : undefined;
       previousSpinWeight = victim.spinSuspension?.weight;
     }

@@ -37,7 +37,7 @@ export type ArenaWrestlingMoveFrame = {
   driverPhase: number; victimPhase: number; driverHeight: number; victimHeight: number;
   driverAngle: number; victimAngle: number; driverSuspension: number; victimSuspension: number;
   driverJumpTuck: number; victimJumpTuck: number; driverSlam?: Slam; victimSlam?: Slam;
-  clotheslineTarget?: ArenaPoint; clotheslineStrength: number; clotheslineInner?: boolean; victimDuck: number;
+  clotheslineTarget?: ArenaPoint; clotheslineArm?: 0 | 1; clotheslineStrength: number; clotheslineInner?: boolean; victimDuck: number;
   footTargets?: [ArenaPoint, ArenaPoint]; feetStrength: number; dropkickProgress: number;
   gripTargets?: [ArenaPoint, ArenaPoint]; gripStrength: number; gripMode?: 'head' | 'waist' | 'ankle' | 'cradle'; bulldogProgress: number; bulldogHeadlock?: boolean; backBodyProgress: number; backBodyRaise?: number; backBodySupport?: ArenaPoint;
   spinebusterProgress: number; spineLoad: number; spineLift: number; spineDown: number; spineSupport?: ArenaPoint; scoopSlamProgress: number; victimCarryStretch?: number; counterPreparation: number; counterReadyAt: number;
@@ -332,6 +332,7 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     frame.driverSuspension = launched ? contacted ? 1 - fall : flight < 1 ? 1 : 0 : 0;
     frame.dropkickProgress = contacted ? caughtFlight : flight;
     frame.clotheslineTarget = { ...target }; frame.clotheslineInner = true;
+    frame.clotheslineArm = side < 0 ? 0 : 1;
     frame.clotheslineStrength = launched ? contacted ? 1 - ease((age - 160) / 180) : ease((flight - .08) / .24) * (1 - ease((flight - .8) / .2)) : 0;
     frame.canContact = frame.canContact && flightAge >= jump.contact && flight < .86;
     if (window.duck && !contacted) {

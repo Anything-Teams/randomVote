@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { Candidate } from './election';
 import type { SportsStageProps } from './sports';
 import { arenaAction, arenaActionWords, arenaApproachSpeed, arenaCatchTargets, arenaChargeFall, arenaChargeTargets, arenaContactRound, arenaDoubleShoveTargets, arenaEliminatedIds, arenaFaceOpponent, arenaInsidePoint, arenaLocalContact, arenaEdgeFall, arenaEdgeTargets, arenaExitDirection, arenaGuardTarget, arenaMiniExchanges, arenaMove as move, arenaNarration, arenaNearbyResponse, arenaPodium, arenaRamTargets, arenaReleaseTarget, arenaRoamingTarget, arenaRounds, arenaShoveTargets, arenaSpinTargets, arenaStartingPoint, arenaThrow, type ArenaPoint, type ArenaPodiumPlace, type ArenaRoamingStage, type ArenaRound } from './arenaLogic';
-import { arenaCarryHolderPoint, arenaDrawOrder, arenaReleaseSnapshot, arenaSpinGripPair, arenaSpinSnapshot, arenaWristGripPoint, createArenaFighterAnimation, drawArenaCradleSupport, drawArenaPowerbombRearLeg, drawArenaFighter as paintArenaFighter, drawArenaName, sampleArenaFighterContacts, type ArenaActor, type ArenaFighterAnimation, type ArenaPose, type ArenaSpinSnapshot } from './game/ArenaFighter';
+import { arenaCarryHolderPoint, arenaDrawOrder, arenaReleaseSnapshot, arenaSpinGripPair, arenaSpinSnapshot, arenaWristGripPoint, createArenaFighterAnimation, drawArenaClotheslineStrike, drawArenaCradleSupport, drawArenaPowerbombRearLeg, drawArenaFighter as paintArenaFighter, drawArenaName, sampleArenaFighterContacts, type ArenaActor, type ArenaFighterAnimation, type ArenaPose, type ArenaSpinSnapshot } from './game/ArenaFighter';
 import { drawArenaScenery } from './game/arenaArt';
 import ArenaStory from './ArenaStory';
 import { arenaTechniqueTargets, arenaTechniqueExit, arenaTechniqueReactionAt, arenaSidekickWindow, arenaFloorExitTiming, isArenaFloorDrag, isArenaFinalTechnique } from './arenaTechniques';
@@ -616,7 +616,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               actor.gripTarget = undefined; actor.secondaryGripTarget = undefined; actor.gripStrength = 0;
               prepareContactActor(actor);
             }
-            driver.clotheslineArm = window.kind === 'clothesline' && frame.clotheslineStrength > .001 ? 1 : undefined;
+            driver.clotheslineArm = window.kind === 'clothesline' && frame.clotheslineStrength > .001 ? frame.clotheslineArm : undefined;
             driver.clotheslineTarget = frame.clotheslineTarget; driver.clotheslineStrength = frame.clotheslineStrength;
             driver.clotheslineInner = frame.clotheslineInner;
             driver.dropkickProgress = frame.dropkickProgress; driver.footTargets = frame.footTargets; driver.feetStrength = frame.feetStrength;
@@ -762,7 +762,8 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
             // real lowered neck so a duck cannot become a phantom hit.
             const neck = window.duck ? clotheslineNeck(defending) : contact.wrestlingMoveOrigins!.target!;
             const extendedArmTouches = (rig: typeof attacking) => {
-              const shoulder = rig.shoulders[1], elbow = rig.elbows[1], hand = rig.hands[1];
+              const arm = frame.clotheslineArm!;
+              const shoulder = rig.shoulders[arm], elbow = rig.elbows[arm], hand = rig.hands[arm];
               const upper = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y }, lower = { x: hand.x - elbow.x, y: hand.y - elbow.y };
               const bend = Math.abs(Math.atan2(upper.x * lower.y - upper.y * lower.x, upper.x * lower.x + upper.y * lower.y));
               const upperInside = { x: shoulder.x + upper.x * .5, y: shoulder.y + upper.y * .5 };
@@ -783,7 +784,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
               for (let at = start; at < elapsed; at += 2) {
                 const candidate = arenaWrestlingMoveTargets(window, at, contact.center, contact.wrestlingMoveOrigins, exchange.contactSide);
                 if (!candidate.canContact || candidate.clotheslineStrength <= .75) continue;
-                const predicted = { ...driver, ...candidate.driver, y: candidate.driver.y - candidate.driverHeight, depthY: candidate.driver.y, pose: candidate.driverPose, phase: candidate.driverPhase, angle: candidate.driverAngle, suspension: candidate.driverSuspension, dropkickProgress: candidate.dropkickProgress, clotheslineStrength: candidate.clotheslineStrength };
+                const predicted = { ...driver, ...candidate.driver, y: candidate.driver.y - candidate.driverHeight, depthY: candidate.driver.y, pose: candidate.driverPose, phase: candidate.driverPhase, angle: candidate.driverAngle, suspension: candidate.driverSuspension, dropkickProgress: candidate.dropkickProgress, clotheslineArm: candidate.clotheslineArm, clotheslineStrength: candidate.clotheslineStrength };
                 const rig = sampleArenaFighterContacts(predicted, clock);
                 if (extendedArmTouches(rig)) {
                   strikeFrame = candidate; touched = true; break;
@@ -2479,6 +2480,13 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     carried.scoopSupportActor = caster;
   }
   arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
+  for (const contact of sim.contacts.values()) {
+    const window = contact.round.wrestlingMove;
+    if (window?.kind !== 'clothesline' || window.launchAt == null || elapsed < window.launchAt
+      || window.contactAt != null && elapsed > window.contactAt + 160) continue;
+    const striker = actors.get(contact.round.aggressor);
+    if (striker) drawArenaClotheslineStrike(ctx, striker);
+  }
   overlays.forEach(draw => draw());
   const alerted = new Set<string>();
   if (!props.preview && !won) for (const contact of sim.contacts.values()) {

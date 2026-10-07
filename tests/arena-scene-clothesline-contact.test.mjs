@@ -44,7 +44,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
   let ran = false, contactSeen = false, knockoutSeen = false, released = false, finished = false, stoppedAt;
   let contactRoot, leadingFallMs = 0, checkedEarlyMomentum = false;
   let airborneApproachMs = 0, oppositeFallMs = 0;
-  let ankleFrames = 0, spinFrames = 0, previousTurn;
+  let ankleFrames = 0, spinFrames = 0, previousTurn, strikingArm, previousDriverRig;
   for (let elapsed = 0; elapsed <= 70000; elapsed += step) {
     render(ctx, props, elapsed, elapsed, sim, step, false);
     const actual = sim.contacts.get(planned.id), round = actual?.round, window = round?.wrestlingMove;
@@ -53,6 +53,17 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
     const frame = arenaWrestlingMoveTargets(window, elapsed, actual.center, actual.wrestlingMoveOrigins, round.contactSide);
     const driver = capturedActors().get(round.aggressor), victim = capturedActors().get(round.victim);
     assert.ok(driver && victim);
+    const driverRig = driver.animation.contactPoints;
+    if (driver.clotheslineStrength > .001) {
+      const expectedArm = frame.side < 0 ? 0 : 1;
+      assert.equal(driver.clotheslineArm, expectedArm, 'the leftward run strikes with the left arm and the rightward run with the right arm');
+      strikingArm ??= driver.clotheslineArm;
+      assert.equal(driver.clotheslineArm, strikingArm, 'the same material arm extends, hits and follows through without exchanging shoulders');
+      if (window.contactAt == null && Math.abs(driver.velocityX) > 80) assert.equal(Math.sign(driver.velocityX), frame.side, 'arm selection follows the actual direction of the incoming run');
+    }
+    if (previousDriverRig && (window.contactAt == null && driver.clotheslineStrength > .001 || window.contactAt != null && elapsed <= frame.floorAt)) {
+      for (const joint of ['shoulders', 'elbows', 'hands']) assert.ok(distance(driverRig[joint][strikingArm], previousDriverRig[joint][strikingArm]) < 8 + step * .9, `the selected striking ${joint} cannot jump to the other arm at neck contact or during the fall`);
+    }
     ran ||= driver.pose === 'run' && Math.hypot(driver.velocityX, driver.velocityY) > 80;
     // The arm strike is a flying wrestling tackle, not a grounded runner
     // falling only after contact. Measure the drawn elevation before the
@@ -66,7 +77,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       contactSeen = true;
       contactRoot = { x: driver.x, y: driver.y };
       assert.ok(ran, 'the strike follows a visible actual run');
-      const driverRig = driver.animation.contactPoints, victimRig = victim.animation.contactPoints;
+      const victimRig = victim.animation.contactPoints;
       const temples = { x: (victimRig.headSides[0].x + victimRig.headSides[1].x) / 2, y: (victimRig.headSides[0].y + victimRig.headSides[1].y) / 2 };
       const shoulders = { x: (victimRig.shoulders[0].x + victimRig.shoulders[1].x) / 2, y: (victimRig.shoulders[0].y + victimRig.shoulders[1].y) / 2 };
       const liveNeck = { x: temples.x + (shoulders.x - temples.x) * .65, y: temples.y + (shoulders.y - temples.y) * .65 };
@@ -74,7 +85,8 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       assert.ok(airborneApproachMs >= 80, 'the real approach shows at least 80ms of visible flight before the extended arm meets the neck');
       assert.ok(driver.depthY - driver.y >= 8 && driver.suspension > .5, 'the arm collision happens while the actual driver is airborne');
       assert.ok(Math.abs(driverRig.head.y - driverRig.waist.y) / trunkLength <= .7, 'the painted driver extends its trunk into a nearly horizontal flying strike');
-      const shoulder = driverRig.shoulders[1], elbow = driverRig.elbows[1], hand = driverRig.hands[1];
+      assert.equal(driver.clotheslineArm, strikingArm);
+      const shoulder = driverRig.shoulders[strikingArm], elbow = driverRig.elbows[strikingArm], hand = driverRig.hands[strikingArm];
       const upper = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y }, lower = { x: hand.x - elbow.x, y: hand.y - elbow.y };
       const bend = Math.abs(Math.atan2(upper.x * lower.y - upper.y * lower.x, upper.x * lower.x + upper.y * lower.y));
       const upperInside = { x: shoulder.x + upper.x * .5, y: shoulder.y + upper.y * .5 };
@@ -82,7 +94,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       const neckGap = Math.min(segmentGap(liveNeck, upperInside, elbow), segmentGap(liveNeck, elbow, lowerInside));
       assert.ok(bend <= .3, 'the arm is extended before the collision, without hooking backward around the neck');
       assert.ok(neckGap < 8, `the painted middle arm reaches the victim's current neck (${neckGap.toFixed(2)}px at ${elapsed}ms)`);
-      assert.ok(distance(liveNeck, driverRig.hands[1]) > 12, 'the fist extends beyond the neck instead of punching it');
+      assert.ok(distance(liveNeck, hand) > 12, 'the selected fist extends beyond the neck instead of punching it');
       assert.ok(frame.side * (driverRig.waist.x - liveNeck.x) <= 3, 'the arm meets the neck before the trunk has passed it');
       assert.ok(driverRig.feet.every(foot => distance(liveNeck, foot) > 14), 'the elbow, rather than dropkick feet, causes the actual neck contact');
       for (let arm = 0; arm < 2; arm++) {
@@ -136,6 +148,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
     }
     else if (!released) assert.equal(capturedRanks()[round.victim], undefined, 'the drawn rank cannot eliminate the victim before the actual held throw');
     if (Object.keys(capturedRanks()).length === order.length) { finished = true; break; }
+    previousDriverRig = structuredClone(driverRig);
   }
   assert.ok(checkedEarlyMomentum && leadingFallMs >= 80, 'the actual caster keeps running momentum and visibly carries its trunk past the opponent before both hit the floor');
   assert.ok(oppositeFallMs >= 80, 'after the flying arm collision the painted bodies fall in opposite head-to-foot directions for a visible interval');

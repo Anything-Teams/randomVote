@@ -35,8 +35,8 @@ function segmentGap(point, from, to) {
   const along = Math.max(0, Math.min(1, ((point.x - from.x) * dx + (point.y - from.y) * dy) / Math.max(.001, dx * dx + dy * dy)));
   return distance(point, mix(from, to, along));
 }
-function insideArmGap(point, rig) {
-  const shoulder = rig.shoulders[1], elbow = rig.elbows[1], hand = rig.hands[1];
+function insideArmGap(point, rig, arm) {
+  const shoulder = rig.shoulders[arm], elbow = rig.elbows[arm], hand = rig.hands[arm];
   return Math.min(segmentGap(point, mix(shoulder, elbow, .5), elbow), segmentGap(point, elbow, mix(elbow, hand, .45)));
 }
 
@@ -141,7 +141,7 @@ for (const side of [-1, 1]) for (const step of [16, 50]) for (const index of [0,
       const painted = paint(defender, clock), upright = paint(reference, clock);
       footprints ??= painted.rig.feet;
       if (!frame.victimDuck) originalTarget = neck(upright.rig);
-      Object.assign(attacker, { x: frame.driver.x, y: frame.driver.y - frame.driverHeight, depthY: frame.driver.y, facing: frame.driverFacing, pose: frame.driverPose, phase: frame.driverPhase, angle: frame.driverAngle, suspension: frame.driverSuspension, jumpTuck: frame.driverJumpTuck, velocityX: frame.driverVelocity.x, velocityY: frame.driverVelocity.y, clotheslineTarget: originalTarget, clotheslineArm: 1, clotheslineStrength: frame.clotheslineStrength, clotheslineInner: true, dropkickProgress: frame.dropkickProgress });
+      Object.assign(attacker, { x: frame.driver.x, y: frame.driver.y - frame.driverHeight, depthY: frame.driver.y, facing: frame.driverFacing, pose: frame.driverPose, phase: frame.driverPhase, angle: frame.driverAngle, suspension: frame.driverSuspension, jumpTuck: frame.driverJumpTuck, velocityX: frame.driverVelocity.x, velocityY: frame.driverVelocity.y, clotheslineTarget: originalTarget, clotheslineArm: frame.clotheslineArm, clotheslineStrength: frame.clotheslineStrength, clotheslineInner: true, dropkickProgress: frame.dropkickProgress });
       const attacking = paint(attacker, clock).rig;
       assert.ok(painted.matrix.every(Number.isFinite) && joints(painted.rig).every(point => Number.isFinite(point.x) && Number.isFinite(point.y)));
       assert.ok(Math.abs(Math.hypot(painted.matrix[0], painted.matrix[1]) - defender.scale) < 1e-8);
@@ -162,8 +162,8 @@ for (const side of [-1, 1]) for (const step of [16, 50]) for (const index of [0,
       if (previous) joints(painted.rig).forEach((point, part) => assert.ok(distance(point, joints(previous.rig)[part]) < 2 + step * .9, `painted joint ${part} cannot pop on lowering, holding or standing (${age} ms)`));
       previous = painted;
       if (frame.canContact && frame.clotheslineStrength > .75) {
-        closestOrdinaryNeck = Math.min(closestOrdinaryNeck, insideArmGap(neck(upright.rig), attacking));
-        closestDuckedNeck = Math.min(closestDuckedNeck, insideArmGap(neck(painted.rig), attacking));
+        closestOrdinaryNeck = Math.min(closestOrdinaryNeck, insideArmGap(neck(upright.rig), attacking, frame.clotheslineArm));
+        closestDuckedNeck = Math.min(closestDuckedNeck, insideArmGap(neck(painted.rig), attacking, frame.clotheslineArm));
         lowestContactDrop = Math.min(lowestContactDrop, neck(painted.rig).y - neck(upright.rig).y);
       }
       recoveryGap = distance(neck(painted.rig), neck(upright.rig));

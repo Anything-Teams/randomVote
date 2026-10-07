@@ -12,15 +12,42 @@ const draw = 'arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFig
 const init = 'const ambient = won ? [] : active.filter';
 assert.ok(source.includes(draw) && source.includes(init));
 source = source.replaceAll('drawArenaScenery(ctx, clock,', 'hookTestScenery(ctx, clock,')
-  .replace(draw, `hookTestActors = actors; ${draw}`)
+  .replace(draw, 'hookTestActors = actors; hookTestSceneMatrix = ctx.captureMatrix(); arenaDrawOrder([...actors.values()]).forEach(actor => { ctx.beginActor(actor); drawArenaFighter(ctx, actor, reduced ? 0 : clock); ctx.endActor(); });')
   .replace(init, `hookTestInitialize(sim, reset); ${init}`);
-source += '\nlet hookTestActors; const hookTestScenery = () => {}; let hookTestInitialize = () => {}; export const setInitialize = fn => { hookTestInitialize = fn; }; export const capturedActors = () => hookTestActors; export { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets };';
+source += '\nlet hookTestActors, hookTestSceneMatrix; const hookTestScenery = () => {}; let hookTestInitialize = () => {}; export const setInitialize = fn => { hookTestInitialize = fn; }; export const capturedActors = () => hookTestActors; export const capturedSceneMatrix = () => hookTestSceneMatrix; export { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets };';
 const bundle = await build({ stdin: { contents: source, resolveDir: `${process.cwd()}/src`, sourcefile: 'ArenaShow.tsx', loader: 'tsx' }, bundle: true, platform: 'node', format: 'cjs', write: false, external: ['react'], loader: { '.css': 'empty' } });
 const module = { exports: {} };
 new Function('module', 'exports', 'require', bundle.outputFiles[0].text)(module, module.exports, require);
-const { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets, capturedActors, setInitialize } = module.exports;
+const { render, createArenaCamera, arenaRounds, arenaWrestlingMoveTargets, capturedActors, capturedSceneMatrix, setInitialize } = module.exports;
 const noop = () => {};
-const ctx = new Proxy({ globalAlpha: 1, measureText: value => ({ width: value.length * 8 }), createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }) }, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
+const identity = () => [1, 0, 0, 1, 0, 0];
+const multiply = (a, b) => [a[0] * b[0] + a[2] * b[1], a[1] * b[0] + a[3] * b[1], a[0] * b[2] + a[2] * b[3], a[1] * b[2] + a[3] * b[3], a[0] * b[4] + a[2] * b[5] + a[4], a[1] * b[4] + a[3] * b[5] + a[5]];
+const project = (matrix, point) => ({ x: matrix[0] * point.x + matrix[2] * point.y + matrix[4], y: matrix[1] * point.x + matrix[3] * point.y + matrix[5] });
+const inverse = matrix => {
+  const determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
+  assert.ok(Math.abs(determinant) > 1e-6);
+  return [matrix[3] / determinant, -matrix[1] / determinant, -matrix[2] / determinant, matrix[0] / determinant, (matrix[2] * matrix[5] - matrix[3] * matrix[4]) / determinant, (matrix[1] * matrix[4] - matrix[0] * matrix[5]) / determinant];
+};
+function context() {
+  let matrix = identity(), actorId, stack = [];
+  const rectangles = [], target = {
+    globalAlpha: 1, measureText: value => ({ width: value.length * 8 }), createLinearGradient: () => ({ addColorStop: noop }), createRadialGradient: () => ({ addColorStop: noop }),
+    save() { stack.push({ matrix: [...matrix], alpha: target.globalAlpha }); },
+    restore() { const saved = stack.pop(); if (saved) { matrix = saved.matrix; target.globalAlpha = saved.alpha; } },
+    transform(...next) { matrix = multiply(matrix, next); },
+    translate(x, y) { matrix = multiply(matrix, [1, 0, 0, 1, x, y]); },
+    scale(x, y) { matrix = multiply(matrix, [x, 0, 0, y, 0, 0]); },
+    rotate(angle) { const c = Math.cos(angle), s = Math.sin(angle); matrix = multiply(matrix, [c, s, -s, c, 0, 0]); },
+    setTransform(...next) { matrix = [...next]; },
+    fillRect(x, y, width, height) {
+      if (target.globalAlpha <= 0) return;
+      rectangles.push({ owner: actorId, width, height, alpha: target.globalAlpha, corners: [{ x, y }, { x: x + width, y }, { x: x + width, y: y + height }, { x, y: y + height }].map(point => project(matrix, point)) });
+    },
+    captureMatrix: () => [...matrix], beginActor(actor) { actorId = actor.candidate.id; }, endActor() { actorId = undefined; }, rectangles,
+  };
+  return new Proxy(target, { get: (object, key) => key in object ? object[key] : noop, set: (object, key, value) => (object[key] = value, true) });
+}
+const ctx = context();
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 const segmentGap = (point, from, to) => {
   const dx = to.x - from.x, dy = to.y - from.y;
@@ -28,6 +55,38 @@ const segmentGap = (point, from, to) => {
   return distance(point, { x: from.x + dx * p, y: from.y + dy * p });
 };
 const painted = rig => [rig.head, rig.back, rig.waist, ...rig.shoulders, ...rig.elbows, ...rig.hands, ...rig.feet];
+const inside = (point, quad) => {
+  const sides = quad.map((from, index) => { const to = quad[(index + 1) % quad.length]; return (to.x - from.x) * (point.y - from.y) - (to.y - from.y) * (point.x - from.x); });
+  return sides.every(side => side >= -1e-7) || sides.every(side => side <= 1e-7);
+};
+function assertVisibleNeckStrike(driver, victim, rig, arm) {
+  const world = inverse(capturedSceneMatrix());
+  const rectangles = ctx.rectangles.map((rect, index) => ({ ...rect, index, corners: rect.corners.map(point => project(world, point)) }));
+  const middle = (from, to) => ({ x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 });
+  const center = rect => middle(rect.corners[0], rect.corners[2]);
+  const segments = [
+    { width: 13, height: 5.5, center: middle(rig.shoulders[arm], rig.elbows[arm]) },
+    { width: 12.5, height: 4.9, center: middle(rig.elbows[arm], rig.hands[arm]) },
+  ].map(segment => rectangles.findLast(rect => Math.abs(rect.width - segment.width) < .001 && rect.height === segment.height && distance(center(rect), segment.center) < .001));
+  assert.ok(segments.every(Boolean), 'the chosen arm is actually painted as two connected strokes');
+  const driverHead = rectangles.find(rect => rect.owner === driver.candidate.id && rect.height === 16 && rect.width >= 14 && rect.width <= 16);
+  assert.ok(driverHead && segments.every(segment => segment.index > driverHead.index), 'the striking arm remains visible in front of its own torso and head');
+  const victimNeck = rectangles.find(rect => rect.owner === victim.candidate.id && rect.width === 5.4 && rect.height === 7);
+  assert.ok(victimNeck, 'the contact check uses the neck rectangle actually painted for the opponent');
+  const bounds = victimNeck.corners;
+  let paintedContactPixels = 0, visibleContactPixels = 0;
+  for (let x = Math.min(...bounds.map(point => point.x)); x <= Math.max(...bounds.map(point => point.x)); x += .5) for (let y = Math.min(...bounds.map(point => point.y)); y <= Math.max(...bounds.map(point => point.y)); y += .5) {
+    const point = { x, y };
+    if (!inside(point, bounds)) continue;
+    const stroke = segments.find(segment => inside(point, segment.corners));
+    if (!stroke) continue;
+    paintedContactPixels++;
+    const last = rectangles.findLast(rect => rect.alpha > .99 && inside(point, rect.corners));
+    if (stroke.index > victimNeck.index && last.index >= stroke.index && last.owner !== victim.candidate.id) visibleContactPixels++;
+  }
+  assert.ok(paintedContactPixels > 0, 'the selected arm silhouette actually overlaps the painted neck at impact');
+  assert.ok(visibleContactPixels > 0, 'the arm-neck impact remains visibly painted instead of being covered by the opponent');
+}
 const props = { candidates: ['1', '2'].map(id => ({ id, name: id, color: '#ffad72' })), order: ['2', '1'], duration: 44000, arenaRushRoll: 7, arenaEscapeSeed: 19, paused: false, preview: false };
 const planned = arenaRounds(props.order, props.duration, props.arenaRushRoll, props.arenaEscapeSeed)[0];
 assert.equal(planned.wrestlingMove?.kind, 'clothesline');
@@ -38,7 +97,10 @@ function neck(rig) {
   const shoulders = { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 };
   return { x: head.x + (shoulders.x - head.x) * .65, y: head.y + (shoulders.y - head.y) * .65 };
 }
-for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the extended flying arm meets the neck before its body drives through (${mirrored ? 'mirrored' : 'ordinary'}/${delta}ms)`, () => {
+for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const rearStriker of [false, true]) test(`the extended flying arm meets the neck before its body drives through (${mirrored ? 'mirrored' : 'ordinary'}/${delta}ms/${rearStriker ? 'rear striker' : 'front striker'})`, () => {
+  // At a shared ground depth, participant input order decides which full body
+  // is painted last. Both cases must expose the actual striking arm at the neck.
+  const runProps = { ...props, candidates: rearStriker ? [...props.candidates].reverse() : props.candidates };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() };
   setInitialize((current, reset) => {
     if (current !== sim || !reset) return;
@@ -50,18 +112,26 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the ex
     }
   });
   let contactSeen = false, leadingMomentum = false, firstMomentum = false, floorSeen = false, previous, airborneMs = 0;
-  let contactWaist, contactRoot, incomingSpeed;
+  let contactWaist, contactRoot, incomingSpeed, strikingArm;
   for (let elapsed = 0; elapsed <= 9000; elapsed += delta) {
-    render(ctx, props, elapsed, elapsed, sim, delta, false);
+    ctx.rectangles.length = 0;
+    render(ctx, runProps, elapsed, elapsed, sim, delta, false);
     const contact = sim.contacts.get(planned.id), round = contact?.round, window = round?.wrestlingMove;
     if (!contact?.started) continue;
     assert.equal(window?.kind, 'clothesline', 'the real flying strike must not fall back to an ordinary attack');
     const frame = arenaWrestlingMoveTargets(window, elapsed, contact.center, contact.wrestlingMoveOrigins, round.contactSide);
     const driver = capturedActors().get(round.aggressor), victim = capturedActors().get(round.victim);
     const rig = driver.animation.contactPoints, defended = victim.animation.contactPoints;
+    if (driver.clotheslineStrength > .001) {
+      assert.equal(driver.clotheslineArm, mirrored ? 0 : 1, 'the mirrored leftward run uses its left arm; the rightward run uses its right arm');
+      strikingArm ??= driver.clotheslineArm;
+      assert.equal(driver.clotheslineArm, strikingArm, 'the strike keeps the same arm throughout extension, collision and follow-through');
+      if (window.contactAt == null && Math.abs(driver.velocityX) > 80) assert.equal(Math.sign(driver.velocityX), mirrored ? -1 : 1, 'the selected arm belongs to the actual leftward or rightward approach');
+    }
     if (window.contactAt == null && driver.depthY - driver.y > 8) airborneMs += delta;
     if (window.contactAt === elapsed) {
-      const target = neck(defended), elbow = rig.elbows[1], hand = rig.hands[1], shoulder = rig.shoulders[1];
+      assert.equal(driver.clotheslineArm, strikingArm);
+      const target = neck(defended), elbow = rig.elbows[strikingArm], hand = rig.hands[strikingArm], shoulder = rig.shoulders[strikingArm];
       const upperAngle = Math.atan2(elbow.y - shoulder.y, elbow.x - shoulder.x), forearmAngle = Math.atan2(hand.y - elbow.y, hand.x - elbow.x);
       const bend = Math.abs(Math.atan2(Math.sin(forearmAngle - upperAngle), Math.cos(forearmAngle - upperAngle)));
       const upperInside = { x: shoulder.x + (elbow.x - shoulder.x) * .5, y: shoulder.y + (elbow.y - shoulder.y) * .5 };
@@ -70,6 +140,7 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the ex
       assert.ok(bend <= .3, `the extended striking arm must stay nearly straight at contact: ${mirrored}/${delta}/${bend}`);
       assert.ok(Math.min(segmentGap(target, upperInside, elbow), segmentGap(target, elbow, lowerInside)) < 8, 'the actual neckline meets the middle upper arm, inner elbow or beginning of the forearm');
       assert.ok(distance(hand, target) > 12, 'the fist passes the neckline rather than causing the collision');
+      assertVisibleNeckStrike(driver, victim, rig, strikingArm);
       assert.ok(previous && frame.side * (previous.waist.x - target.x) < 0, 'the incoming trunk is still before the neckline immediately before contact');
       assert.ok(frame.side * (rig.waist.x - target.x) <= 1, 'the extended arm hits before the trunk passes the neckline instead of hooking it from behind');
       contactWaist = { ...rig.waist }; contactRoot = { x: driver.x, y: driver.depthY }; incomingSpeed = frame.side * frame.driverVelocity.x;

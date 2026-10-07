@@ -225,9 +225,11 @@ test('the solo clothesline strikes the real neck with its extended middle arm be
     for (let elapsed = values.actual.launchAt; elapsed < values.opening.requiredEndAt; elapsed += 2) {
       const frame = arenaWrestlingMoveTargets(values.actual, elapsed, center, values.initial, side);
       if (!frame.canContact || frame.clotheslineStrength <= .75) continue;
-      const actor = fighter(index, { ...frame.driver, y: frame.driver.y - frame.driverHeight, angle: frame.driverAngle, facing: frame.driverFacing, pose: frame.driverPose, phase: frame.driverPhase, suspension: frame.driverSuspension, dropkickProgress: frame.dropkickProgress, clotheslineArm: 1, clotheslineTarget: frame.clotheslineTarget, clotheslineStrength: frame.clotheslineStrength, clotheslineInner: frame.clotheslineInner });
+      assert.equal(frame.clotheslineArm, side < 0 ? 0 : 1, 'leftward uses the left arm; rightward uses the right arm');
+      const actor = fighter(index, { ...frame.driver, y: frame.driver.y - frame.driverHeight, angle: frame.driverAngle, facing: frame.driverFacing, pose: frame.driverPose, phase: frame.driverPhase, suspension: frame.driverSuspension, dropkickProgress: frame.dropkickProgress, clotheslineArm: frame.clotheslineArm, clotheslineTarget: frame.clotheslineTarget, clotheslineStrength: frame.clotheslineStrength, clotheslineInner: frame.clotheslineInner });
       const contact = sampleArenaFighterContacts(actor, elapsed);
-      const shoulder = contact.shoulders[1], elbow = contact.elbows[1], hand = contact.hands[1];
+      const arm = frame.clotheslineArm;
+      const shoulder = contact.shoulders[arm], elbow = contact.elbows[arm], hand = contact.hands[arm];
       const upper = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y }, lower = { x: hand.x - elbow.x, y: hand.y - elbow.y };
       const bend = Math.abs(Math.atan2(upper.x * lower.y - upper.y * lower.x, upper.x * lower.x + upper.y * lower.y));
       const upperInside = { x: shoulder.x + upper.x * .5, y: shoulder.y + upper.y * .5 };
@@ -237,8 +239,8 @@ test('the solo clothesline strikes the real neck with its extended middle arm be
         assert.ok(side * (hand.x - neck.x) > 10, `${side}/${index}: the fist continues beyond the middle-arm collision`);
         assert.ok(side * (contact.waist.x - neck.x) < 1, `${side}/${index}: the middle arm strikes before the torso passes the neck`);
         assert.ok(frame.driverHeight > 20 && frame.driverSuspension === 1, 'the neck collision happens during the same flying attack');
-        assert.ok(Math.abs(distance(contact.shoulders[1], contact.elbows[1]) - 11 * actor.scale) < .001);
-        assert.ok(Math.abs(distance(contact.elbows[1], contact.hands[1]) - 10.5 * actor.scale) < .001);
+        assert.ok(Math.abs(distance(contact.shoulders[arm], contact.elbows[arm]) - 11 * actor.scale) < .001);
+        assert.ok(Math.abs(distance(contact.elbows[arm], contact.hands[arm]) - 10.5 * actor.scale) < .001);
         touched = true; break;
       }
     }
