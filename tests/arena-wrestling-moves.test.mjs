@@ -57,7 +57,7 @@ test('a clothesline runs into its flying arm strike while hip counters wait for 
     const clothesline = launched('clothesline', side), early = arenaWrestlingMoveTargets(clothesline.actual, clothesline.actual.start + 250, center, clothesline.initial, side);
     assert.equal(early.canContact, false); assert.equal(early.driverPose, 'run'); assert.ok(distance(early.driver, clothesline.initial.driver) > 25);
     const flying = arenaWrestlingMoveTargets(clothesline.actual, clothesline.actual.launchAt + 250, center, clothesline.initial, side);
-    assert.ok(flying.driverHeight > 20 && flying.driverSuspension === 1 && Math.abs(flying.driverAngle) > 1, 'the accelerating stride launches a visibly horizontal flying body before contact');
+    assert.ok(flying.driverHeight > 8 && flying.driverSuspension === 1 && flying.driverAngle === 0, 'the accelerating stride makes a low upright bound for a perpendicular neck strike');
     assert.equal(flying.footTargets, undefined); assert.equal(flying.feetStrength, 0, 'the flying clothesline strikes with its arm rather than converting into a two-foot kick');
     const close = arenaWrestlingMoveTargets(window('clothesline'), 1000, center, { driver: { x: 500, y: 416 }, victim: { x: 500 + side * 90, y: 416 } }, side);
     assert.equal(close.canPerform, false, 'a short reach cannot become an instant running clothesline');
@@ -238,7 +238,7 @@ test('the solo clothesline strikes the real neck with its extended middle arm be
         assert.ok(bend <= .3, `${side}/${index}: the arm is extended rather than hooked around the neck`);
         assert.ok(side * (hand.x - neck.x) > 10, `${side}/${index}: the fist continues beyond the middle-arm collision`);
         assert.ok(side * (contact.waist.x - neck.x) < 1, `${side}/${index}: the middle arm strikes before the torso passes the neck`);
-        assert.ok(frame.driverHeight > 20 && frame.driverSuspension === 1, 'the neck collision happens during the same flying attack');
+        assert.ok(frame.driverHeight > 8 && frame.driverSuspension === 1, 'the neck collision happens during the same upright running bound');
         assert.ok(Math.abs(distance(contact.shoulders[arm], contact.elbows[arm]) - 11 * actor.scale) < .001);
         assert.ok(Math.abs(distance(contact.elbows[arm], contact.hands[arm]) - 10.5 * actor.scale) < .001);
         touched = true; break;

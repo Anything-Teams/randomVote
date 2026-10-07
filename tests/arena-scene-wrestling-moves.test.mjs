@@ -225,7 +225,7 @@ for (const kind of Object.keys(seeds)) for (const mirrored of [false, true]) tes
       if (window.contactAt === elapsed) {
         actualContactAt = elapsed; contactSeen = true;
         if (kind === 'clothesline') {
-          assert.ok(runSeen && elapsed - window.launchAt >= 320, 'the solo clothesline accelerates in a real run before striking');
+          assert.ok(runSeen && elapsed - frame.plannedLaunchAt >= 320, 'the solo clothesline accelerates in a real run before striking');
           assert.ok(distance(frame.driver, contact.wrestlingMoveOrigins.launchDriver) > 70);
           const arm = frame.side < 0 ? 0 : 1;
           assert.equal(driver.clotheslineArm, arm, 'the actual directional strike uses its matching left or right arm');

@@ -84,7 +84,7 @@ for (const mirrored of [false, true]) for (const step of [16, 50]) test(`a natur
       const trunkLength = distance(driverRig.head, driverRig.waist);
       assert.ok(airborneApproachMs >= 80, 'the real approach shows at least 80ms of visible flight before the extended arm meets the neck');
       assert.ok(driver.depthY - driver.y >= 8 && driver.suspension > .5, 'the arm collision happens while the actual driver is airborne');
-      assert.ok(Math.abs(driverRig.head.y - driverRig.waist.y) / trunkLength <= .7, 'the painted driver extends its trunk into a nearly horizontal flying strike');
+      assert.ok(Math.abs(driverRig.head.y - driverRig.waist.y) / trunkLength >= .9, 'the painted driver stays upright while its arm sweeps across the neckline');
       assert.equal(driver.clotheslineArm, strikingArm);
       const shoulder = driverRig.shoulders[strikingArm], elbow = driverRig.elbows[strikingArm], hand = driverRig.hands[strikingArm];
       const upper = { x: elbow.x - shoulder.x, y: elbow.y - shoulder.y }, lower = { x: hand.x - elbow.x, y: hand.y - elbow.y };

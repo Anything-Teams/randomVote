@@ -71,6 +71,16 @@ function assertVisibleNeckStrike(driver, victim, rig, arm) {
   assert.ok(segments.every(Boolean), 'the chosen arm is actually painted as two connected strokes');
   const driverHead = rectangles.find(rect => rect.owner === driver.candidate.id && rect.height === 16 && rect.width >= 14 && rect.width <= 16);
   assert.ok(driverHead && segments.every(segment => segment.index > driverHead.index), 'the striking arm remains visible in front of its own torso and head');
+  const driverBody = rectangles.filter(rect => rect.owner === driver.candidate.id), victimBody = rectangles.filter(rect => rect.owner === victim.candidate.id);
+  assert.ok(driverBody.length && victimBody.length && driverBody.at(-1).index < victimBody[0].index, 'the complete attacking body is painted behind the opponent regardless of participant input order');
+  const freeArm = 1 - arm;
+  for (const segment of [
+    { width: 13, height: 5.5, center: middle(rig.shoulders[freeArm], rig.elbows[freeArm]) },
+    { width: 12.5, height: 4.9, center: middle(rig.elbows[freeArm], rig.hands[freeArm]) },
+  ]) {
+    const stroke = rectangles.findLast(rect => Math.abs(rect.width - segment.width) < .001 && rect.height === segment.height && distance(center(rect), segment.center) < .001);
+    assert.ok(stroke && stroke.index < victimBody[0].index, 'the free arm stays behind the opponent; only the neck-striking arm crosses the foreground');
+  }
   const victimNeck = rectangles.find(rect => rect.owner === victim.candidate.id && rect.width === 5.4 && rect.height === 7);
   assert.ok(victimNeck, 'the contact check uses the neck rectangle actually painted for the opponent');
   const bounds = victimNeck.corners;
@@ -87,6 +97,15 @@ function assertVisibleNeckStrike(driver, victim, rig, arm) {
   assert.ok(paintedContactPixels > 0, 'the selected arm silhouette actually overlaps the painted neck at impact');
   assert.ok(visibleContactPixels > 0, 'the arm-neck impact remains visibly painted instead of being covered by the opponent');
 }
+function assertPerpendicularNeckStrike(rig, arm) {
+  const trunk = { x: rig.head.x - rig.waist.x, y: rig.head.y - rig.waist.y };
+  const striking = { x: rig.hands[arm].x - rig.shoulders[arm].x, y: rig.hands[arm].y - rig.shoulders[arm].y };
+  const trunkLength = Math.hypot(trunk.x, trunk.y), armLength = Math.hypot(striking.x, striking.y);
+  assert.ok(Math.abs(trunk.y) / trunkLength >= .9, 'the real attacking trunk stays upright at the neck strike instead of becoming a sideways diving body');
+  assert.ok(Math.abs(striking.y) / armLength <= .2, 'the actual striking arm extends horizontally at neck height instead of aiming diagonally');
+  const alignment = Math.abs(trunk.x * striking.x + trunk.y * striking.y) / (trunkLength * armLength);
+  assert.ok(alignment <= .3, 'the connected shoulder-to-hand arm is approximately perpendicular to the painted head-to-waist body axis');
+}
 const props = { candidates: ['1', '2'].map(id => ({ id, name: id, color: '#ffad72' })), order: ['2', '1'], duration: 44000, arenaRushRoll: 7, arenaEscapeSeed: 19, paused: false, preview: false };
 const planned = arenaRounds(props.order, props.duration, props.arenaRushRoll, props.arenaEscapeSeed)[0];
 assert.equal(planned.wrestlingMove?.kind, 'clothesline');
@@ -97,9 +116,10 @@ function neck(rig) {
   const shoulders = { x: (rig.shoulders[0].x + rig.shoulders[1].x) / 2, y: (rig.shoulders[0].y + rig.shoulders[1].y) / 2 };
   return { x: head.x + (shoulders.x - head.x) * .65, y: head.y + (shoulders.y - head.y) * .65 };
 }
-for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const rearStriker of [false, true]) test(`the extended flying arm meets the neck before its body drives through (${mirrored ? 'mirrored' : 'ordinary'}/${delta}ms/${rearStriker ? 'rear striker' : 'front striker'})`, () => {
+for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const rearStriker of [false, true]) test(`the upright runner stays behind the opponent while its perpendicular arm visibly strikes the neck (${mirrored ? 'mirrored' : 'ordinary'}/${delta}ms/${rearStriker ? 'rear input order' : 'front input order'})`, () => {
   // At a shared ground depth, participant input order decides which full body
-  // is painted last. Both cases must expose the actual striking arm at the neck.
+  // would ordinarily be painted last. The attacking body must remain behind
+  // the opponent in both cases, with only its striking arm above the neckline.
   const runProps = { ...props, candidates: rearStriker ? [...props.candidates].reverse() : props.candidates };
   const sim = { key: '', elapsed: 0, epoch: 0, camera: createArenaCamera(), bodies: new Map(), contacts: new Map(), exits: new Map(), minis: new Map() };
   setInitialize((current, reset) => {
@@ -111,14 +131,14 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const r
       body.vx = 0; body.vy = 0; body.motorX = 0; body.motorY = 0; body.animation = undefined;
     }
   });
-  let contactSeen = false, leadingMomentum = false, firstMomentum = false, floorSeen = false, previous, airborneMs = 0;
+  let contactSeen = false, leadingMomentum = false, firstMomentum = false, floorSeen = false, previous, runningMs = 0;
   let contactWaist, contactRoot, incomingSpeed, strikingArm;
   for (let elapsed = 0; elapsed <= 9000; elapsed += delta) {
     ctx.rectangles.length = 0;
     render(ctx, runProps, elapsed, elapsed, sim, delta, false);
     const contact = sim.contacts.get(planned.id), round = contact?.round, window = round?.wrestlingMove;
     if (!contact?.started) continue;
-    assert.equal(window?.kind, 'clothesline', 'the real flying strike must not fall back to an ordinary attack');
+    assert.equal(window?.kind, 'clothesline', 'the actual running neck strike must not fall back to an ordinary attack');
     const frame = arenaWrestlingMoveTargets(window, elapsed, contact.center, contact.wrestlingMoveOrigins, round.contactSide);
     const driver = capturedActors().get(round.aggressor), victim = capturedActors().get(round.victim);
     const rig = driver.animation.contactPoints, defended = victim.animation.contactPoints;
@@ -128,7 +148,7 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const r
       assert.equal(driver.clotheslineArm, strikingArm, 'the strike keeps the same arm throughout extension, collision and follow-through');
       if (window.contactAt == null && Math.abs(driver.velocityX) > 80) assert.equal(Math.sign(driver.velocityX), mirrored ? -1 : 1, 'the selected arm belongs to the actual leftward or rightward approach');
     }
-    if (window.contactAt == null && driver.depthY - driver.y > 8) airborneMs += delta;
+    if (window.contactAt == null && driver.pose === 'run' && Math.hypot(driver.velocityX, driver.velocityY) > 80) runningMs += delta;
     if (window.contactAt === elapsed) {
       assert.equal(driver.clotheslineArm, strikingArm);
       const target = neck(defended), elbow = rig.elbows[strikingArm], hand = rig.hands[strikingArm], shoulder = rig.shoulders[strikingArm];
@@ -136,10 +156,11 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const r
       const bend = Math.abs(Math.atan2(Math.sin(forearmAngle - upperAngle), Math.cos(forearmAngle - upperAngle)));
       const upperInside = { x: shoulder.x + (elbow.x - shoulder.x) * .5, y: shoulder.y + (elbow.y - shoulder.y) * .5 };
       const lowerInside = { x: elbow.x + (hand.x - elbow.x) * .45, y: elbow.y + (hand.y - elbow.y) * .45 };
-      assert.ok(airborneMs >= 80, 'the actual striker visibly jumps from its running approach');
+      assert.ok(runningMs >= 80, 'the upright strike follows a visible moving run rather than a static pose at the neckline');
       assert.ok(bend <= .3, `the extended striking arm must stay nearly straight at contact: ${mirrored}/${delta}/${bend}`);
       assert.ok(Math.min(segmentGap(target, upperInside, elbow), segmentGap(target, elbow, lowerInside)) < 8, 'the actual neckline meets the middle upper arm, inner elbow or beginning of the forearm');
       assert.ok(distance(hand, target) > 12, 'the fist passes the neckline rather than causing the collision');
+      assertPerpendicularNeckStrike(rig, strikingArm);
       assertVisibleNeckStrike(driver, victim, rig, strikingArm);
       assert.ok(previous && frame.side * (previous.waist.x - target.x) < 0, 'the incoming trunk is still before the neckline immediately before contact');
       assert.ok(frame.side * (rig.waist.x - target.x) <= 1, 'the extended arm hits before the trunk passes the neckline instead of hooking it from behind');
@@ -155,16 +176,18 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const r
       const age = elapsed - window.contactAt;
       if (age === delta) {
         const speed = frame.side * (driver.x - contactRoot.x) * 1000 / age;
-        assert.ok(incomingSpeed > 300 && speed >= incomingSpeed * .85, 'the first actual collision step retains the incoming forward tangent instead of stopping at the neckline');
+        assert.ok(incomingSpeed > 0 && speed >= incomingSpeed * .85, 'the first actual collision step retains the recorded incoming forward tangent instead of stopping at the neckline');
         firstMomentum = true;
       }
       // Check the carried incoming momentum before the bodies decelerate into
       // their floor poses. The final sand positions remain unchanged.
       if (age >= 96 && age <= 112) {
         assert.ok(frame.side * (rig.waist.x - contactWaist.x) >= Math.max(28, age * .1), 'the collision carries the attacking trunk a full torso width forward from its first contact position before the fall slows');
-        assert.ok(frame.side * (rig.waist.x - defended.waist.x) >= 20, 'after first striking in front, the actual attacking trunk passes the opponent during the same early collision beat');
-        leadingMomentum = true;
       }
+      // A straight upright body begins farther behind the neckline than the
+      // former sideways dive. Its recorded momentum still carries the actual
+      // hip beyond the opponent as the same collision develops into the fall.
+      if (age >= 160 && elapsed < frame.floorAt && frame.side * (rig.waist.x - defended.waist.x) >= 20) leadingMomentum = true;
     }
     if (window.contactAt != null && elapsed >= frame.floorAt) {
       assert.ok(frame.side * (driver.x - victim.x) >= 67.9, 'the attacker completes the forward pass before both bodies land');
@@ -174,5 +197,5 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) for (const r
     }
     previous = structuredClone(rig);
   }
-  assert.ok(contactSeen && firstMomentum && leadingMomentum && floorSeen, 'the same running jump reaches the neck, preserves its incoming motion, drives through the body and completes the floor knockout');
+  assert.ok(contactSeen && firstMomentum && leadingMomentum && floorSeen, 'the same upright running strike reaches the neck, preserves its incoming motion, drives through the body and completes the floor knockout');
 });

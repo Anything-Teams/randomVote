@@ -92,19 +92,19 @@ test('a duck leaves the original 640 ms flying attack and horizontal momentum in
       for (const field of ['driver', 'driverVelocity', 'driverPose', 'driverHeight', 'driverSuspension', 'dropkickProgress', 'clotheslineStrength', 'clotheslineTarget']) assert.deepEqual(actual[field], reference[field], `${field} remains the same empty flying attack`);
       if (age < 640) assert.equal(actual.driverPhase, reference.driverPhase);
       const angle = Math.abs(actual.driverAngle);
-      assert.ok(-side * actual.driverAngle >= 0 && angle < Math.PI / 2, 'the flying body rotates forward into its arm strike without an opposite or complete tumble');
+      assert.equal(angle, 0, 'the empty neck strike keeps the upright running chest through its landing');
       if (previousFlightAngle !== undefined) {
         assert.ok(Math.abs(angle - previousFlightAngle) < .16, 'the flying rotation cannot pop between 16 ms frames');
-        if (age <= 320) assert.ok(angle >= previousFlightAngle, 'the opening rotation flows toward the nearly horizontal arm strike');
+        if (age <= 320) assert.equal(angle, previousFlightAngle, 'the opening bound retains the upright arm-strike body axis');
       }
       previousFlightAngle = angle;
       if (age > 640 * .56) {
-        if (previousLandingAngle !== undefined) assert.ok(angle <= previousLandingAngle && previousLandingAngle - angle < .14, 'only the missed landing unfolds smoothly instead of resetting its horizontal body');
+        if (previousLandingAngle !== undefined) assert.equal(angle, previousLandingAngle, 'the missed landing preserves the upright body without a sudden turn');
         previousLandingAngle = angle;
       }
     }
     const striking = ducking.at(320);
-    assert.ok(Math.abs(striking.driverAngle) > Math.PI / 2 * .9 && striking.driverHeight > 30 && striking.clotheslineStrength > .75, 'at the physical contact window the airborne body and its extended arm are nearly horizontal');
+    assert.ok(striking.driverAngle === 0 && striking.driverHeight > 8 && striking.clotheslineStrength > .75, 'at the physical contact window the body stays upright in a low bound while the arm extends sideways');
     assert.equal(Math.abs(ducking.at(0).driverAngle), 0); assert.equal(Math.abs(ducking.at(640).driverAngle), 0);
     assert.equal(ducking.at(639).driverPose, 'dropkick'); assert.equal(ducking.at(640).driverPose, 'land');
     assert.equal(ducking.at(640).driverHeight, 0); assert.equal(ducking.at(640).driverPhase, 0, 'the landed body begins its ground settling instead of replaying takeoff');

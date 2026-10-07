@@ -585,6 +585,11 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     const chamber = ease(dropkickProgress / .22), landing = ease((dropkickProgress - .64) / .36);
     target.crouch = mix(1.8, 0, landing); target.hipX = 0; target.lean = 9 * landing; target.head = -target.lean * .20 * (1 - landing);
     target.backX = mix(-11, -5, landing); target.backY = mix(-21, -1, landing); target.frontX = mix(13, 15, landing); target.frontY = mix(-23, 1, landing);
+    if (actor.clotheslineInner) {
+      target.lean = 0; target.head = 0;
+      target.backX = mix(-11, -5, landing); target.backY = mix(-12, -1, landing);
+      target.frontX = mix(13, 15, landing); target.frontY = mix(-20, 1, landing);
+    }
     target.mouth = 2.4; target.contact = 0; target.shoulderLift = 0; target.clapTurn = 0; target.cheerTurn = 0; target.applause = 0;
     if (state.dropkickMotion) for (const key of Object.keys(target) as (keyof Motion)[]) target[key] = mix(state.dropkickMotion[key], target[key], chamber);
   }
@@ -947,8 +952,13 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     feet = [falseKick, leadKnee].map((foot, leg) => pointMix(pointMix(state.supermanFeet![leg], foot, chamber), { x: leg ? 6 : -5, y: 0 }, landing)) as [Point, Point];
   }
   if (dropkick) {
-    const chamber = ease(dropkickProgress / .22), strike = ease((dropkickProgress - .20) / .26), landing = ease((dropkickProgress - .64) / .36);
-    feet = feet.map((_, leg) => pointMix(pointMix(state.dropkickFeet![leg], pointMix({ x: hip.x + (leg ? 10 : 7), y: hip.y + 7 }, { x: hip.x + (leg ? 3 : -3), y: hip.y + 21.4 }, strike), chamber), { x: leg ? 6 : -5, y: 0 }, landing)) as [Point, Point];
+    const chamber = ease(dropkickProgress / .22), strike = ease((dropkickProgress - .20) / .26), landing = actor.clotheslineInner && slam ? slump : ease((dropkickProgress - .64) / .36);
+    feet = feet.map((_, leg) => {
+      const bound = actor.clotheslineInner
+        ? { x: hip.x + (leg ? 12 : -12), y: hip.y + (leg ? 12 : 16) }
+        : pointMix({ x: hip.x + (leg ? 10 : 7), y: hip.y + 7 }, { x: hip.x + (leg ? 3 : -3), y: hip.y + 21.4 }, strike);
+      return pointMix(pointMix(state.dropkickFeet![leg], bound, chamber), { x: leg ? 6 : -5, y: 0 }, landing);
+    }) as [Point, Point];
   }
   if (plantedLanding) feet = feet.map(foot => ({ x: foot.x, y: 0 })) as [Point, Point];
   if (actor.jumpTuck !== undefined && air) feet = feet.map((foot, leg) => pointMix(foot, { x: hip.x + (leg ? 7 : -2), y: hip.y + 8 }, clamp(actor.jumpTuck!))) as [Point, Point];
@@ -1491,8 +1501,8 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     // Rotate the airborne torso about its pelvis. The soles extend forward
     // while the head stays behind them; a ground-marker rotation would move
     // the hip out of reach and make both feet miss their captured chest.
-    // A flying neck hook keeps this same pelvis pivot through contact, then
-    // settles its complete horizontal silhouette onto the sand as it falls.
+    // The upright neck strike keeps this pelvis pivot through contact, then
+    // settles its complete silhouette onto the sand as the collision tips it.
     const landing = actor.clotheslineInner && slam ? slump : 0;
     matrix[4] = mix(x + hip.x * scale * facing - matrix[0] * hip.x - matrix[2] * hip.y, matrix[4], landing);
     matrix[5] = mix(y - 2 * scale + hip.y * scale - matrix[1] * hip.x - matrix[3] * hip.y, matrix[5], landing);
@@ -1794,9 +1804,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     // strikes the neck while the hand continues beyond it and the body passes.
     const arm = actor.clotheslineArm ?? (facing < 0 ? 0 : 1), strength = clamp(actor.clotheslineStrength ?? 0);
     const determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2];
-    const dx = actor.clotheslineTarget.x - matrix[4], dy = actor.clotheslineTarget.y - matrix[5];
-    const raw = { x: (matrix[3] * dx - matrix[2] * dy) / determinant, y: (-matrix[1] * dx + matrix[0] * dy) / determinant };
-    const local = rotate({ x: raw.x - hip.x, y: raw.y - hip.y }, -lean), shoulder = shoulders[arm];
+    const shoulder = shoulders[arm];
     if (reset) state.clotheslineAngles = undefined;
     const memory = state.clotheslineAngles;
     const unwrap = (from: number, to: number) => from + Math.atan2(Math.sin(to - from), Math.cos(to - from));
@@ -1804,7 +1812,10 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
     const free = rawFree.map((angle, bone) => memory ? unwrap(memory.free[bone], angle) : angle) as [number, number];
     const worldShoulder = worldPoint(bodyPoint(shoulder));
     const targetAhead = facing * (actor.clotheslineTarget.x - worldShoulder.x) > 0;
-    let aim = Math.atan2(local.y - shoulder.y, local.x - shoulder.x);
+    // A clothesline sweeps a straight arm across the upright chest's side.
+    // Meet the neck with the moving shoulder, rather than tilting the arm
+    // diagonally to chase it or folding the elbow into a hook.
+    let aim = 0;
     if (!targetAhead && !reset && state.contactPoints) {
       // Once the neck passes behind the shoulder, keep the extended arm's
       // actual forward direction. Chasing it backward turns the strike into
@@ -1813,7 +1824,7 @@ export function drawArenaFighter(ctx: CanvasRenderingContext2D, actor: ArenaActo
       const direction = rotate({ x: (matrix[3] * dx - matrix[2] * dy) / determinant, y: (-matrix[1] * dx + matrix[0] * dy) / determinant }, -lean);
       aim = Math.atan2(direction.y, direction.x);
     }
-    const strike = [aim, aim + .14].map((angle, bone) => unwrap(memory?.strike[bone] ?? free[bone], angle)) as [number, number];
+    const strike = [aim, aim + .04].map((angle, bone) => unwrap(memory?.strike[bone] ?? free[bone], angle)) as [number, number];
     const upperAngle = mix(free[0], strike[0], strength), lowerAngle = mix(free[1], strike[1], strength);
     elbows[arm] = { x: shoulder.x + Math.cos(upperAngle) * upperArm, y: shoulder.y + Math.sin(upperAngle) * upperArm };
     hands[arm] = { x: elbows[arm].x + Math.cos(lowerAngle) * lowerArm, y: elbows[arm].y + Math.sin(lowerAngle) * lowerArm };

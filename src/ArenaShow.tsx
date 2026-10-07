@@ -2479,6 +2479,16 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     caster.paintLayer = -1; carried.paintLayer = 1;
     carried.scoopSupportActor = caster;
   }
+  for (const contact of sim.contacts.values()) {
+    const window = contact.round.wrestlingMove;
+    if (window?.kind !== 'clothesline' || window.launchAt == null || elapsed < window.launchAt) continue;
+    const striker = actors.get(contact.round.aggressor), receiver = actors.get(contact.round.victim);
+    if (!striker || !receiver || striker.pose !== 'dropkick') continue;
+    // Keep the running body behind its opponent; only the striking arm is
+    // repainted across the neckline after both complete bodies are drawn.
+    striker.paintDepth = receiver.paintDepth = receiver.depthY ?? receiver.y;
+    striker.paintLayer = -1; receiver.paintLayer = 1;
+  }
   arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
   for (const contact of sim.contacts.values()) {
     const window = contact.round.wrestlingMove;

@@ -72,7 +72,7 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the ex
       assert.ok(Math.min(segmentGap(caughtNeck, upperInside, elbow), segmentGap(caughtNeck, elbow, lowerInside)) < 8, 'the actual middle upper arm, elbow or beginning of the forearm meets the live neck');
       assert.ok(distance(contact.wrestlingMoveOrigins.target, hand) > 12, 'the selected hand continues beyond the neck instead of making a fist strike');
       assert.ok(frame.side * (rig.waist.x - caughtNeck.x) <= 1, 'the neck collision precedes the attacking trunk passing its contact point');
-      assert.ok(distance(contactRoot, contact.wrestlingMoveOrigins.launchDriver) > 100, 'the airborne wrestler crosses a visible runway before the neck strike');
+      assert.ok(distance(contactRoot, contact.wrestlingMoveOrigins.launchDriver) > 70, 'the upright wrestler crosses a visible runway before its leading arm strikes the neck');
     }
     if (contactAt != null && elapsed <= frame.floorAt) {
       if (previousRig) for (const [index, point] of painted(rig).entries()) assert.ok(distance(point, painted(previousRig)[index]) < 8 + delta * .9, 'the painted collision cannot teleport an arm, trunk or foot');
@@ -91,8 +91,8 @@ for (const mirrored of [false, true]) for (const delta of [16, 50]) test(`the ex
         }
       }
       if (elapsed === contactAt + delta) {
-        const incomingDescent = Math.max(0, -4 * 40 * (1 - 2 * caughtFlight) / .64);
-        assert.ok(incomingDescent > 20, 'the real arm contact occurs on the descending jump');
+        const incomingDescent = Math.max(0, -4 * 14 * (1 - 2 * caughtFlight) / .64);
+        assert.ok(caughtFlight >= .5 && incomingDescent >= 0, 'the upright arm contact occurs at or after the top of its low bound');
         assert.ok(caughtHeight - frame.driverHeight >= incomingDescent * delta / 1000 * .75, 'the first fall frame retains the incoming downward speed instead of hanging at the neck');
         continuedDescent = true;
       }

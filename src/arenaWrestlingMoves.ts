@@ -59,7 +59,7 @@ export const ARENA_WRESTLING_MOVE_TIMING = {
   load: 160, jump: 840, landing: 180, clotheslineFollow: 240, clotheslineFall: 420, groggy: 200,
   bulldogFall: 620, bulldogRecover: 480, backFlip: 1200, slamLift: 420, slamFall: 360, slamKick: 240, ankleReach: 240, ankleThrow: 300,
 } as const;
-export const ARENA_CLOTHESLINE_JUMP_TIMING = { flight: 640, height: 40, contact: 320 } as const;
+export const ARENA_CLOTHESLINE_JUMP_TIMING = { flight: 640, height: 14, contact: 320 } as const;
 export const ARENA_CLOTHESLINE_DUCK_CHANCE = .005;
 export const ARENA_CLOTHESLINE_DUCK_TIMING = { start: 120, low: 280, rise: 560, upright: 900, recover: 980 } as const;
 export const ARENA_POWERBOMB_TIMING = { load: 320, lift: 620, hold: 180, slam: 560, recover: 300, groggy: 300, ankleLoad: 520, ankleSpin: 1400, ankleThrow: 0 } as const;
@@ -294,13 +294,20 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
   if (kind === 'clothesline') {
     const jump = ARENA_CLOTHESLINE_JUMP_TIMING, origin = initial.launchDriver ?? goal;
     const flightAge = launched ? Math.max(0, elapsed - launch) : 0, flight = clamp(flightAge / jump.flight);
-    const landing = { x: initial.victim.x + side * 64, y: initial.victim.y };
+    // The upright shoulder and outstretched arm reach the opponent before
+    // the pelvis does. Reserve the remaining pass-through for the impact.
+    const landing = { x: initial.victim.x + side * 16, y: initial.victim.y };
     const runway = distance(initial.driver, goal), runDirection = runway > .001 ? { x: (goal.x - initial.driver.x) / runway, y: (goal.y - initial.driver.y) / runway } : { x: side, y: 0 };
     const airborne = (p: number) => {
       const tangent = p * (1 - p) ** 2, tangentVelocity = (1 - p) * (1 - 3 * p), duration = jump.flight / 1000;
-      return { point: { x: mix(origin.x, landing.x, ease(p)) + runDirection.x * ARENA_CHARGE_SPEED * duration * tangent, y: mix(origin.y, landing.y, ease(p)) + runDirection.y * ARENA_CHARGE_SPEED * duration * tangent },
-        velocity: { x: (landing.x - origin.x) * 6 * p * (1 - p) / duration + runDirection.x * ARENA_CHARGE_SPEED * tangentVelocity, y: (landing.y - origin.y) * 6 * p * (1 - p) / duration + runDirection.y * ARENA_CHARGE_SPEED * tangentVelocity },
-        height: jump.height * 4 * p * (1 - p), angle: -side * Math.PI * .47 * ease(p / .32) };
+      // After a duck has cleared the sweep, complete the missed run on the
+      // far side rather than landing alongside the opponent and stopping.
+      const missAge = (p - .58) * jump.flight, missDuration = jump.flight * .42;
+      const missPass = contactAt === null ? side * 48 * ease(missAge / missDuration) : 0;
+      const missVelocity = contactAt === null ? side * 48 * easeVelocity(missAge, missDuration) : 0;
+      return { point: { x: mix(origin.x, landing.x, ease(p)) + runDirection.x * ARENA_CHARGE_SPEED * duration * tangent + missPass, y: mix(origin.y, landing.y, ease(p)) + runDirection.y * ARENA_CHARGE_SPEED * duration * tangent },
+        velocity: { x: (landing.x - origin.x) * 6 * p * (1 - p) / duration + runDirection.x * ARENA_CHARGE_SPEED * tangentVelocity + missVelocity, y: (landing.y - origin.y) * 6 * p * (1 - p) / duration + runDirection.y * ARENA_CHARGE_SPEED * tangentVelocity },
+        height: jump.height * 4 * p * (1 - p), angle: 0 };
     };
     const entry = launched ? airborne(flight) : { point: run.point, velocity: run.velocity, height: 0, angle: 0 };
     const atContact = airborne(clamp((contact - launch) / jump.flight));
@@ -308,9 +315,8 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
     const victimOrigin = initial.contactVictim ?? initial.victim;
     const age = contacted ? Math.max(0, elapsed - contactAt!) : 0;
     const fall = ease(age / timing.clotheslineFall), rise = ease((age - timing.clotheslineFall) / ARENA_CLOTHESLINE_FINISH_TIMING.rise);
-    // Jump from the running stride, then carry that same airborne body and
-    // velocity through the extended-arm strike. The attacker keeps its feet
-    // forward as it lands; the opponent tips in the opposite direction.
+    // Bound from the running stride with an upright chest and a horizontal
+    // arm at neck height. The collision then tips both complete bodies down.
     const incoming = initial.contactDriverVelocity ?? atContact.velocity;
     const caughtHeight = initial.contactDriverHeight ?? atContact.height, caughtAngle = initial.contactDriverAngle ?? atContact.angle;
     const caughtFlight = initial.contactFlightProgress ?? clamp((contact - launch) / jump.flight);
@@ -339,9 +345,8 @@ export function arenaWrestlingMoveTargets(window: ArenaWrestlingMoveWindow, elap
       const duck = ARENA_CLOTHESLINE_DUCK_TIMING;
       frame.victimDuck = launched ? ease((flightAge - duck.start) / (duck.low - duck.start)) * (1 - ease((flightAge - duck.rise) / (duck.upright - duck.rise))) : 0;
       frame.victimPose = 'guard'; frame.victimEyesClosed = false;
-      // Unfold into the landing across the last part of the empty jump,
-      // rather than snapping the horizontal trunk upright at touchdown.
-      frame.driverAngle = -side * Math.PI * .47 * ease(flight / .36) * (1 - ease((flight - .56) / .44));
+      // An empty strike retains the upright running bound into its landing.
+      frame.driverAngle = 0;
       frame.landingAt = launch + jump.flight;
       frame.requiredEndAt = launch + duck.recover;
       frame.recovered = launched && elapsed >= frame.requiredEndAt;
