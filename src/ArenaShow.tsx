@@ -31,7 +31,7 @@ import './arena.css';
 type Body = ArenaPoint & { gait: number; facing: number; vx: number; vy: number; motorX?: number; motorY?: number; restUntil?: number; separatedFrom?: string; animation?: ArenaFighterAnimation; roam?: { key: string; origin: ArenaPoint; target: ArenaPoint; neighborId?: string } };
 type Contact = { center: ArenaPoint; side: number; round: ArenaRound; plannedDelay?: number; started?: boolean; metAt?: number; committed?: boolean; chargerOrigin?: ArenaPoint; pairDodgeOrigins?: ArenaPairDodgeOrigins; supermanPunchOrigins?: ArenaSupermanPunchOrigins; kickCatchOrigins?: ArenaKickCatchOrigins; wrestlingMoveOrigins?: ArenaWrestlingMoveOrigins; wrestlingHeadOffset?: ArenaPoint; wrestlingCradleOffset?: ArenaPoint; wrestlingSpinSample?: { at: number; waist: ArenaPoint }; slideTripOrigins?: ArenaSlideTripOrigins; linkedRushOrigins?: ArenaLinkedRushOrigins; pairCarryOrigins?: ArenaPairCarryOrigins; linkedRelease?: { at: number; hands: [ArenaPoint, ArenaPoint]; roots: [ArenaPoint, ArenaPoint]; arms: [0 | 1, 0 | 1]; facings: [number, number] }; pairReachAt?: Map<string, number>; pairGripMap?: Map<string, [number, number]>; pairArmRelease?: Map<string, { hands: [ArenaPoint, ArenaPoint]; elbows: [ArenaPoint, ArenaPoint]; shoulders: [ArenaPoint, ArenaPoint]; root: ArenaPoint; facing: number; stance?: NonNullable<ArenaActor['carrierRelease']>['stance'] }>; pairDodgeFinished?: boolean; passingTripOrigins?: ArenaPassingTripOrigins; passingTripDeclined?: boolean; escapeFinished?: boolean; recoveryFinished?: boolean; recoveryRelease?: { thrower: ArenaPoint; receiver: ArenaPoint; height: number; snapshot?: ArenaSpinSnapshot }; rimFinished?: boolean; rimOrigins?: { aggressor: ArenaPoint; victim: ArenaPoint }; rimChargeOrigins?: ArenaRimChargeOrigins; rimChargeFinished?: boolean; sidekickLaunched?: boolean; elbowFall?: ArenaPoint; elbowApproachOrigin?: ArenaPoint; releases?: Map<string, ArenaPoint> };
 type Exit = { floorThrow?: { driver: ArenaPoint; ankles: [ArenaPoint, ArenaPoint]; orbit: number; facing: 1 | -1 }; floorArms?: { hands: [ArenaPoint, ArenaPoint]; elbows: [ArenaPoint, ArenaPoint]; shoulders: [ArenaPoint, ArenaPoint]; root: ArenaPoint; stance?: NonNullable<ArenaActor['carrierRelease']>['stance'] }; round: ArenaRound; origin: ArenaPoint; landing: ArenaPoint; side: number; bench: ArenaPoint; lift: number; angle: number; velocity: number; heldFacing?: number; launchedAt?: number; dodgeFall?: { center: ArenaPoint; origins: ArenaPairDodgeOrigins }; dragOffset?: ArenaPoint; driverStop?: ArenaPoint; pushRelease?: { hands: [ArenaPoint, ArenaPoint]; elbows: [ArenaPoint, ArenaPoint]; shoulders: [ArenaPoint, ArenaPoint]; root: ArenaPoint; angle: number; lean: number }; spinSnapshot?: ArenaSpinSnapshot; spinFlight?: { velocity: ArenaPoint; angularVelocity: number; center: ArenaPoint; planarOrbit?: number; duration: number; rotationDuration?: number; gravity: number } };
-type Simulation = { key: string; elapsed: number; epoch: number; rounds?: ArenaRound[]; camera: ArenaCamera; bodies: Map<string, Body>; contacts: Map<string, Contact>; exits: Map<string, Exit>; minis: Map<string, ArenaRound> };
+type Simulation = { key: string; elapsed: number; clock?: number; epoch: number; rounds?: ArenaRound[]; camera: ArenaCamera; bodies: Map<string, Body>; contacts: Map<string, Contact>; exits: Map<string, Exit>; minis: Map<string, ArenaRound> };
 type ChoreographedActor = ArenaActor & { rearExitCutoff?: number; paintDepth?: number; paintLayer?: number; scoopSupportActor?: ArenaActor; powerbombRearActor?: ArenaActor };
 const W = 1000, H = 620;
 const clamp = (p: number, low = 0, high = 1) => Math.max(low, Math.min(high, p));
@@ -150,13 +150,27 @@ function podium(ctx: CanvasRenderingContext2D, places: ArenaPodiumPlace[], alpha
   ctx.restore();
 }
 
-function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed: number, clock: number, sim: Simulation, delta: number, reduced: boolean) {
+function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed: number, clock: number, sim: Simulation, delta: number, reduced: boolean, advancing = false): ArenaRound | undefined {
   const order = validOrder(props.candidates, props.order);
   const signature = sceneSignature(props);
+  const gap = elapsed - sim.elapsed;
+  const interruptedCarry = sim.key === signature && gap > 500 && delta > 0 && !props.paused && !props.preview && !reduced
+    && [...sim.contacts.values()].some(({ started, round }) => started && round.rushOutcome === 'counter-throw'
+      && round.rushContactAt !== undefined && sim.elapsed >= round.rushContactAt && sim.elapsed < round.resolve);
+  if (interruptedCarry) {
+    // A delayed live frame must keep the measured waist, holders and grips.
+    // Replay the missing physics in normal steps instead of seeking to a new cast.
+    const previous = sim.elapsed, previousClock = sim.clock ?? clock - gap;
+    for (let at = previous + 50; at < elapsed; at += 50) {
+      render(ctx, props, at, previousClock + (clock - previousClock) * (at - previous) / gap, sim, 50, reduced, true);
+    }
+    delta = elapsed - sim.elapsed;
+  }
   const seek = elapsed < sim.elapsed - 150 || elapsed - sim.elapsed > 500;
   const reset = sim.key !== signature || seek;
   if (reset) { sim.key = signature; sim.epoch++; sim.bodies.clear(); sim.contacts.clear(); sim.exits.clear(); sim.minis.clear(); }
   sim.elapsed = elapsed;
+  sim.clock = clock;
   if (!reset && !props.preview) for (const contact of sim.contacts.values()) {
     const round = contact.round;
     if (round.floorFinish && round.floorFinish.releaseAt == null && elapsed >= round.impact) {
@@ -558,6 +572,20 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           const origins: ArenaWrestlingMoveOrigins = { driver: { x: a.x, y: a.y }, victim: { x: v.x, y: v.y }, target, contactTargets };
           const window = { ...exchange.wrestlingMove, start: elapsed };
           const initial = arenaWrestlingMoveTargets(window, elapsed, contact.center, origins, exchange.contactSide);
+          if (!reset && kind === 'clothesline' && initial.canPerform && initial.plannedLaunchAt - elapsed < 180) {
+            // Finish a short, visible back step when a real handoff leaves
+            // too little runway to show a running stride before takeoff.
+            const runup = { x: a.x - initial.side * 16, y: a.y };
+            const prepared = arenaWrestlingMoveTargets(window, elapsed, contact.center, { ...origins, driver: runup }, exchange.contactSide);
+            if (prepared.canPerform) {
+              const distance = Math.hypot(runup.x - a.x, runup.y - a.y), step = Math.min(1, 165 * seconds / Math.max(.001, distance));
+              a.x += (runup.x - a.x) * step; a.y += (runup.y - a.y) * step;
+              a.motorX = seconds ? (a.x - origins.driver.x) / seconds : 0; a.motorY = seconds ? (a.y - origins.driver.y) / seconds : 0;
+              arenaFaceOpponent(a, v); driver.x = a.x; driver.y = a.y; driver.facing = a.facing; driver.pose = 'walk';
+              driver.gripTarget = undefined; driver.secondaryGripTarget = undefined; driver.gripStrength = 0;
+              continue;
+            }
+          }
           if (!initial.canPerform) fallback();
           else {
             contact.wrestlingMoveOrigins = origins;
@@ -1732,8 +1760,19 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
           body.x = next.x; body.y = next.y;
         }
         else if (ram && ram.stage !== 'release') {
-          body.motorX = seconds ? (target.x - body.x) / seconds : 0; body.motorY = seconds ? (target.y - body.y) / seconds : 0;
-          body.x = target.x; body.y = target.y;
+          // A queued clothesline has the ram fallback tag but no real runway.
+          // Approach its preparation marks on foot; only a launched charge
+          // may apply its already integrated physical position directly.
+          if (!reset && (elapsed < exchange.start || !exchange.chargeSetup)) {
+            const distance = Math.hypot(target.x - body.x, target.y - body.y), step = Math.min(1, 165 * seconds / Math.max(.001, distance));
+            const next = { x: body.x + (target.x - body.x) * step, y: body.y + (target.y - body.y) * step };
+            body.motorX = seconds ? (next.x - body.x) / seconds : 0; body.motorY = seconds ? (next.y - body.y) / seconds : 0;
+            body.x = next.x; body.y = next.y;
+          }
+          else {
+            body.motorX = seconds ? (target.x - body.x) / seconds : 0; body.motorY = seconds ? (target.y - body.y) / seconds : 0;
+            body.x = target.x; body.y = target.y;
+          }
         }
         else if (rush && part.id === rush.chargerId && ['charge', 'wrestle', 'rebound', 'groggy'].includes(rush.stage)) {
           // The rush model already integrates acceleration from this body's
@@ -2463,10 +2502,12 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
   const rimExit = [...sim.exits.values()].filter(exit => exit.spinFlight?.planarOrbit !== undefined && !exit.floorThrow && exit.launchedAt !== undefined && elapsed >= exit.launchedAt && elapsed < exit.launchedAt + exit.spinFlight.duration + 450).sort((a, b) => b.launchedAt! - a.launchedAt!)[0];
   const camera = sampleArenaCamera(sim.camera, { elapsed, final: !props.preview && !!exchange?.final && elapsed >= exchange.start && elapsed < exchange.resolve, fighters: order.slice(0, 2).map(id => actors.get(id)!).filter(Boolean), rimImpact: rimExit?.landing, width: W, height: H, delta: props.paused ? 0 : delta, immediate: reset || reduced });
   ctx.save(); ctx.translate(W / 2 + collisionShake, H / 2 + collisionShake * .35); ctx.scale(camera.zoom, camera.zoom); ctx.translate(-camera.x, -camera.y);
-  drawArenaScenery(ctx, clock, { intensity: exchange?.tactic === 'team' || exchange?.tactic === 'betrayal' ? .8 : .35, reduced });
-  effects.forEach(draw => draw());
-  // Every name is fixed below its owner and sits behind every fighter.
-  for (const actor of actors.values()) drawArenaName(ctx, actor);
+  if (!advancing) {
+    drawArenaScenery(ctx, clock, { intensity: exchange?.tactic === 'team' || exchange?.tactic === 'betrayal' ? .8 : .35, reduced });
+    effects.forEach(draw => draw());
+    // Every name is fixed below its owner and sits behind every fighter.
+    for (const actor of actors.values()) drawArenaName(ctx, actor);
+  }
   for (const contact of sim.contacts.values()) {
     const round = contact.round, window = round.wrestlingMove;
     if (!window || window.kind !== 'scoopslam' || window.contactAt == null || elapsed < window.contactAt) continue;
@@ -2490,6 +2531,7 @@ function render(ctx: CanvasRenderingContext2D, props: SportsStageProps, elapsed:
     striker.paintLayer = -1; receiver.paintLayer = 1;
   }
   arenaDrawOrder([...actors.values()]).forEach(actor => drawArenaFighter(ctx, actor, reduced ? 0 : clock));
+  if (advancing) { ctx.restore(); return exchange; }
   for (const contact of sim.contacts.values()) {
     const window = contact.round.wrestlingMove;
     if (window?.kind !== 'clothesline' || window.launchAt == null || elapsed < window.launchAt
@@ -2547,8 +2589,8 @@ export default function ArenaShow(props: SportsStageProps) {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     let request = 0, previous = 0, clock = 0, narrationKey = '', lastFrameError = '', timelineEnd = 0, timelineKey = '';
     const draw = (now: number) => {
-      const state = latest.current, delta = previous ? Math.min(50, Math.max(0, now - previous)) : 16;
-      previous = now; if (!state.paused && !media.matches) clock += delta;
+      const state = latest.current, frameTime = previous ? Math.max(0, now - previous) : 16, delta = Math.min(50, frameTime);
+      previous = now; if (!state.paused && !media.matches) clock += frameTime;
       const box = element.getBoundingClientRect(), ratio = Math.min(2, window.devicePixelRatio || 1);
       const width = Math.max(1, Math.round(box.width * ratio)), height = Math.max(1, Math.round(box.height * ratio));
       const scale = Math.min(width / W, height / H);
